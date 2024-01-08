@@ -22,7 +22,13 @@ output:
 ```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
 library(tidyverse)
 library(sf)
-project_crs <- "EPSG:3310" #"EPSG:5070"
+library(stars)
+
+theme_set(theme_minimal())
+
+#project_crs <- "EPSG:3310" # NAD83 California Teale Albers
+#project_crs <- "EPSG:5070" # NAD83 CONUS Albers
+project_crs <- "ESRI:102039" # NAD83 CONUS Albers USGS Version
 ```
 
 *Selected HUCs*
@@ -35,7 +41,7 @@ project_crs <- "EPSG:3310" #"EPSG:5070"
 * NHDPlusV2 dataset https://nhdplus.com/NHDPlus/NHDPlusV2_home.php
 * As retrievedfrom https://www.epa.gov/waterdata/nhdplus-california-data-vector-processing-unit-18
 * User Guide https://www.epa.gov/system/files/documents/2023-04/NHDPlusV2_User_Guide.pdf
-* (This is different from NHDPlusHR which is generated at a higher resolution and more computationally intensive)
+* (This is different from [NHDPlusHR](https://pubs.usgs.gov/of/2019/1096/ofr20191096.pdf) which is generated at a higher resolution and more computationally intensive)
 
 ## Data Import
 
@@ -110,6 +116,23 @@ flowlines <-
   arrange(comid) |>
   st_transform(project_crs)
 
+#flowareas <- 
+#  st_read("nhdplus/Hydrography/NHDArea.shp") |>
+#  janitor::clean_names() |>
+#  arrange(comid) #|>
+#  #inner_join(flowlines |> st_drop_geometry() |> select(comid)) |>
+#  #select(comid, ftype, fcode, geometry)
+
+waterbodies <- 
+  st_read("nhdplus/Hydrography/NHDWaterbody.shp") |>
+  janitor::clean_names() |>
+  mutate(huc_8 = substr(reachcode, 1, 8),
+         huc_10 = substr(reachcode, 1, 10),
+         huc_12 = substr(reachcode, 1, 12)) |>
+  filter(huc_8 %in% selected_huc_8) |>
+  arrange(comid) |>
+  st_transform(project_crs)
+
 # plot showing slopes
 flowlines |> 
   st_zm() |>
@@ -117,8 +140,21 @@ flowlines |>
   ggplot() + 
   geom_sf(data=st_zm(flowlines), aes(color = slope)) +
   geom_sf(aes(color = slope), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="black", color="black") +
   scale_color_viridis_c(trans = "log")
 
+```
+
+```{r}
+# plot showing drainage area
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = tot_da_sq_km)) +
+  geom_sf(aes(color = tot_da_sq_km), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="black", color="black") +
+  scale_color_viridis_c(direction=-1)
 ```
 
 ### Import catchments
@@ -161,3 +197,50 @@ sample_points_midpt <-
 
 sample_points_midpt |> ggplot() + geom_sf()
 ```
+
+```{r}
+cvpia_extents <- st_read("habitat_extents_cvpia/habitat_extents_combined_gradients_v3.shp")
+
+cvpia_extents |> 
+  st_cast("LINESTRING") |>
+  mutate(geometry = st_line_sample(geometry, sample = c(0,1))) |>
+  ggplot() + geom_sf()
+```
+
+## DEM 
+
+### 10m NHDPlusHR
+
+```{r}
+dem <- read_stars("nhdplushr/dem_nhdplushr_yuba_meters_v2.tif")
+# this input has already been clipped to the AOI, converted from cm to m, and crs redefined
+ggplot() + geom_stars(data=dem) + coord_fixed()
+```
+
+#### export flowlines within this raster domain
+
+```{r}
+flowlines_for_vbet <- flowlines |>
+  filter(gnis_name %in% c("Yuba River")) |>
+  st_transform(st_crs(dem)) |>
+  st_zm() |> 
+  st_crop(st_bbox(dem)) |>
+  smoothr::densify(5)
+
+flowlines_for_vbet |>
+  st_write("out/flowlines_for_vbet.shp", append=FALSE)
+
+flowlines_for_vbet |> ggplot() + geom_sf(aes(color = tot_da_sq_km)) #+ geom_stars(data=dem)
+```
+
+### 1m CA NoCAL Wildfires B2 2018
+
+Not generalizable/automatable
+
+https://rockyweb.usgs.gov/vdelivery/Datasets/Staged/Elevation/LPC/Projects/CA_NoCAL_3DEP_Supp_Funding_2018_D18/CA_NoCAL_Wildfires_B2_2018/
+
+https://prd-tnm.s3.amazonaws.com/index.html?prefix=StagedProducts/Elevation/OPR/Projects/CA_NoCAL_Wildfires_B2_2018
+
+https://prd-tnm.s3.amazonaws.com/index.html?prefix=StagedProducts/Elevation/metadata/CA_NoCAL_3DEP_Supp_Funding_2018_D18/CA_NoCAL_Wildfires_B2_2018
+
+

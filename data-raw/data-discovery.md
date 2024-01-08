@@ -1,7 +1,7 @@
 SWC Habitat Model Data Discovery
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-01-04
+2024-01-08
 
 - [Data Import](#data-import)
 - [Import HUC Watersheds](#import-huc-watersheds)
@@ -9,6 +9,9 @@ SWC Habitat Model Data Discovery
   - [Import flowline geometry](#import-flowline-geometry)
   - [Import catchments](#import-catchments)
 - [Stream Widths?](#stream-widths)
+- [DEM](#dem)
+  - [10m NHDPlusHR](#10m-nhdplushr)
+  - [1m CA NoCAL Wildfires B2 2018](#1m-ca-nocal-wildfires-b2-2018)
 
 *Selected HUCs*
 
@@ -22,8 +25,10 @@ SWC Habitat Model Data Discovery
   <https://www.epa.gov/waterdata/nhdplus-california-data-vector-processing-unit-18>
 - User Guide
   <https://www.epa.gov/system/files/documents/2023-04/NHDPlusV2_User_Guide.pdf>
-- (This is different from NHDPlusHR which is generated at a higher
-  resolution and more computationally intensive)
+- (This is different from
+  [NHDPlusHR](https://pubs.usgs.gov/of/2019/1096/ofr20191096.pdf) which
+  is generated at a higher resolution and more computationally
+  intensive)
 
 ## Data Import
 
@@ -126,6 +131,35 @@ flowlines <-
     ## Joining with `by = join_by(fcode)`
 
 ``` r
+#flowareas <- 
+#  st_read("nhdplus/Hydrography/NHDArea.shp") |>
+#  janitor::clean_names() |>
+#  arrange(comid) #|>
+#  #inner_join(flowlines |> st_drop_geometry() |> select(comid)) |>
+#  #select(comid, ftype, fcode, geometry)
+
+waterbodies <- 
+  st_read("nhdplus/Hydrography/NHDWaterbody.shp") |>
+  janitor::clean_names() |>
+  mutate(huc_8 = substr(reachcode, 1, 8),
+         huc_10 = substr(reachcode, 1, 10),
+         huc_12 = substr(reachcode, 1, 12)) |>
+  filter(huc_8 %in% selected_huc_8) |>
+  arrange(comid) |>
+  st_transform(project_crs)
+```
+
+    ## Reading layer `NHDWaterbody' from data source 
+    ##   `C:\Users\skylerlewis\Github\swc-habitat-suitability\data-raw\nhdplus\Hydrography\NHDWaterbody.shp' 
+    ##   using driver `ESRI Shapefile'
+    ## Simple feature collection with 9651 features and 12 fields
+    ## Geometry type: POLYGON
+    ## Dimension:     XYZ
+    ## Bounding box:  xmin: -124.3796 ymin: 32.54717 xmax: -114.9462 ymax: 43.24877
+    ## z_range:       zmin: 0 zmax: 0
+    ## Geodetic CRS:  NAD83
+
+``` r
 # plot showing slopes
 flowlines |> 
   st_zm() |>
@@ -133,10 +167,25 @@ flowlines |>
   ggplot() + 
   geom_sf(data=st_zm(flowlines), aes(color = slope)) +
   geom_sf(aes(color = slope), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="black", color="black") +
   scale_color_viridis_c(trans = "log")
 ```
 
 ![](data-discovery_files/figure-gfm/unnamed-chunk-3-1.png)<!-- -->
+
+``` r
+# plot showing drainage area
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = tot_da_sq_km)) +
+  geom_sf(aes(color = tot_da_sq_km), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="black", color="black") +
+  scale_color_viridis_c(direction=-1)
+```
+
+![](data-discovery_files/figure-gfm/unnamed-chunk-4-1.png)<!-- -->
 
 ### Import catchments
 
@@ -169,7 +218,7 @@ ggplot() + geom_sf(data = catchments, color="orange") +
   geom_sf(data = st_zm(flowlines), color="blue") 
 ```
 
-![](data-discovery_files/figure-gfm/unnamed-chunk-4-1.png)<!-- -->
+![](data-discovery_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
 
 ## Stream Widths?
 
@@ -194,4 +243,84 @@ sample_points_midpt <-
 sample_points_midpt |> ggplot() + geom_sf()
 ```
 
-![](data-discovery_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
+![](data-discovery_files/figure-gfm/unnamed-chunk-6-1.png)<!-- -->
+
+``` r
+cvpia_extents <- st_read("habitat_extents_cvpia/habitat_extents_combined_gradients_v3.shp")
+```
+
+    ## Reading layer `habitat_extents_combined_gradients_v3' from data source 
+    ##   `C:\Users\skylerlewis\Github\swc-habitat-suitability\data-raw\habitat_extents_cvpia\habitat_extents_combined_gradients_v3.shp' 
+    ##   using driver `ESRI Shapefile'
+    ## Simple feature collection with 323 features and 12 fields
+    ## Geometry type: MULTILINESTRING
+    ## Dimension:     XY
+    ## Bounding box:  xmin: -251634.9 ymin: -139292.4 xmax: 61284.41 ymax: 364940.4
+    ## Projected CRS: NAD83 / California Albers
+
+``` r
+cvpia_extents |> 
+  st_cast("LINESTRING") |>
+  mutate(geometry = st_line_sample(geometry, sample = c(0,1))) |>
+  ggplot() + geom_sf()
+```
+
+    ## Warning in st_cast.sf(cvpia_extents, "LINESTRING"): repeating attributes for
+    ## all sub-geometries for which they may not be constant
+
+![](data-discovery_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
+
+## DEM
+
+### 10m NHDPlusHR
+
+``` r
+dem <- read_stars("nhdplushr/dem_nhdplushr_yuba_meters_v2.tif")
+# this input has already been clipped to the AOI, converted from cm to m, and crs redefined
+ggplot() + geom_stars(data=dem) + coord_fixed()
+```
+
+![](data-discovery_files/figure-gfm/unnamed-chunk-8-1.png)<!-- -->
+
+#### export flowlines within this raster domain
+
+``` r
+flowlines_for_vbet <- flowlines |>
+  filter(gnis_name %in% c("Yuba River")) |>
+  st_transform(st_crs(dem)) |>
+  st_zm() |> 
+  st_crop(st_bbox(dem)) |>
+  smoothr::densify(5)
+```
+
+    ## Warning: attribute variables are assumed to be spatially constant throughout
+    ## all geometries
+
+``` r
+flowlines_for_vbet |>
+  st_write("out/flowlines_for_vbet.shp", append=FALSE)
+```
+
+    ## Warning in abbreviate_shapefile_names(obj): Field names abbreviated for ESRI
+    ## Shapefile driver
+
+    ## Deleting layer `flowlines_for_vbet' using driver `ESRI Shapefile'
+    ## Writing layer `flowlines_for_vbet' to data source 
+    ##   `out/flowlines_for_vbet.shp' using driver `ESRI Shapefile'
+    ## Writing 124 features with 24 fields and geometry type Line String.
+
+``` r
+flowlines_for_vbet |> ggplot() + geom_sf(aes(color = tot_da_sq_km)) #+ geom_stars(data=dem)
+```
+
+![](data-discovery_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
+
+### 1m CA NoCAL Wildfires B2 2018
+
+Not generalizable/automatable
+
+<https://rockyweb.usgs.gov/vdelivery/Datasets/Staged/Elevation/LPC/Projects/CA_NoCAL_3DEP_Supp_Funding_2018_D18/CA_NoCAL_Wildfires_B2_2018/>
+
+<https://prd-tnm.s3.amazonaws.com/index.html?prefix=StagedProducts/Elevation/OPR/Projects/CA_NoCAL_Wildfires_B2_2018>
+
+<https://prd-tnm.s3.amazonaws.com/index.html?prefix=StagedProducts/Elevation/metadata/CA_NoCAL_3DEP_Supp_Funding_2018_D18/CA_NoCAL_Wildfires_B2_2018>

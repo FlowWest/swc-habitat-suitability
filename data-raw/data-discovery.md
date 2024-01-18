@@ -1,12 +1,13 @@
 SWC Habitat Model Data Discovery
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-01-08
+2024-01-18
 
 - [Data Import](#data-import)
 - [Import HUC Watersheds](#import-huc-watersheds)
-- [Import Supplemental Tables](#import-supplemental-tables)
+  - [Import Supplemental Tables](#import-supplemental-tables)
   - [Import flowline geometry](#import-flowline-geometry)
+  - [Plots of attribute data](#plots-of-attribute-data)
   - [Import catchments](#import-catchments)
 - [Stream Widths?](#stream-widths)
 - [DEM](#dem)
@@ -59,50 +60,137 @@ watersheds |> ggplot() + geom_sf()
 
 ![](data-discovery_files/figure-gfm/unnamed-chunk-1-1.png)<!-- -->
 
-## Import Supplemental Tables
+### Import Supplemental Tables
 
 ``` r
-# identifiers of each flowline (COMID)
-flowline_comid_reachcode_crosswalk <- 
-  foreign::read.dbf("nhdplus/NHDReachCode_Comid.dbf") |> 
-  as_tibble() |> 
-  janitor::clean_names() |>
-  mutate(huc_8 = substr(reachcode, 1, 8),
-         huc_10 = substr(reachcode, 1, 10),
-         huc_12 = substr(reachcode, 1, 12)) |>
-  filter(huc_8 %in% selected_huc_8)
+if(!file.exists("flowline_attributes.Rds")) {
+  
+  # # cumulative upstream area
+  # flowline_cumarea <- 
+  #   foreign::read.dbf("nhdplus/NHDPlusAttributes/CumulativeArea.dbf") |> 
+  #   as_tibble() |> 
+  #   janitor::clean_names() |>
+  #   rename(comid = com_id)
+  
+  # flow routing attributes as described in https://www.usgs.gov/national-hydrography/value-added-attributes-vaas
+  flowline_vaattr <- 
+    foreign::read.dbf("nhdplus/NHDPlusAttributes/PlusFlowlineVAA.dbf") |> 
+    as_tibble() |> 
+    select(comid = ComID, 
+           hydro_seq = Hydroseq,
+           reach_code = ReachCode,
+           stream_level = StreamLeve, 
+           stream_order = StreamOrde, 
+           us_length_km = ArbolateSu,
+           ds_length_km = Pathlength,
+           tot_da_sq_km = TotDASqKM,
+           div_da_sq_km = DivDASqKM,
+           reach_length_km = LengthKM
+           )
+  
+  # slopes and endpoint elevations
+  flowline_slopes <- 
+    foreign::read.dbf("nhdplus/NHDPlusAttributes/elevslope.dbf") |> 
+    as_tibble() |> 
+    mutate(SLOPE = if_else(SLOPE==-9998, NA, SLOPE)) |>
+    select(comid = COMID, 
+           elev_min = MINELEVSMO, 
+           elev_max = MAXELEVSMO, 
+           #length_km = SLOPELENKM, 
+           slope = SLOPE)
+  
+  # # identifiers of each flowline (COMID)
+  # flowline_comid_huc_crosswalk <- 
+  #   foreign::read.dbf("nhdplus/NHDReachCode_Comid.dbf") |> 
+  #   as_tibble() |> 
+  #   janitor::clean_names() |>
+  #   mutate(huc_8 = substr(reachcode, 1, 8),
+  #          huc_10 = substr(reachcode, 1, 10),
+  #          huc_12 = substr(reachcode, 1, 12)) |>
+  #   filter(huc_8 %in% selected_huc_8) |>
+  #   select(comid, huc_8, huc_10, huc_12)
+  
+  # vogel method mean annual flow and mean annual velocity
+  vogel_flow <- 
+    foreign::read.dbf("nhdplus/VogelExtension/vogelflow.dbf") |> 
+    as_tibble() |>
+    janitor::clean_names() |>
+    mutate(across(maflowv:mavelv, function(x) if_else(x>=0, x, NA))) |>
+    select(comid, vogel_q_ma_cfs = maflowv, vogel_v_ma_fps = mavelv)
+  
+  # cumulative precipitation in upstream drainage area
+  precip_annual <- 
+    read_delim("nhdplus/VPUAttributeExtension/CumTotPrecipMA.txt") |>
+    mutate(comid = as.numeric(ComID), da_ppt_mean_mm = PrecipVC/100) |>
+    select(comid, da_ppt_mean_mm)
+  import_precip <- function(m) {
+    mm <- str_pad(m, width=2, pad="0")
+    read_delim(paste0("nhdplus/VPUAttributeExtension/CumTotPrecipMM", mm, ".txt")) |>
+      mutate(month = m) |>
+      mutate(comid = as.numeric(ComID), da_ppt_mean_mm = PrecipVC/100) |>
+      select(month, comid, da_ppt_mean_mm)
+  }
+  precip_monthly <- 
+    seq(1,12,1) |> 
+    map(import_precip) |> 
+    reduce(bind_rows) |>
+    pivot_wider(names_from = month, names_prefix = "da_ppt_mean_mm_", values_from = da_ppt_mean_mm)
+  
+  # EROM method mean annual and monthly flows
+  erom_annual <- 
+    foreign::read.dbf(paste0("nhdplus/EROMExtension/EROM_MA0001.dbf")) |>
+    as_tibble() |>
+    select(comid = ComID, erom_q_ma_cfs = Q0001E, erom_v_ma_fps = V0001E, 
+           #temp = Temp0001, ppt = PPT0001, pet = PET0001, qetloss = QLoss0001,
+           #catchment_lat = Lat, catchment_sqkm = AreaSqKm,
+           ) |>
+    mutate(across(erom_q_ma_cfs:erom_v_ma_fps, function(x) if_else(x>=0, x, NA)))
+  import_erom <- function(m) {
+    mm <- str_pad(m, width=2, pad="0")
+    foreign::read.dbf(paste0("nhdplus/EROMExtension/EROM_", mm, "0001.dbf")) |>
+      as_tibble() |>
+      mutate(month = m) |>
+      select(month, comid = ComID, erom_q_ma_cfs = Q0001E, erom_v_ma_fps = V0001E, 
+             #temp = Temp0001, ppt = PPT0001, pet = PET0001, qetloss = QLoss0001,
+             #catchment_lat = Lat, catchment_sqkm = AreaSqKm,
+             ) |> 
+      mutate(across(erom_q_ma_cfs:erom_v_ma_fps, function(x) if_else(x>=0, x, NA)))
+  }
+  erom_monthly <- 
+    seq(1,12,1) |> 
+    map(import_erom) |> 
+    reduce(bind_rows)
+  erom_monthly_flows <- erom_monthly |> pivot_wider(names_from = month, names_prefix = "erom_q_ma_cfs_", values_from = erom_q_ma_cfs)
+erom_monthly_velocities <- erom_monthly |> pivot_wider(names_from = month, names_prefix = "erom_v_ma_fps_", values_from = erom_v_ma_fps)
 
-# slopes and endpoint elevations
-flowline_slopes <- 
-  foreign::read.dbf("nhdplus/NHDPlusAttributes/elevslope.dbf") |> 
-  as_tibble() |> 
-  janitor::clean_names() |>
-  mutate(slope = if_else(slope==-9998, NA, slope))
+  flowline_attributes <-
+    flowline_vaattr |> 
+    left_join(flowline_slopes) |>
+    left_join(precip_annual) |>
+    left_join(vogel_flow) |>
+    left_join(erom_annual) |>
+    mutate(stream_power = slope * div_da_sq_km)
+  
+  flowline_attributes |> saveRDS("flowline_attributes.Rds")
+  
+} else {
+  
+  flowline_attributes <- readRDS("flowline_attributes.Rds")
+  
+}
+```
 
-# cumulative upstream area
-flowline_cumarea <- 
-  foreign::read.dbf("nhdplus/NHDPlusAttributes/CumulativeArea.dbf") |> 
-  as_tibble() |> 
-  janitor::clean_names() |>
-  rename(comid = com_id)
+### Import flowline geometry
 
-# flow routing attributes as described in https://www.usgs.gov/national-hydrography/value-added-attributes-vaas
-flowline_vaattr <- 
-  foreign::read.dbf("nhdplus/NHDPlusAttributes/PlusFlowlineVAA.dbf") |> 
-  as_tibble() |> 
-  janitor::clean_names()
-
+``` r
 # fcode table
 fcodes <- 
   foreign::read.dbf("nhdplus/NHDFCode.dbf") |> 
   as_tibble() |> 
   janitor::clean_names() |>
   rename(fcode = f_code, fcode_desc = descriptio)
-```
 
-### Import flowline geometry
 
-``` r
 flowlines <- 
   st_read("nhdplus/Hydrography/NHDFlowline.shp") |>
   janitor::clean_names() |>
@@ -111,9 +199,10 @@ flowlines <-
          huc_12 = substr(reachcode, 1, 12)) |>
   filter(huc_8 %in% selected_huc_8) |>
   inner_join(fcodes |> select(fcode, fcode_desc)) |>
-  inner_join(flowline_slopes |> select(comid, slope, maxelevsmo, minelevsmo, slopelenkm), by = join_by(comid)) |>
-  inner_join(flowline_cumarea, by = join_by(comid)) |>
-  arrange(comid) |>
+  #inner_join(flowline_slopes |> select(comid, slope, maxelevsmo, minelevsmo, slopelenkm), by = join_by(comid)) |>
+  #inner_join(flowline_cumarea, by = join_by(comid)) |>
+  inner_join(flowline_attributes) |>
+  arrange(hydro_seq) |>
   st_transform(project_crs)
 ```
 
@@ -129,6 +218,7 @@ flowlines <-
     ## Geodetic CRS:  NAD83
 
     ## Joining with `by = join_by(fcode)`
+    ## Joining with `by = join_by(comid)`
 
 ``` r
 #flowareas <- 
@@ -159,6 +249,8 @@ waterbodies <-
     ## z_range:       zmin: 0 zmax: 0
     ## Geodetic CRS:  NAD83
 
+### Plots of attribute data
+
 ``` r
 # plot showing slopes
 flowlines |> 
@@ -167,11 +259,11 @@ flowlines |>
   ggplot() + 
   geom_sf(data=st_zm(flowlines), aes(color = slope)) +
   geom_sf(aes(color = slope), linewidth=1) + 
-  geom_sf(data=waterbodies, fill="black", color="black") +
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
   scale_color_viridis_c(trans = "log")
 ```
 
-![](data-discovery_files/figure-gfm/unnamed-chunk-3-1.png)<!-- -->
+![](data-discovery_files/figure-gfm/unnamed-chunk-4-1.png)<!-- -->
 
 ``` r
 # plot showing drainage area
@@ -179,18 +271,74 @@ flowlines |>
   st_zm() |>
   filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
   ggplot() + 
-  geom_sf(data=st_zm(flowlines), aes(color = tot_da_sq_km)) +
-  geom_sf(aes(color = tot_da_sq_km), linewidth=1) + 
-  geom_sf(data=waterbodies, fill="black", color="black") +
+  geom_sf(data=st_zm(flowlines), aes(color = div_da_sq_km)) +
+  geom_sf(aes(color = div_da_sq_km), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
   scale_color_viridis_c(direction=-1)
 ```
 
-![](data-discovery_files/figure-gfm/unnamed-chunk-4-1.png)<!-- -->
+![](data-discovery_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
+
+``` r
+# plot showing stream order
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = stream_order)) +
+  geom_sf(aes(color = stream_order), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(direction=-1)
+```
+
+![](data-discovery_files/figure-gfm/unnamed-chunk-6-1.png)<!-- -->
+
+``` r
+# plot showing mean annual precip in upstream drainage area
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = da_ppt_mean_mm)) +
+  geom_sf(aes(color = da_ppt_mean_mm), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(direction=-1)
+```
+
+![](data-discovery_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
+
+``` r
+# plot showing EROM flow estimates
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = erom_q_ma_cfs)) +
+  geom_sf(aes(color = erom_q_ma_cfs), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(direction=-1)
+```
+
+![](data-discovery_files/figure-gfm/unnamed-chunk-8-1.png)<!-- -->
+
+``` r
+# plot showing EROM velocity estimates
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = erom_v_ma_fps)) +
+  geom_sf(aes(color = erom_v_ma_fps), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(direction=-1)
+```
+
+![](data-discovery_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
 
 ### Import catchments
 
 ``` r
-# catchment associated with each flowline reach (COMID)
+# local catchment associated with each flowline reach (COMID)
 catchments <- 
   st_read("nhdplus/Catchment.shp") |> 
   janitor::clean_names() |>
@@ -218,7 +366,7 @@ ggplot() + geom_sf(data = catchments, color="orange") +
   geom_sf(data = st_zm(flowlines), color="blue") 
 ```
 
-![](data-discovery_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
+![](data-discovery_files/figure-gfm/unnamed-chunk-10-1.png)<!-- -->
 
 ## Stream Widths?
 
@@ -243,7 +391,7 @@ sample_points_midpt <-
 sample_points_midpt |> ggplot() + geom_sf()
 ```
 
-![](data-discovery_files/figure-gfm/unnamed-chunk-6-1.png)<!-- -->
+![](data-discovery_files/figure-gfm/unnamed-chunk-11-1.png)<!-- -->
 
 ``` r
 cvpia_extents <- st_read("habitat_extents_cvpia/habitat_extents_combined_gradients_v3.shp")
@@ -268,7 +416,7 @@ cvpia_extents |>
     ## Warning in st_cast.sf(cvpia_extents, "LINESTRING"): repeating attributes for
     ## all sub-geometries for which they may not be constant
 
-![](data-discovery_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
+![](data-discovery_files/figure-gfm/unnamed-chunk-12-1.png)<!-- -->
 
 ## DEM
 
@@ -280,7 +428,7 @@ dem <- read_stars("nhdplushr/dem_nhdplushr_yuba_meters_v2.tif")
 ggplot() + geom_stars(data=dem) + coord_fixed()
 ```
 
-![](data-discovery_files/figure-gfm/unnamed-chunk-8-1.png)<!-- -->
+![](data-discovery_files/figure-gfm/unnamed-chunk-13-1.png)<!-- -->
 
 #### export flowlines within this raster domain
 
@@ -307,13 +455,23 @@ flowlines_for_vbet |>
     ## Deleting layer `flowlines_for_vbet' using driver `ESRI Shapefile'
     ## Writing layer `flowlines_for_vbet' to data source 
     ##   `out/flowlines_for_vbet.shp' using driver `ESRI Shapefile'
-    ## Writing 124 features with 24 fields and geometry type Line String.
+    ## Writing 124 features with 36 fields and geometry type Line String.
+
+    ## Warning in CPL_write_ogr(obj, dsn, layer, driver,
+    ## as.character(dataset_options), : GDAL Message 1: Value 948020916 of field comid
+    ## of feature 41 not successfully written. Possibly due to too larger number with
+    ## respect to field width
+
+    ## Warning in CPL_write_ogr(obj, dsn, layer, driver,
+    ## as.character(dataset_options), : GDAL Message 1: Value 948020915 of field comid
+    ## of feature 42 not successfully written. Possibly due to too larger number with
+    ## respect to field width
 
 ``` r
 flowlines_for_vbet |> ggplot() + geom_sf(aes(color = tot_da_sq_km)) #+ geom_stars(data=dem)
 ```
 
-![](data-discovery_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
+![](data-discovery_files/figure-gfm/unnamed-chunk-14-1.png)<!-- -->
 
 ### 1m CA NoCAL Wildfires B2 2018
 

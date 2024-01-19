@@ -42,23 +42,38 @@ project_crs <- "ESRI:102039" # NAD83 CONUS Albers USGS Version
 * As retrievedfrom https://www.epa.gov/waterdata/nhdplus-california-data-vector-processing-unit-18
 * User Guide https://www.epa.gov/system/files/documents/2023-04/NHDPlusV2_User_Guide.pdf
 * (This is different from [NHDPlusHR](https://pubs.usgs.gov/of/2019/1096/ofr20191096.pdf) which is generated at a higher resolution and more computationally intensive)
+* Note also if we need to do routing: https://www.sciencebase.gov/catalog/item/5b92790be4b0702d0e809fe5
 
 *Supplemental Data*
 
+https://www.sciencebase.gov/catalog/item/5669a79ee4b08895842a1d47
+
 * Upstream catchment characteristics: Wieczorek, M.E., Jackson, S.E., and Schwarz, G.E., 2018, Select Attributes for NHDPlus Version 2.1 Reach Catchments and Modified Network Routed Upstream Watersheds for the Conterminous United States (ver. 4.0, August 2023): U.S. Geological Survey data release, https://doi.org/10.5066/F7765D7V https://www.sciencebase.gov/catalog/item/57976a0ce4b021cadec97890
 
-Potential sources of channel widths
+* Streamcat dataset
+https://gaftp.epa.gov/epadatacommons/ORD/NHDPlusLandscapeAttributes/StreamCat/HydroRegions/
+https://www.epa.gov/national-aquatic-resource-surveys/streamcat-web-tool-table-view
+
+*Potential sources of channel widths:*
 
 * Simplest version: https://digitalcommons.unl.edu/usdaarsfacpub/1515
 as available in dataset: Schwarz, G. E., Jackson, S. E., & Wieczorek, M. E. (2018). Select Attributes for NHDPlus Version 2.1 Reach Catchments and Modified Network Routed Upstream Watersheds for the Conterminous United States (ver. 4.0, August 2023) [Data set]. U.S. Geological Survey. https://doi.org/10.5066/F7765D7V https://data.usgs.gov/datacatalog/data/USGS:5cf02bdae4b0b51330e22b85
 
-* More complex modelled dataset: https://doi.org/10.1111/1752-1688.13116
+* More complex modelled dataset: https://doi.org/10.1111/1752-1688.13116 (provided in StreamCat)
 
 * Best: empirical data
 
+*Channel vegetation*
+
+* Very coarse version from MODIS
+https://gaftp.epa.gov/Exposure/CurveNumberNDVI/READNow.pdf
+https://gaftp.epa.gov/Exposure/CurveNumberNDVI/
+
+* Best: empirical from NAIP
+
 ## Data Import
 
-## Import HUC Watersheds
+### Import HUC Watersheds
 
 ```{r}
 selected_huc_8 <- c("18020107", "18020125")
@@ -72,187 +87,307 @@ watersheds <- st_read("nhdplus/WBD_Subwatershed.shp") |>
 watersheds |> ggplot() + geom_sf()
 ```
 
-### Import Supplemental Tables
+### Import Flowline Tables
+
+NHD Flowlines
 
 ```{r message=FALSE, warning=FALSE}
-if(!file.exists("flowline_attributes.Rds")) {
-  
-      # fcode table
-  fcodes <- 
-    foreign::read.dbf("nhdplus/NHDFCode.dbf") |> 
-    as_tibble() |> 
-    janitor::clean_names() |>
-    rename(fcode = f_code, fcode_desc = descriptio) |>
-    mutate(ftype_desc = map(fcode_desc, function(x) str_split(x, ":", simplify=TRUE)[1])) |>
-    unnest(ftype_desc) |>
-    select(fcode, ftype_desc)
-  
-  # flowline shapefile attribute table
-  flowline_table <- 
-    foreign::read.dbf("nhdplus/Hydrography/NHDFlowline.dbf") |> 
-    janitor::clean_names() |>
-    select(comid, reachcode, gnis_id, gnis_name, lengthkm, ftype, fcode) |>
-    mutate(huc_8 = substr(reachcode, 1, 8),
-           huc_10 = substr(reachcode, 1, 10),
-           huc_12 = substr(reachcode, 1, 12)) |>
-    inner_join(fcodes |> select(fcode, ftype_desc))
+#if(!file.exists("flowline_attributes.Rds")) {
 
-  # # cumulative upstream area
-  # flowline_cumarea <- 
-  #   foreign::read.dbf("nhdplus/NHDPlusAttributes/CumulativeArea.dbf") |> 
-  #   as_tibble() |> 
-  #   janitor::clean_names() |>
-  #   rename(comid = com_id)
-  
-  # flow routing attributes as described in https://www.usgs.gov/national-hydrography/value-added-attributes-vaas
-  flowline_vaattr <- 
-    foreign::read.dbf("nhdplus/NHDPlusAttributes/PlusFlowlineVAA.dbf") |> 
-    as_tibble() |> 
-    select(comid = ComID, 
-           hydro_seq = Hydroseq,
-           reach_code = ReachCode,
-           stream_level = StreamLeve, 
-           stream_order = StreamOrde, 
-           us_length_km = ArbolateSu,
-           ds_length_km = Pathlength,
-           da_area_sq_km = DivDASqKM, # using divergence-routed version 
-           #da_area_sq_km_tot = TotDASqKM,
-           reach_length_km = LengthKM
-           )
-  
-  # slopes and endpoint elevations
-  flowline_slopes <- 
-    foreign::read.dbf("nhdplus/NHDPlusAttributes/elevslope.dbf") |> 
-    as_tibble() |> 
-    mutate(slope = if_else(SLOPE==-9998, NA, SLOPE),
-           elev_min = MINELEVSMO/100, # convert from cm to m
-           elev_max = MAXELEVSMO/100) |>
-    select(comid = COMID, slope, elev_min, elev_max)
-  
-  # # identifiers of each flowline (COMID)
-  # flowline_comid_huc_crosswalk <- 
-  #   foreign::read.dbf("nhdplus/NHDReachCode_Comid.dbf") |> 
-  #   as_tibble() |> 
-  #   janitor::clean_names() |>
-  #   mutate(huc_8 = substr(reachcode, 1, 8),
-  #          huc_10 = substr(reachcode, 1, 10),
-  #          huc_12 = substr(reachcode, 1, 12)) |>
-  #   filter(huc_8 %in% selected_huc_8) |>
-  #   select(comid, huc_8, huc_10, huc_12)
-  
-  # vogel method mean annual flow and mean annual velocity
-  vogel_flow <- 
-    foreign::read.dbf("nhdplus/VogelExtension/vogelflow.dbf") |> 
-    as_tibble() |>
-    janitor::clean_names() |>
-    mutate(across(maflowv:mavelv, function(x) if_else(x>=0, x, NA))) |>
-    select(comid, vogel_q_ma_cfs = maflowv, vogel_v_ma_fps = mavelv)
-  
-    # incremental precipitation at reach
-  loc_precip_annual <- 
-    read_delim("nhdplus/VPUAttributeExtension/IncrPrecipMA.txt") |>
-    mutate(comid = as.numeric(FeatureID), loc_ppt_mean_mm = PrecipV/100) |>
-    select(comid, loc_ppt_mean_mm)
-  import_loc_precip <- function(m) {
-    mm <- str_pad(m, width=2, pad="0")
-    read_delim(paste0("nhdplus/VPUAttributeExtension/IncrPrecipMM", mm, ".txt")) |>
-      mutate(month = m) |>
-      mutate(comid = as.numeric(FeatureID), loc_ppt_mean_mm = PrecipV/100) |>
-      select(month, comid, loc_ppt_mean_mm)
-  }
-  loc_precip_monthly <- 
-    seq(1,12,1) |> 
-    map(import_loc_precip) |> 
-    reduce(bind_rows) |>
-    pivot_wider(names_from = month, names_prefix = "loc_ppt_mean_mm_", values_from = loc_ppt_mean_mm)
+    # fcode table
+fcodes <- 
+  foreign::read.dbf("nhdplus/NHDFCode.dbf") |> 
+  as_tibble() |> 
+  janitor::clean_names() |>
+  rename(fcode = f_code, fcode_desc = descriptio) |>
+  mutate(ftype_desc = map(fcode_desc, function(x) str_split(x, ":", simplify=TRUE)[1])) |>
+  unnest(ftype_desc) |>
+  select(fcode, ftype_desc)
 
-  # cumulative precipitation in upstream drainage area
-  precip_annual <- 
-    read_delim("nhdplus/VPUAttributeExtension/CumTotPrecipMA.txt") |>
-    mutate(comid = as.numeric(ComID), da_ppt_mean_mm = PrecipVC/100) |>
-    select(comid, da_ppt_mean_mm)
-  import_precip <- function(m) {
-    mm <- str_pad(m, width=2, pad="0")
-    read_delim(paste0("nhdplus/VPUAttributeExtension/CumTotPrecipMM", mm, ".txt")) |>
-      mutate(month = m) |>
-      mutate(comid = as.numeric(ComID), da_ppt_mean_mm = PrecipVC/100) |>
-      select(month, comid, da_ppt_mean_mm)
-  }
-  precip_monthly <- 
-    seq(1,12,1) |> 
-    map(import_precip) |> 
-    reduce(bind_rows) |>
-    pivot_wider(names_from = month, names_prefix = "da_ppt_mean_mm_", values_from = da_ppt_mean_mm)
-  
-  # EROM method mean annual and monthly flows
-  erom_annual <- 
-    foreign::read.dbf(paste0("nhdplus/EROMExtension/EROM_MA0001.dbf")) |>
-    as_tibble() |>
-    select(comid = ComID, erom_q_ma_cfs = Q0001E, erom_v_ma_fps = V0001E, 
-           #temp = Temp0001, ppt = PPT0001, pet = PET0001, qetloss = QLoss0001,
-           #catchment_lat = Lat, catchment_sqkm = AreaSqKm,
-           ) |>
-    mutate(across(erom_q_ma_cfs:erom_v_ma_fps, function(x) if_else(x>=0, x, NA)))
-  import_erom <- function(m) {
-    mm <- str_pad(m, width=2, pad="0")
-    foreign::read.dbf(paste0("nhdplus/EROMExtension/EROM_", mm, "0001.dbf")) |>
-      as_tibble() |>
-      mutate(month = m) |>
-      select(month, comid = ComID, erom_q_ma_cfs = Q0001E, erom_v_ma_fps = V0001E, 
-             #temp = Temp0001, ppt = PPT0001, pet = PET0001, qetloss = QLoss0001,
-             #catchment_lat = Lat, catchment_sqkm = AreaSqKm,
-             ) |> 
-      mutate(across(erom_q_ma_cfs:erom_v_ma_fps, function(x) if_else(x>=0, x, NA)))
-  }
-  erom_monthly <- 
-    seq(1,12,1) |> 
-    map(import_erom) |> 
-    reduce(bind_rows)
-  erom_monthly_flows <- erom_monthly |> pivot_wider(names_from = month, names_prefix = "erom_q_ma_cfs_", values_from = erom_q_ma_cfs)
-erom_monthly_velocities <- erom_monthly |> pivot_wider(names_from = month, names_prefix = "erom_v_ma_fps_", values_from = erom_v_ma_fps)
-  
-  # sinuosity from https://www.sciencebase.gov/catalog/item/57976a0ce4b021cadec97890
-  flowline_sinuosity <- 
-    read_delim("nhdplus_extension/Sinuousity_CONUS.TXT") |>
-    janitor::clean_names() |>
-    filter(comid %in% flowline_vaattr$comid)
-  
-  # catchment characteristics from https://www.sciencebase.gov/catalog/item/57976a0ce4b021cadec97890
-  da_suppl_attrs <- # using divergence routed version
-    read_delim("nhdplus_extension/BASIN_CHAR_ACC_CONUS.TXT") |>
-    filter(COMID %in% flowline_vaattr$comid) |>
-    select(comid = COMID, 
-           da_avg_slope = ACC_BASIN_SLOPE, 
-           da_elev_mean = ACC_ELEV_MEAN,
-           da_elev_min = ACC_ELEV_MIN,
-           da_elev_max = ACC_ELEV_MAX) |>
-    mutate(da_elev_rel = da_elev_max - da_elev_min)
-  
-  flowline_attributes <-
-    flowline_table |>
-    left_join(flowline_vaattr) |> 
-    left_join(flowline_slopes) |>
-    mutate(stream_power = slope * da_area_sq_km) |>
-    left_join(precip_annual) |>
-    left_join(loc_precip_annual) |>
-    left_join(vogel_flow) |>
-    left_join(erom_annual) |>
-    left_join(flowline_sinuosity) |>
-    left_join(da_suppl_attrs)
-  
-  flowline_attributes |> saveRDS("flowline_attributes.Rds")
-  
-} else {
-  
-  flowline_attributes <- readRDS("flowline_attributes.Rds")
-  
-}
-
+# flowline shapefile attribute table
+flowline_table <- 
+  foreign::read.dbf("nhdplus/Hydrography/NHDFlowline.dbf") |> 
+  janitor::clean_names() |>
+  select(comid, reachcode, gnis_id, gnis_name, lengthkm, ftype, fcode) |>
+  mutate(huc_8 = substr(reachcode, 1, 8),
+         huc_10 = substr(reachcode, 1, 10),
+         huc_12 = substr(reachcode, 1, 12)) |>
+  inner_join(fcodes |> select(fcode, ftype_desc))
 ```
 
+NHDPlusV2 tables
 
-```{r}
+```{r message=FALSE, warning=FALSE}
+# # cumulative upstream area
+# flowline_cumarea <- 
+#   foreign::read.dbf("nhdplus/NHDPlusAttributes/CumulativeArea.dbf") |> 
+#   as_tibble() |> 
+#   janitor::clean_names() |>
+#   rename(comid = com_id)
 
+# flow routing attributes as described in https://www.usgs.gov/national-hydrography/value-added-attributes-vaas
+flowline_vaattr <- 
+  foreign::read.dbf("nhdplus/NHDPlusAttributes/PlusFlowlineVAA.dbf") |> 
+  as_tibble() |> 
+  select(comid = ComID, 
+         hydro_seq = Hydroseq,
+         reach_code = ReachCode,
+         stream_level = StreamLeve, 
+         stream_order = StreamOrde, 
+         us_length_km = ArbolateSu,
+         ds_length_km = Pathlength,
+         da_area_sq_km = DivDASqKM, # using divergence-routed version 
+         #da_area_sq_km_tot = TotDASqKM,
+         reach_length_km = LengthKM
+         )
+
+# slopes and endpoint elevations
+flowline_slopes <- 
+  foreign::read.dbf("nhdplus/NHDPlusAttributes/elevslope.dbf") |> 
+  as_tibble() |> 
+  mutate(slope = if_else(SLOPE==-9998, NA, SLOPE),
+         elev_min = MINELEVSMO/100, # convert from cm to m
+         elev_max = MAXELEVSMO/100) |>
+  select(comid = COMID, slope, elev_min, elev_max)
+
+# # identifiers of each flowline (COMID)
+# flowline_comid_huc_crosswalk <- 
+#   foreign::read.dbf("nhdplus/NHDReachCode_Comid.dbf") |> 
+#   as_tibble() |> 
+#   janitor::clean_names() |>
+#   mutate(huc_8 = substr(reachcode, 1, 8),
+#          huc_10 = substr(reachcode, 1, 10),
+#          huc_12 = substr(reachcode, 1, 12)) |>
+#   filter(huc_8 %in% selected_huc_8) |>
+#   select(comid, huc_8, huc_10, huc_12)
+```
+
+NHDPlusV2 extension tables
+
+```{r message=FALSE, warning=FALSE}
+# vogel method mean annual flow and mean annual velocity
+vogel_flow <- 
+  foreign::read.dbf("nhdplus/VogelExtension/vogelflow.dbf") |> 
+  as_tibble() |>
+  janitor::clean_names() |>
+  mutate(across(maflowv:mavelv, function(x) if_else(x>=0, x, NA))) |>
+  select(comid, vogel_q_ma_cfs = maflowv, vogel_v_ma_fps = mavelv)
+
+  # incremental precipitation at reach
+loc_precip_annual <- 
+  read_delim("nhdplus/VPUAttributeExtension/IncrPrecipMA.txt") |>
+  mutate(comid = as.numeric(FeatureID), loc_ppt_mean_mm = PrecipV/100) |>
+  select(comid, loc_ppt_mean_mm)
+import_loc_precip <- function(m) {
+  mm <- str_pad(m, width=2, pad="0")
+  read_delim(paste0("nhdplus/VPUAttributeExtension/IncrPrecipMM", mm, ".txt")) |>
+    mutate(month = m) |>
+    mutate(comid = as.numeric(FeatureID), loc_ppt_mean_mm = PrecipV/100) |>
+    select(month, comid, loc_ppt_mean_mm)
+}
+loc_precip_monthly <- 
+  seq(1,12,1) |> 
+  map(import_loc_precip) |> 
+  reduce(bind_rows) |>
+  pivot_wider(names_from = month, names_prefix = "loc_ppt_mean_mm_", values_from = loc_ppt_mean_mm)
+
+# cumulative precipitation in upstream drainage area
+precip_annual <- 
+  read_delim("nhdplus/VPUAttributeExtension/CumTotPrecipMA.txt") |>
+  mutate(comid = as.numeric(ComID), da_ppt_mean_mm = PrecipVC/100) |>
+  select(comid, da_ppt_mean_mm)
+import_precip <- function(m) {
+  mm <- str_pad(m, width=2, pad="0")
+  read_delim(paste0("nhdplus/VPUAttributeExtension/CumTotPrecipMM", mm, ".txt")) |>
+    mutate(month = m) |>
+    mutate(comid = as.numeric(ComID), da_ppt_mean_mm = PrecipVC/100) |>
+    select(month, comid, da_ppt_mean_mm)
+}
+precip_monthly <- 
+  seq(1,12,1) |> 
+  map(import_precip) |> 
+  reduce(bind_rows) |>
+  pivot_wider(names_from = month, names_prefix = "da_ppt_mean_mm_", values_from = da_ppt_mean_mm)
+
+# EROM method mean annual and monthly flows
+erom_annual <- 
+  foreign::read.dbf(paste0("nhdplus/EROMExtension/EROM_MA0001.dbf")) |>
+  as_tibble() |>
+  select(comid = ComID, erom_q_ma_cfs = Q0001E, erom_v_ma_fps = V0001E, 
+         #temp = Temp0001, ppt = PPT0001, pet = PET0001, qetloss = QLoss0001,
+         #catchment_lat = Lat, catchment_sqkm = AreaSqKm,
+         ) |>
+  mutate(across(erom_q_ma_cfs:erom_v_ma_fps, function(x) if_else(x>=0, x, NA)))
+import_erom <- function(m) {
+  mm <- str_pad(m, width=2, pad="0")
+  foreign::read.dbf(paste0("nhdplus/EROMExtension/EROM_", mm, "0001.dbf")) |>
+    as_tibble() |>
+    mutate(month = m) |>
+    select(month, comid = ComID, erom_q_ma_cfs = Q0001E, erom_v_ma_fps = V0001E, 
+           #temp = Temp0001, ppt = PPT0001, pet = PET0001, qetloss = QLoss0001,
+           #catchment_lat = Lat, catchment_sqkm = AreaSqKm,
+           ) |> 
+    mutate(across(erom_q_ma_cfs:erom_v_ma_fps, function(x) if_else(x>=0, x, NA)))
+}
+erom_monthly <- 
+  seq(1,12,1) |> 
+  map(import_erom) |> 
+  reduce(bind_rows)
+erom_monthly_flows <- erom_monthly |> pivot_wider(names_from = month, names_prefix = "erom_q_ma_cfs_", values_from = erom_q_ma_cfs)
+erom_monthly_velocities <- erom_monthly |> pivot_wider(names_from = month, names_prefix = "erom_v_ma_fps_", values_from = erom_v_ma_fps)
+```
+
+Third party NHDPlusV2 extension tables
+
+```{r message=FALSE, warning=FALSE}
+# sinuosity from https://www.sciencebase.gov/catalog/item/57976a0ce4b021cadec97890
+flowline_sinuosity <- 
+  read_delim("nhdplus_extension/Sinuousity_CONUS.TXT") |>
+  janitor::clean_names() |>
+  filter(comid %in% flowline_table$comid)
+
+# catchment characteristics from https://www.sciencebase.gov/catalog/item/57976a0ce4b021cadec97890
+da_suppl_attrs <- # using divergence routed version
+  read_delim("nhdplus_extension/BASIN_CHAR_ACC_CONUS.TXT") |>
+  filter(COMID %in% flowline_table$comid) |>
+  select(comid = COMID, 
+         da_avg_slope = ACC_BASIN_SLOPE, 
+         da_elev_mean = ACC_ELEV_MEAN,
+         da_elev_min = ACC_ELEV_MIN,
+         da_elev_max = ACC_ELEV_MAX) |>
+  mutate(da_elev_rel = da_elev_max - da_elev_min)
+```
+
+StreamCat extension tables
+
+```{r message=FALSE, warning=FALSE}
+# supplemental data from Streamcat
+bfi <- 
+  read_csv("streamcat/BFI_Region18.csv") |>
+  select(comid = COMID,
+         loc_bfi = BFICat,
+         da_bfi= BFIWs
+         )
+twi <- 
+  read_csv("streamcat/WetIndx_Region18.csv") |>
+  select(comid = COMID,
+         loc_twi = WetIndexCat,
+         da_twi= WetIndexWs
+         )
+soiltext <- 
+  read_csv("streamcat/STATSGO_Set1_Region18.csv") |>
+  select(comid = COMID,
+         loc_pct_clay = ClayCat,
+         da_pct_clay = ClayWs,
+         loc_pct_sand = SandCat,
+         da_pct_sand = SandWs,
+         )
+soilprop <- 
+  read_csv("streamcat/STATSGO_Set2_Region18.csv") |>
+  select(comid = COMID,
+         loc_permeability = PermCat,
+         loc_bedrock_depth = RckDepCat,
+         da_permeability = PermWs,
+         da_bedrock_depth = RckDepWs,
+         )
+kffact <- 
+  read_csv("streamcat/Kffact_Region18.csv") |>
+  select(comid = COMID,
+         loc_k_erodibility = KffactCat,
+         da_k_erodibility = KffactWs,
+         )
+precip <- 
+  read_csv("streamcat/PRISM_1981_2010_Region18.csv") |>
+  select(comid = COMID,
+         loc_precip = Precip8110Cat,
+         da_precip = Precip8110Ws,
+         )
+runoff <- 
+  read_csv("streamcat/Runoff_Region18.csv") |>
+  select(comid = COMID,
+         loc_runoff = RunoffCat,
+         da_runoff = RunoffWs,
+         )
+bankfull <- 
+  read_csv("streamcat/Bankfull_Region18.csv") |>
+  select(comid = COMID,
+         bf_width_m = BANKFULL_WIDTH_M,
+         bf_depth_m = BANKFULL_DEPTH_M,
+         ) |>
+  mutate(bf_w_d_ratio = bf_width_m/bf_depth_m)
+# this bankfull dataset is incomplete so best to supplement with the coarser calculation
+
+streamcat_data <- 
+  reduce(list(bfi, twi, soiltext, soilprop, kffact, precip, runoff, bankfull),
+         function(x, y) left_join(x, y, by=join_by(comid)))
+```
+
+coarse catchment NDVI data
+
+```{r message=FALSE, warning=FALSE}
+catchment_ndvi_ts <- archive::archive_read("nhdplus_cn_ndvi/18-California-NDVI.zip", file="18-California-NDVI.csv") |>
+  read_csv() |>
+  filter(ComID %in% flowline_table$comid) |>
+  pivot_longer(cols=-ComID, names_to="modis_date", names_transform = lubridate::ymd, values_to="ndvi") |>
+  rename(comid = ComID)
+catchment_ndvi <- 
+  catchment_ndvi_ts |> 
+  group_by(comid) |>
+  summarize(mean_ndvi = mean(ndvi)/10000)
+catchment_ndvi
+```
+
+### Combine all attributes
+
+```{r message=FALSE, warning=FALSE}
+
+# gravitational constant, cm/s2
+g_cgs <- 981
+# grain density and water density, g/cm3
+rho_s_cgs <- 2.65
+rho_cgs <- 1.00
+# kinematic viscosity of water, cm2/s
+nu_cgs <- 0.01
+
+flowline_attributes <-
+  flowline_table |>
+  left_join(flowline_vaattr) |> 
+  left_join(flowline_slopes) |>
+  mutate(stream_power = slope * da_area_sq_km) |>
+  left_join(precip_annual) |>
+  left_join(loc_precip_annual) |>
+  left_join(vogel_flow) |>
+  left_join(erom_annual) |>
+  left_join(flowline_sinuosity) |>
+  left_join(da_suppl_attrs) |> 
+  left_join(streamcat_data) |>
+  left_join(catchment_ndvi) |> 
+  # fill in gaps in the RF bankfull estimates with the simple Bieger model
+  mutate(bf_width_m = coalesce(bf_width_m, 2.76*da_area_sq_km^0.399),
+         bf_depth_m = coalesce(bf_depth_m, 0.23*da_area_sq_km^0.294),
+         bf_xarea_m = coalesce(bf_width_m*bf_depth_m, 0.87*da_area_sq_km^0.652),
+         bf_w_d_ratio = bf_width_m / bf_depth_m) |>
+  # add some back of the envelope sediment transport calculations
+  mutate(velocity_m_s = erom_v_ma_fps / 0.3048,
+         wetted_perimeter_m = 2*bf_depth_m + bf_width_m,
+         hydraulic_radius_m = bf_xarea_m / wetted_perimeter_m,
+         critical_shields_number = 0.15 * slope^(1/4),
+         grain_size_mobilized_mm = 10 * rho_cgs * hydraulic_radius_m * slope / 
+                         (critical_shields_number * (rho_s_cgs - rho_cgs)),
+         shear_velocity_cm_s = sqrt(g_cgs * (hydraulic_radius_m*100) * slope),
+         settling_velocity_ndim = rho_cgs * shear_velocity_cm_s^3 / 
+                         ((rho_s_cgs - rho_cgs) * g_cgs * nu_cgs),
+         grain_size_suspended_ndim = sqrt(5832 * settling_velocity_ndim),
+         grain_size_suspended_mm = 10 * grain_size_suspended_ndim * rho_cgs * nu_cgs^2 /
+                         ((rho_s_cgs - rho_cgs) * g_cgs)^(1/3))
+
+flowline_attributes |> saveRDS("flowline_attributes.Rds")
+  
+#} else {
+#  
+#  flowline_attributes <- readRDS("flowline_attributes.Rds")
+#  
+#}
 ```
 
 ### Import flowline geometry
@@ -396,6 +531,115 @@ flowlines |>
   scale_color_viridis_c(direction=-1)
 ```
 
+```{r}
+# plot showing sinuousity estimates
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = sinuosity)) +
+  geom_sf(aes(color = sinuosity), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(direction=-1)
+```
+
+
+```{r}
+# plot showing bankfull width
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = bf_width_m)) +
+  geom_sf(aes(color = bf_width_m), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(direction=-1)
+```
+
+```{r}
+# plot showing bankfull width/depth ratio
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = bf_w_d_ratio)) +
+  geom_sf(aes(color = bf_w_d_ratio), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(direction=-1)
+```
+
+```{r}
+# plot showing local soil erodibility
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = loc_k_erodibility)) +
+  geom_sf(aes(color = loc_k_erodibility), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(direction=-1)
+```
+
+```{r}
+# plot showing local soil depth to bedrock
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = loc_bedrock_depth)) +
+  geom_sf(aes(color = loc_bedrock_depth), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(direction=-1)
+```
+
+```{r}
+# plot showing local topographic wetness index
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = loc_twi)) +
+  geom_sf(aes(color = loc_twi), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(direction=-1)
+```
+
+```{r}
+# plot showing local baseflow index (ratio of baseflow to total flow)
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = loc_bfi)) +
+  geom_sf(aes(color = loc_bfi), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(direction=-1)
+```
+
+```{r}
+# plot showing NDVI
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = mean_ndvi)) +
+  geom_sf(aes(color = mean_ndvi), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(direction=-1)
+```
+
+```{r}
+# plot showing theoretical grain size mobilized
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = grain_size_mobilized_mm)) +
+  geom_sf(aes(color = grain_size_mobilized_mm), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(direction=-1, trans="log2")
+```
+
 ### Import catchments
 
 ```{r}
@@ -415,12 +659,180 @@ ggplot() + geom_sf(data = catchments, color="orange") +
 ```
 
 
+## DEM 
 
-## Stream Widths?
+### 1m CA NoCAL Wildfires B2 2018
 
-#### Points along line
+Not generalizable/automatable
 
-using st_line_sample or st_segmentize
+https://rockyweb.usgs.gov/vdelivery/Datasets/Staged/Elevation/LPC/Projects/CA_NoCAL_3DEP_Supp_Funding_2018_D18/CA_NoCAL_Wildfires_B2_2018/
+
+https://prd-tnm.s3.amazonaws.com/index.html?prefix=StagedProducts/Elevation/OPR/Projects/CA_NoCAL_Wildfires_B2_2018
+
+https://prd-tnm.s3.amazonaws.com/index.html?prefix=StagedProducts/Elevation/metadata/CA_NoCAL_3DEP_Supp_Funding_2018_D18/CA_NoCAL_Wildfires_B2_2018
+
+### 10m NHDPlusHR DEM
+
+```{r}
+dem <- read_stars("nhdplushr/dem_nhdplushr_yuba_meters_v2.tif") |>
+  rename(elev = dem_nhdplushr_yuba_meters_v2.tif)
+# this input has already been clipped to the AOI, converted from cm to m, and crs redefined
+ggplot() + geom_stars(data=dem) + coord_fixed()
+```
+
+Calculate slope 
+
+```{r}
+slope <- dem |> starsExtra::slope()
+#slope <- dem |> terra::rast() |> terra::slope()
+ggplot() + geom_stars(data=slope) + coord_fixed()
+```
+
+
+## Lithology
+
+https://pubs.usgs.gov/ds/425/
+
+
+
+
+
+## Confinement
+
+### mTPI as a measure of topographic confinement
+
+Theobald DM, Harrison-Atlas D, Monahan WB, Albano CM. 2015. Ecologically-relevant maps of landforms and physiographic diversity for climate adaptation planning. PLOS ONE. DOI: 10.1371/journal.pone.0143619
+
+```{r}
+dem_rast <- terra::rast(dem) 
+cell_size <- 10 # mean(terra::res(dem_rast))
+tpi_90 <- dem_rast - terra::focal(dem_rast, w=90/cell_size, fun="mean")
+tpi_270 <- dem_rast - terra::focal(dem_rast, w=270/cell_size, fun="mean")
+tpi_810 <- dem_rast - terra::focal(dem_rast, w=810/cell_size, fun="mean")
+#tpi_2430 <- dem_rast - terra::focal(dem_rast, w=2430/cell_size, fun="mean")
+mtpi <- terra::app(c(tpi_90, tpi_270, tpi_810), mean)
+mtpi |> st_as_stars() |> plot()
+```
+
+Apply TPI to datasets
+
+```{r}
+#cat_vect <- terra::vect(catchments)
+#vec_mtpi_min <- terra::zonal(mtpi, cat_vect, "min") |> rename(mtpi_min = mean)
+#vec_mtpi_mean <- terra::zonal(mtpi, cat_vect, "mean") |> rename(mtpi_mean = mean)
+#mtpi_comid <- catchments |> 
+#  mutate(vec_mtpi_min, vec_mtpi_mean) |> 
+#  st_drop_geometry() |> 
+#  select(comid, mtpi_min, mtpi_mean) |>
+#  filter(!is.nan(mtpi_min) & !is.nan(mtpi_mean))
+#flowlines |>
+#  inner_join(mtpi_comid) |>
+#  st_zm() |>
+#  ggplot() + 
+#  geom_sf(aes(color = mtpi_min), linewidth=1) + 
+#  scale_color_viridis_c(direction=-1)
+
+flow_buffered <- terra::vect(flowlines) |> terra::buffer(width=50)
+vec_mtpi_min <- terra::zonal(mtpi, flow_buffered, "min") |> rename(mtpi_min = mean)
+#vec_mtpi_mean <- terra::zonal(mtpi, flow_buffered, "mean") |> rename(mtpi_mean = mean)
+mtpi_comid <- flowlines |>
+  select(comid) |>
+  mutate(vec_mtpi_min) |>#, vec_mtpi_mean) |> 
+  st_drop_geometry() |> 
+  select(comid, mtpi_min) |> #, mtpi_mean) |>
+  filter(!is.nan(mtpi_min))# & !is.nan(mtpi_mean))
+flowlines |>
+  inner_join(mtpi_comid) |>
+  st_zm() |>
+  ggplot() + 
+  #geom_stars(data=st_as_stars(mtpi)) +
+  geom_sf(aes(color = mtpi_min), linewidth=1) + 
+  scale_color_viridis_c(direction=-1)
+```
+
+### Catchment slope cutoff method
+
+Method described in https://watermanagement.ucdavis.edu/download_file/view_inline/144
+
+```{r}
+#slope <- dem |> starsExtra::slope()
+#valley_bottom_test <- slope |>
+#  mutate(valley_bottom = if_else(slope<units::set_units(atan(0.25)*180/pi,"degrees"), 1, 0)) |>
+#  select(valley_bottom)
+
+valley_bottom <- function(catchment, flowline, dem) {
+  dem |> 
+    st_crop(catchment) |> 
+    starsExtra::slope() |>
+    mutate(valley_bottom = if_else(slope<units::set_units(atan(0.25)*180/pi,"degrees"), 1, NA)) |>
+    select(valley_bottom) |>
+    st_as_sf(merge=TRUE) |>
+    st_filter(st_zm(flowline))
+}
+
+valley_bottom_by_comid <- function(x) {
+  c <- catchments |> filter(comid==x)
+  f <- flowlines |> filter(comid==x)
+  valley_bottom(c, f, dem)
+}
+
+valley_width <- function(geom_valley_bottom) {
+   geom_valley_bottom |> 
+    terra::vect() |> 
+    terra::width()
+}
+
+#TEST
+catchment <- catchments |> filter(comid==8062593)
+flowline <- flowlines |> filter(comid==8062593)
+ggplot() + 
+  #geom_stars(data=catchment_confinement(catchment, flowline, dem)) + 
+  geom_sf(data=valley_bottom(catchment, flowline, dem)) +
+  geom_sf(data=st_zm(flowline))
+valley_width(valley_bottom(catchment, flowline, dem))
+
+#flowlines |>
+#  rename(geometry_flowline = geometry) |>
+#  left_join(catchments |> select(comid, geometry_catchment = geometry) |> as.data.frame(), by = join_by(comid)) |>
+#  mutate(valley_bottom_width = pmap_dbl(c(as.list.data.frame(geometry_catchment), as.list.data.frame(geometry_flowline)), function(c,f) valley_width(valley_bottom(c, f, dem))))
+
+valley_bottoms <- flowlines |> head(10) |>
+  st_drop_geometry() |>
+  mutate(valley_bottom_geoms = map(comid, possibly(function(x) valley_bottom_by_comid(x), otherwise=NA))) |>
+  #mutate(is_empty = map(valley_bottom_geoms, st_is_empty)) |>
+  #unnest(is_empty) |>
+  #filter(!is_empty) |>
+  #mutate(geometry = valley_bottom_geoms |> bind_rows()) |>
+  #st_as_sf() |>
+  mutate(valley_bottom_width = map(valley_bottom_geoms, possibly(function(x) valley_width(x), otherwise=NA))) 
+
+valley_bottoms
+
+```
+
+### VBET
+
+export flowlines within DEM raster domain
+
+```{r}
+flowlines_for_vbet <- flowlines |>
+  filter(gnis_name %in% c("Yuba River")) |>
+  st_transform(st_crs(dem)) |>
+  st_zm() |> 
+  st_crop(st_bbox(dem)) |>
+  smoothr::densify(5)
+
+#flowlines_for_vbet |>
+#  st_write("out/flowlines_for_vbet.shp", append=FALSE)
+
+#flowlines_for_vbet |> ggplot() + geom_sf(aes(color = )) #+ geom_stars(data=dem)
+```
+
+## Test
+
+### Stream Widths?
+
+Points along line using st_line_sample or st_segmentize
 
 ```{r}
 # approach with one point every 100 ft
@@ -448,41 +860,9 @@ cvpia_extents |>
   ggplot() + geom_sf()
 ```
 
-## DEM 
-
-### 10m NHDPlusHR
-
 ```{r}
-dem <- read_stars("nhdplushr/dem_nhdplushr_yuba_meters_v2.tif")
-# this input has already been clipped to the AOI, converted from cm to m, and crs redefined
-ggplot() + geom_stars(data=dem) + coord_fixed()
+knitr::knit_exit()
 ```
-
-#### export flowlines within this raster domain
-
-```{r}
-flowlines_for_vbet <- flowlines |>
-  filter(gnis_name %in% c("Yuba River")) |>
-  st_transform(st_crs(dem)) |>
-  st_zm() |> 
-  st_crop(st_bbox(dem)) |>
-  smoothr::densify(5)
-
-#flowlines_for_vbet |>
-#  st_write("out/flowlines_for_vbet.shp", append=FALSE)
-
-flowlines_for_vbet |> ggplot() + geom_sf(aes(color = tot_da_sq_km)) #+ geom_stars(data=dem)
-```
-
-### 1m CA NoCAL Wildfires B2 2018
-
-Not generalizable/automatable
-
-https://rockyweb.usgs.gov/vdelivery/Datasets/Staged/Elevation/LPC/Projects/CA_NoCAL_3DEP_Supp_Funding_2018_D18/CA_NoCAL_Wildfires_B2_2018/
-
-https://prd-tnm.s3.amazonaws.com/index.html?prefix=StagedProducts/Elevation/OPR/Projects/CA_NoCAL_Wildfires_B2_2018
-
-https://prd-tnm.s3.amazonaws.com/index.html?prefix=StagedProducts/Elevation/metadata/CA_NoCAL_3DEP_Supp_Funding_2018_D18/CA_NoCAL_Wildfires_B2_2018
 
 ## Vegetation
 
@@ -494,6 +874,37 @@ naip_proxy <-  read_stars(naip_filename, proxy = TRUE)
 naip_ndvi <- function(x) (x[4]-x[1]) / (x[4]+x[1])
 
 ndvi_out <- st_apply(naip_proxy, c("x", "y"), ndvi)
+```
 
 
+```{r}
+# # natural flows
+# natural_flows <- 
+#   archive::archive_read("natural_flows/ffm-final-v1.2.1.zip") |>
+#   read_csv() |> 
+#   filter(comid %in% flowline_vaattr$comid)
+# 
+# natural_flows |>
+#   filter(ffm = "ds_mag_50")
+
+
+```
+
+
+```{r}
+#Another way to retrieve additional data from Streamcat
+#devtools::install_github('USEPA/StreamCatTools')
+#df <- StreamCatTools::sc_get_data(metric='PctWdWet2006', aoi='watershed', region='18')
+
+```
+
+```{r}
+# # natural flows
+# natural_flows <- 
+#   archive::archive_read("natural_flows/ffm-final-v1.2.1.zip") |>
+#   read_csv() |> 
+#   filter(comid %in% flowline_vaattr$comid)
+# 
+# natural_flows |>
+#   filter(ffm = "ds_mag_50")
 ```

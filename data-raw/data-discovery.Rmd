@@ -340,7 +340,7 @@ streamcat_data <-
 coarse catchment NDVI data
 
 ```{r message=FALSE, warning=FALSE}
-catchment_ndvi_ts <- archive::archive_read("nhdplus_cn_ndvi/18-California-NDVI.zip", file="18-California-NDVI.csv") |>
+catchment_ndvi_ts <- archive::archive_read("nhdplusv2_suppl/18-California-NDVI.zip", file="18-California-NDVI.csv") |>
   read_csv() |>
   filter(ComID %in% flowline_table$comid) |>
   pivot_longer(cols=-ComID, names_to="modis_date", names_transform = lubridate::ymd, values_to="ndvi") |>

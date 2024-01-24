@@ -103,9 +103,9 @@ fcodes <-
   select(fcode, ftype_desc)
 
 # flowline shapefile attribute table
+archive::archive_extract("nhdplusv2/Hydrography/NHDFlowline.zip", dir="temp", file="NHDFlowline.dbf")
 flowline_table <- 
-  archive::archive_extract("nhdplusv2/Hydrography/NHDFlowline.zip", dir="nhdplusv2/Hydrography", file="NHDFlowline.dbf") |>
-  foreign::read.dbf() |> 
+  foreign::read.dbf("temp/NHDFlowline.dbf") |> 
   janitor::clean_names() |>
   select(comid, reachcode, gnis_id, gnis_name, lengthkm, ftype, fcode) |>
   mutate(huc_8 = substr(reachcode, 1, 8),
@@ -125,8 +125,10 @@ NHDPlusV2 tables
 #   rename(comid = com_id)
 
 # flow routing attributes as described in https://www.usgs.gov/national-hydrography/value-added-attributes-vaas
+archive::archive_extract("nhdplusv2/NHDPlusAttributes.zip", dir="temp/nhdplusv2/NHDPlusAttributes", file="NHDFlowline.dbf")
+
 flowline_vaattr <- 
-  foreign::read.dbf("nhdplusv2/NHDPlusAttributes/PlusFlowlineVAA.dbf") |> 
+  foreign::read.dbf("temp/nhdplusv2/NHDPlusAttributes/PlusFlowlineVAA.dbf") |> 
   as_tibble() |> 
   select(comid = ComID, 
          hydro_seq = Hydroseq,
@@ -142,7 +144,7 @@ flowline_vaattr <-
 
 # slopes and endpoint elevations
 flowline_slopes <- 
-  foreign::read.dbf("nhdplusv2/NHDPlusAttributes/elevslope.dbf") |> 
+  foreign::read.dbf("temp/nhdplusv2/NHDPlusAttributes/elevslope.dbf") |> 
   as_tibble() |> 
   mutate(slope = if_else(SLOPE==-9998, NA, SLOPE),
          elev_min = MINELEVSMO/100, # convert from cm to m
@@ -164,26 +166,26 @@ flowline_slopes <-
 NHDPlusV2 extension tables
 
 ```{r message=FALSE, warning=FALSE}
-archive::archive_extract("nhdplusv2/VogelExtension.zip", dir="nhdplusv2/VogelExtension")
+archive::archive_extract("nhdplusv2/VogelExtension.zip", dir="temp/nhdplusv2/VogelExtension")
 
 # vogel method mean annual flow and mean annual velocity
 vogel_flow <- 
-  foreign::read.dbf("nhdplusv2/VogelExtension/vogelflow.dbf") |> 
+  foreign::read.dbf("temp/nhdplusv2/VogelExtension/vogelflow.dbf") |> 
   as_tibble() |>
   janitor::clean_names() |>
   mutate(across(maflowv:mavelv, function(x) if_else(x>=0, x, NA))) |>
   select(comid, vogel_q_ma_cfs = maflowv, vogel_v_ma_fps = mavelv)
 
-archive::archive_extract("nhdplusv2/VPUAttributeExtension.zip", dir="nhdplusv2/VPUAttributeExtension")
+archive::archive_extract("nhdplusv2/VPUAttributeExtension.zip", dir="temp/nhdplusv2/VPUAttributeExtension")
 
   # incremental precipitation at reach
 loc_precip_annual <- 
-  read_delim("nhdplusv2/VPUAttributeExtension/IncrPrecipMA.txt") |>
+  read_delim("temp/nhdplusv2/VPUAttributeExtension/IncrPrecipMA.txt") |>
   mutate(comid = as.numeric(FeatureID), loc_ppt_mean_mm = PrecipV/100) |>
   select(comid, loc_ppt_mean_mm)
 import_loc_precip <- function(m) {
   mm <- str_pad(m, width=2, pad="0")
-  read_delim(paste0("nhdplusv2/VPUAttributeExtension/IncrPrecipMM", mm, ".txt")) |>
+  read_delim(paste0("temp/nhdplusv2/VPUAttributeExtension/IncrPrecipMM", mm, ".txt")) |>
     mutate(month = m) |>
     mutate(comid = as.numeric(FeatureID), loc_ppt_mean_mm = PrecipV/100) |>
     select(month, comid, loc_ppt_mean_mm)
@@ -196,7 +198,7 @@ loc_precip_monthly <-
 
 # cumulative precipitation in upstream drainage area
 precip_annual <- 
-  read_delim("nhdplusv2/VPUAttributeExtension/CumTotPrecipMA.txt") |>
+  read_delim("temp/nhdplusv2/VPUAttributeExtension/CumTotPrecipMA.txt") |>
   mutate(comid = as.numeric(ComID), da_ppt_mean_mm = PrecipVC/100) |>
   select(comid, da_ppt_mean_mm)
 import_precip <- function(m) {
@@ -213,9 +215,9 @@ precip_monthly <-
   pivot_wider(names_from = month, names_prefix = "da_ppt_mean_mm_", values_from = da_ppt_mean_mm)
 
 # EROM method mean annual and monthly flows
-archive::archive_extract("nhdplusv2/EROMExtension.zip", dir="nhdplusv2/EROMExtension")
+archive::archive_extract("nhdplusv2/EROMExtension.zip", dir="temp/nhdplusv2/EROMExtension")
 erom_annual <- 
-  foreign::read.dbf("nhdplusv2/EROMExtension/EROM_MA0001.DBF") |>
+  foreign::read.dbf("temp/nhdplusv2/EROMExtension/EROM_MA0001.DBF") |>
   as_tibble() |>
   select(comid = ComID, erom_q_ma_cfs = Q0001E, erom_v_ma_fps = V0001E, 
          #temp = Temp0001, ppt = PPT0001, pet = PET0001, qetloss = QLoss0001,
@@ -224,7 +226,7 @@ erom_annual <-
   mutate(across(erom_q_ma_cfs:erom_v_ma_fps, function(x) if_else(x>=0, x, NA)))
 import_erom <- function(m) {
   mm <- str_pad(m, width=2, pad="0")
-  foreign::read.dbf(paste0("nhdplusv2/EROMExtension/EROM_", mm, "0001.dbf")) |>
+  foreign::read.dbf(paste0("temp/nhdplusv2/EROMExtension/EROM_", mm, "0001.dbf")) |>
     as_tibble() |>
     mutate(month = m) |>
     select(month, comid = ComID, erom_q_ma_cfs = Q0001E, erom_v_ma_fps = V0001E, 

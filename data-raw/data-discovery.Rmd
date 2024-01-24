@@ -393,10 +393,15 @@ flowline_attributes |> saveRDS("../data/flowline_attributes.Rds")
 ### Import flowline geometry
 
 ```{r}
-flowlines <- 
+flowlines_sf <- 
   st_read("nhdplus/Hydrography/NHDFlowline.shp") |>
   janitor::clean_names() |>
-  select(comid) |>
+  select(comid) 
+
+flowlines_sf |> saveRDS("../data/flowline_geometries.Rds")
+
+flowlines <- 
+  flowlines_sf |>
   inner_join(flowline_attributes) |>
   filter(huc_8 %in% selected_huc_8) |>
   arrange(hydro_seq) |>

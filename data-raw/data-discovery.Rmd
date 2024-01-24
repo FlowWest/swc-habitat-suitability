@@ -767,7 +767,7 @@ valley_bottom <- function(catchment, flowline, dem) {
     mutate(valley_bottom = if_else(slope<units::set_units(atan(0.25)*180/pi,"degrees"), 1, NA)) |>
     select(valley_bottom) |>
     st_as_sf(merge=TRUE) |>
-    st_filter(st_zm(flowline))
+    st_filter(st_zm(flowline)) #|> st_as_sfc()
 }
 
 valley_bottom_by_comid <- function(x) {
@@ -782,31 +782,109 @@ valley_width <- function(geom_valley_bottom) {
     terra::width()
 }
 
+perpendicular_transect <- function(pair=st_multipoint(), length=numeric()) {
+  x1 <- pair[1]
+  x2 <- pair[2]
+  y1 <- pair[3]
+  y2 <- pair[4]
+  midpoint_x <- (x1+x2)/2
+  midpoint_y <- (y1+y2)/2
+  orig_bearing <- atan2((y2-y1), (x2-x1))
+  perp_bearing <- orig_bearing + pi/2
+  radius <- length/2
+  perp_x1 <- midpoint_x + radius*cos(perp_bearing)
+  perp_y1 <- midpoint_y + radius*sin(perp_bearing)
+  perp_x2 <- midpoint_x - radius*cos(perp_bearing)
+  perp_y2 <- midpoint_y - radius*sin(perp_bearing)
+  return(st_linestring(c(st_point(c(perp_x1,perp_y1)), 
+                         st_point(c(perp_x2, perp_y2)))))
+}
+
+perpendicular_transects <- function(ls=st_linestring(), length=numeric()) {
+  if ("sf" %in% class(ls)){
+    ls <- st_as_sfc(ls, crs=st_crs(ls))
+  }
+  if ("sfc" %in% class(ls)){
+    m <- t(st_zm(ls[[1]]))
+  } 
+  if ("sfg" %in% class(ls)){
+    m <- t(ls)
+  }
+  point_pairs <- lapply(seq(1, length(m)-3, 2), function(i) c(st_point(c(m[i], m[i+1])), st_point(c(m[i+2], m[i+3]))))
+  perp_lines <- lapply(point_pairs, function(pair) perpendicular_transect(pair, length))
+  return(st_sfc(perp_lines, crs=st_crs(ls)))
+}
+
+valley_width_via_transects <- function(geom_valley_bottom, flowline, max_width) {
+  transects <- perpendicular_transects(flowline, length=max_width)
+  if("sfg" %in% class(geom_valley_bottom)) {
+    geom_valley_bottom <- st_sfc(geom_valley_bottom, crs=st_crs(transects))
+  }
+  clipped <- st_intersection(transects, geom_valley_bottom)
+  #filtered <- clipped[st_intersects(clipped, flowline)]
+  #return(mean(st_length(filtered)))
+  return(mean(st_length(clipped)))
+}
+
+
 #TEST
-catchment <- catchments |> filter(comid==8062593)
-flowline <- flowlines |> filter(comid==8062593)
+flowline <- flowlines |> filter(comid==8062593) |> st_zm()
+catchment <- catchments |> filter(comid==8062593) |> st_transform(st_crs(flowline))
 ggplot() + 
   #geom_stars(data=catchment_confinement(catchment, flowline, dem)) + 
   geom_sf(data=valley_bottom(catchment, flowline, dem)) +
   geom_sf(data=st_zm(flowline))
 valley_width(valley_bottom(catchment, flowline, dem))
+valley_polygon <- valley_bottom(catchment, flowline, dem)
+valley_width_via_transects(valley_bottom(catchment, flowline, dem), flowline, max_width=1000)
+ggplot() + 
+  geom_sf(data=catchment) +
+  geom_sf(data=valley_polygon, fill="lightblue") +
+  geom_sf(data=flowline, color="blue") +
+  geom_sf(data=perpendicular_transects(flowline, length=1000) |> st_intersection(valley_polygon), color="red") 
+```
 
+```{r}
 #flowlines |>
 #  rename(geometry_flowline = geometry) |>
 #  left_join(catchments |> select(comid, geometry_catchment = geometry) |> as.data.frame(), by = join_by(comid)) |>
 #  mutate(valley_bottom_width = pmap_dbl(c(as.list.data.frame(geometry_catchment), as.list.data.frame(geometry_flowline)), function(c,f) valley_width(valley_bottom(c, f, dem))))
 
-valley_bottoms <- flowlines |> head(10) |>
-  st_drop_geometry() |>
-  mutate(valley_bottom_geoms = map(comid, possibly(function(x) valley_bottom_by_comid(x), otherwise=NA))) |>
-  #mutate(is_empty = map(valley_bottom_geoms, st_is_empty)) |>
-  #unnest(is_empty) |>
-  #filter(!is_empty) |>
-  #mutate(geometry = valley_bottom_geoms |> bind_rows()) |>
-  #st_as_sf() |>
-  mutate(valley_bottom_width = map(valley_bottom_geoms, possibly(function(x) valley_width(x), otherwise=NA))) 
+# flowlines |> filter(huc_8 %in% selected_huc_8) |> 
+#   filter(comid==8062593) |>
+#   mutate(flowline = st_zm(geometry)) |>
+#   st_drop_geometry() |>
+#   mutate(valley_bottom_geoms = map(comid, possibly(function(x) valley_bottom_by_comid(x), otherwise=NA))) |>
+#   mutate(vb_width_simple = map(valley_bottom_geoms, possibly(function(x) valley_width(x), otherwise=NA))) |> 
+#   unnest(vb_width_simple) |>
+#   mutate(vb_width_transect = map(valley_bottom_geoms, possibly(function(x) valley_width_via_transects(x, flowline, 1000), otherwise=NA))) |>
+#   unnest(vb_width_transect) |>
+#   mutate(vb_width_transect = vb_width_transect|> 
+#            units::drop_units()) |>
+#   select(comid, valley_bottom_geoms, vb_width_simple, vb_width_transect) 
 
-valley_bottoms
+proj_crs <- st_crs(flowlines)
+  
+vb1 <- 
+flowlines |> filter(huc_8 %in% selected_huc_8) |> head(2) |> #filter(comid==8062593) |>
+  mutate(flowline = st_set_crs(st_zm(geometry),proj_crs)) |>
+  st_drop_geometry() |>
+  mutate(valley_bottom_geoms = st_as_sfc(bind_rows(map(comid, possibly(function(x) valley_bottom_by_comid(x), otherwise=NA))), crs=proj_crs)) |>
+  mutate(vb_width_simple = map(valley_bottom_geoms, possibly(function(x) valley_width(x), otherwise=NA))) |> 
+  unnest(vb_width_simple) |>
+  mutate(vb_width_transect = map2(valley_bottom_geoms, flowline, function(x, y) valley_width_via_transects(x, y, 1000))) |> 
+  unnest(vb_width_transect) |>
+  select(comid, flowline, valley_bottom_geoms, vb_width_simple, vb_width_transect) 
+
+ggplot() +  geom_sf(data=vb1$valley_bottom_geoms) + geom_sf(data=vb1$flowline)
+
+#|>
+#  mutate(vb_width_transect = vb_width_transect|> units::drop_units()) |>
+#  select(comid, valley_bottom_geoms, vb_width_simple, vb_width_transect) 
+
+valley_bottoms |> saveRDS("valley_bottoms.Rds")
+
+valley_bottoms |> filter(comid==8062593) 
 
 ```
 
@@ -866,6 +944,14 @@ knitr::knit_exit()
 
 ## Vegetation
 
+https://gdal.org/drivers/raster/mrsid.html
+
+```{r}
+rgdal::
+terra::rast("naip/ortho_1-1_hc_s_ca115_2022_1.sid")
+```
+
+
 ```{r}
 naip_filename <- "naip/naip.tif"
 
@@ -908,3 +994,4 @@ ndvi_out <- st_apply(naip_proxy, c("x", "y"), ndvi)
 # natural_flows |>
 #   filter(ffm = "ds_mag_50")
 ```
+

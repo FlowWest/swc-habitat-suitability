@@ -4,7 +4,7 @@ import classVBET
 class RunVBET:
     def __init__(self):
         self.params = {
-            'network': 'data-raw/flowlines_with_cumarea_clip2.shp',
+            'network': 'data-raw/flowlines_with_cumarea_clip2_project.shp',
             'dem': 'data-raw/dem_nhdplushr_yuba_meters_v2.tif',
             'out': 'output/yuba_output_v3.shp',
             'scratch': 'scratch',

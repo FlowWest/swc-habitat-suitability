@@ -1,0 +1,1530 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<metadata>
+  <idinfo>
+    <citation>
+      <citeinfo>
+        <origin>Michael E. Wieczorek</origin>
+        <origin>Shannon E. Jackson</origin>
+        <origin>Gregory E. Schwarz</origin>
+        <pubdate>20230802</pubdate>
+        <title>Attributes for NHDPlus Version 2.1 Catchments and Modified Routing of Upstream Watersheds for the Conterminous United States: Select Basin Characteristics</title>
+        <geoform>tabular digital data</geoform>
+        <pubinfo>
+          <pubplace>Reston, Virginia</pubplace>
+          <publish>U.S. Geological Survey</publish>
+        </pubinfo>
+        <onlink>https://doi.org/10.5066/F7765D7V</onlink>
+      </citeinfo>
+    </citation>
+    <descript>
+      <abstract>This tabular data set represents select basin characteristics compiled for two spatial components of the NHDPlus version 2 data suite (NHDPlusv2) for the conterminous United States; 1) individual reach catchments and 2) reach catchments accumulated upstream through the river network. The select variables in this data set are parsed out into six different file themes as follows: 
+
+BASIN_CHAR_XXX_CONUS.txt (where XXX is CAT flowline catchment value, ACC is divergence routed accumulated value, and TOT is total upstream routed accumulated value) contains information on stream slope (percent rise, also referred to as the percent slope), basin slope (percent rise, also referred to as the percent slope), basin area, minimum basin elevation, maximum basin elevation, mean basin elevation, and stream length. 
+
+RDX_CONUS.txt contains information on road and stream crossings. 
+
+ROAD_DENS_XXX_CONUS.txt (where XXX is CAT flowline catchment value, ACC is divergence routed accumulated value, and TOT is total upstream routed accumulated value) contains information on road density by road type.
+
+STREAM_DENSITY_CONUS.TXT stream density, contains information on stream density (stream kilometers per square kilometer of basin).
+
+SINUOSITY_CONUS.txt contains information on flowline reach sinuosity. 
+
+FTYPE_PCT_CONUS.txt contains information on each flowline reach type as a percentage to all flowline features per catchment. 
+
+This dataset can be linked to the NHDPlus version 2 data suite by the unique identifier COMID.  The source data is the NHDPlus Version 2 data suite (U.S. Geological Survey (USGS) and the U.S. Environmental Protection Agency (USEPA), 2012).  Reach catchment information characterizes data at the local scale. Reach catchments accumulated upstream through the river network characterizes cumulative upstream conditions.  Network-accumulated values are computed using two methods, 1) divergence-routed and 2) total cumulative drainage area. Both approaches use a modified routing database to navigate the NHDPlus reach network to aggregate (accumulate) the metrics derived from the reach catchment scale. (Schwarz and Wieczorek, 2018).</abstract>
+      <purpose>This data set was created by the U.S. Geological Survey's (USGS) National Water-Quality Assessment Project (NAWQA) which is part of the USGS National Water Quality Program (NWQP).  This effort was undertaken to estimate select basin characteristics for NHDPlusV2 flowline catchments and upstream river networks to support statistical analysis, map display, and model parameterization.</purpose>
+      <supplinf>The data processed here uses a modified routing data base for the NHDPlusV2 flowline network (ENHDPlusV2_us, Schwarz and Wieczorek, 2018). The NHDPlusV2 flowline network serves as the spatial infrastructure for many water-quality modeling efforts included under NAWQA Cycle 3 status and trend assessments including the SPARROW (SPAtially Referenced Regressions On Watershed attributes) model (Rowe and others, 2009). The NHDPlusV2 flowline network is a publically available digital geospatial framework (database) that depicts the network of stream segments and their catchments within the conterminous United States (see Moore and Dewald, 2016 for more detail). The NHDPlusv2 data set includes catchments for each reach covering the conterminous U.S. which includes the catchment boundaries in neighboring Canada and Mexico. These catchments are used as the spatial units for zonal statistics. A statistic (summation, average, minimum or maximum) is calculated for each zone (catchment), based on values from the source ancillary data set (See Process_Description for more details). The output of these values are used as the source input data for an accumulation program which uses a routing database to allocate and accumulate landscape metrics. This database  (ENHDPlusV2_us) is based on a topologically reconditionedversion of the NHDPlusV2 hydrography network and is used for routing purposes only. No cartographic changes were made to the original NHDPlusV2 in either the flowline or catchment line work.</supplinf>
+    </descript>
+    <timeperd>
+      <timeinfo>
+        <sngdate>
+          <caldate>2018</caldate>
+        </sngdate>
+      </timeinfo>
+      <current>publication date</current>
+    </timeperd>
+    <status>
+      <progress>Complete</progress>
+      <update>As needed</update>
+    </status>
+    <spdom>
+      <bounding>
+        <westbc>-127.910792</westbc>
+        <eastbc>-65.327751</eastbc>
+        <northbc>51.657387</northbc>
+        <southbc>23.243486</southbc>
+      </bounding>
+      <descgeog>CONUS United States</descgeog>
+    </spdom>
+    <keywords>
+      <theme>
+        <themekt>None</themekt>
+        <themekey>basin slope</themekey>
+        <themekey>SPARROW</themekey>
+        <themekey>Inlandwaters</themekey>
+        <themekey>NHDPlus</themekey>
+        <themekey>Catchment</themekey>
+        <themekey>NAWQA</themekey>
+        <themekey>basin elevations</themekey>
+        <themekey>stream slope</themekey>
+        <themekey>stream length</themekey>
+        <themekey>basin area</themekey>
+        <themekey>sinuosity</themekey>
+        <themekey>road density</themekey>
+        <themekey>TIGER roads</themekey>
+        <themekey>flowline reach type</themekey>
+        <themekey>stream density</themekey>
+      </theme>
+      <theme>
+        <themekt>USGS Metadata Identifier</themekt>
+        <themekey>USGS:57976a0ce4b021cadec97890</themekey>
+      </theme>
+      <place>
+        <placekt>None</placekt>
+        <placekey>Conterminous United States</placekey>
+      </place>
+    </keywords>
+    <accconst>none</accconst>
+    <useconst>One should use caution and read this document before using these data to estimate smaller areas. These data should not be used for site-specific evaluation, surveying, or engineering purposes. They should also not be used beyond the limits of the source data's scale. Use of this data is considered acceptance of the limitations of this data and that the user has read and understood this metadata prior to its use in any form.</useconst>
+    <ptcontac>
+      <cntinfo>
+        <cntperp>
+          <cntper>Michael E. Wieczorek</cntper>
+          <cntorg>US Geological Survey, Maryland Water Science Center</cntorg>
+        </cntperp>
+        <cntaddr>
+          <addrtype>mailing and physical</addrtype>
+          <address>5522 Research Park Drive</address>
+          <city>Baltimore</city>
+          <state>MD</state>
+          <postal>21228</postal>
+          <country>USA</country>
+        </cntaddr>
+        <cntvoice>443-498-5550</cntvoice>
+        <cntemail>mewieczo@usgs.gov</cntemail>
+      </cntinfo>
+    </ptcontac>
+    <datacred>We would like to acknowledge the following USGS employees.  The original conception and rationale for creating these data is from Robert Gilliom and Daren Carlisle.  We also acknowledge Andrew LaMotte in helping to process and format much of this data as well as the helpful colleague reviews provided by Alison Appling and Daren Carlisle.  We also would like to thank Dave Wolock, Curtis Price, Roland Viger, and Drew Ignazio for their invaluable input.</datacred>
+    <crossref>
+      <citeinfo>
+        <origin>Gary L. Rowe</origin>
+        <origin>Kenneth Belitz</origin>
+        <origin>Hedeff I. Essaid</origin>
+        <origin>Robert J. Gilliom</origin>
+        <origin>Pixie A. Hamilton</origin>
+        <origin>Anne B. Hoos</origin>
+        <origin>Dennis D. Lynch</origin>
+        <origin>Mark D. Munn</origin>
+        <origin>David W. Wolock</origin>
+        <pubdate>2009</pubdate>
+        <title>Design of Cycle 3 of the National Water-Quality Assessment Program, 2013–2023: Part 1: Framework of Water-Quality Issues and Potential Approaches</title>
+        <pubinfo>
+          <pubplace>Reston, Virginia</pubplace>
+          <publish>U.S. Geological Survey</publish>
+        </pubinfo>
+        <onlink>http://pubs.usgs.gov/of/2009/1296/pdf/OF09-1296.pdf</onlink>
+      </citeinfo>
+    </crossref>
+    <crossref>
+      <citeinfo>
+        <origin>Richard B. Moore</origin>
+        <origin>Thomas G. Dewald</origin>
+        <pubdate>2016</pubdate>
+        <title>The Road to NHDPlus-Advancements in Digital Stream Networks and Associated Catchments</title>
+        <pubinfo>
+          <pubplace>American Water Resources Association</pubplace>
+          <publish>(JAWRA) 1-10.DOI: 10.1111/1752-1688.12389</publish>
+        </pubinfo>
+        <onlink>http://dx.doi.org/10.1111/1752-1688.12389</onlink>
+      </citeinfo>
+    </crossref>
+  </idinfo>
+  <dataqual>
+    <attracc>
+      <attraccr>Basin metrics were compared to values for the variables, ELEV_MEAN_M_BASIN_30M' ELEV_MAX_M_BASIN_30M, ELEV_MIN_M_BASIN_30M, and SLOPE_PCT_30M, available in the GAGESII data set (Falcone, 2010).  The following steps were performed before making the comparisons:
+
+1) GAGESII point file with the most current COMIDs associations was joined to the routing database file which contains accumulated basin areas (Schwarz and Wieczorek, 2018).
+2) Only those GAGESII basins that have a basin area within 1% or less of the accumulated basin areas were processed and used for comparisons. This resulted in 4,713 locations.
+3) Using those COMIDs for GAGESII sites, the associated record in the accumulation files were pulled and used in the comparison of one to one plots.
+
+Results demonstrated a Pearson's r-squared well over 90%. Values that differed greatly between data sets can be attributed to either the difference in the basin delineations of GAGESII basins compared to that of the catchment representations in NHDPlus version 2 or to the fact that this data set only reports data from the downstream end of reaches and their upstream contribution. GAGESII basin outlets can occur anywhere along a reach segment which can produce different results depending on the variability of the source data being compiled and the distance between the GAGES II basin outlet and the downstream endpoint of the reach segment. NHDPlus version 2 reach segments can be as long as 95 kilometers and some source data can vary considerably within an NHDPlus reach catchment. As a result, some data processed from the location of a GAGESII pour point compared to the downstream end of a reach segment can result in differences in accumulated variables.</attraccr>
+    </attracc>
+    <logic>None</logic>
+    <complete>None</complete>
+    <posacc>
+      <horizpa>
+        <horizpar>No formal positional accuracy tests were conducted</horizpar>
+      </horizpa>
+      <vertacc>
+        <vertaccr>No formal positional accuracy tests were conducted</vertaccr>
+      </vertacc>
+    </posacc>
+    <lineage>
+      <srcinfo>
+        <srccite>
+          <citeinfo>
+            <origin>Gregory E. Schwarz</origin>
+            <origin>Michael E. Wieczorek</origin>
+            <pubdate>2018</pubdate>
+            <title>Database of Modified Routing for NHDPlus Version 2.1 Flowlines: ENHDPlusV2_US</title>
+            <geoform>tabular data</geoform>
+            <pubinfo>
+              <pubplace>Reston, VA</pubplace>
+              <publish>U.S. Geological Survey</publish>
+            </pubinfo>
+            <onlink>https://www.sciencebase.gov/catalog/item/5718d2f8e4b0ef3b7cabdc17</onlink>
+          </citeinfo>
+        </srccite>
+        <typesrc>online</typesrc>
+        <srctime>
+          <timeinfo>
+            <sngdate>
+              <caldate>2018</caldate>
+            </sngdate>
+          </timeinfo>
+          <srccurr>publication date</srccurr>
+        </srctime>
+        <srccitea>nhdplusus_v2.sas</srccitea>
+        <srccontr>The source data provided routing information for the NHDPlusV2 flow line network.</srccontr>
+      </srcinfo>
+      <srcinfo>
+        <srccite>
+          <citeinfo>
+            <origin>U.S. Environmental Protection</origin>
+            <origin>U.S. Geological Survey</origin>
+            <pubdate>2012</pubdate>
+            <title>National Hydrography Dataset Plus Version 2.1</title>
+            <geoform>vector and raster digital data</geoform>
+            <pubinfo>
+              <pubplace>Reston, VA</pubplace>
+              <publish>U.S. Geological Survey</publish>
+            </pubinfo>
+            <onlink>http://www.horizon-systems.com/NHDPlus/NHDPlusV2_data.php</onlink>
+          </citeinfo>
+        </srccite>
+        <typesrc>online</typesrc>
+        <srctime>
+          <timeinfo>
+            <sngdate>
+              <caldate>2012</caldate>
+            </sngdate>
+          </timeinfo>
+          <srccurr>publication date</srccurr>
+        </srctime>
+        <srccitea>NHDPlus</srccitea>
+        <srccontr>The source data is the basic hydrologic framework used to process  these data.</srccontr>
+      </srcinfo>
+      <srcinfo>
+        <srccite>
+          <citeinfo>
+            <origin>U.S. Census Bureau</origin>
+            <origin>Geography Division</origin>
+            <pubdate>2014</pubdate>
+            <title>TIGER Line Shapefiles, 2014</title>
+            <geoform>vector and raster digital data</geoform>
+            <pubinfo>
+              <pubplace>Washington, DC</pubplace>
+              <publish>U.S. Census Bureau</publish>
+            </pubinfo>
+            <onlink>https://www2.census.gov/geo/pdfs/maps-data/data/tiger/tgrshp2014/TGRSHP2014_TechDoc.pdf</onlink>
+          </citeinfo>
+        </srccite>
+        <typesrc>online</typesrc>
+        <srctime>
+          <timeinfo>
+            <sngdate>
+              <caldate>2012</caldate>
+            </sngdate>
+          </timeinfo>
+          <srccurr>publication date</srccurr>
+        </srctime>
+        <srccitea>TIGER</srccitea>
+        <srccontr>The source data is used for road information.</srccontr>
+      </srcinfo>
+      <procstep>
+        <procdesc>This tabular data set represents select basin characteristics compiled for two spatial components of the NHDPlus version 2 data suite (NHDPlusv2) for the conterminous United States; 1) individual reach catchments and 2) reach catchments accumulated upstream through the river network. Both approaches use a modified routing database to navigate the NHDPlus reach network to aggregate (accumulate) the metrics derived from the reach catchment scale (Schwarz and Wieczorek, 2018). 
+These data sets can be linked to the NHDPlus version 2 data suite by the unique identifier COMID. The select variables in these data sets are parsed out into six different file themes and processed as follows: 
+
+BASIN_CHAR_XXX_CONUS.txt (where XXX is CAT flowline catchment value, ACC is divergence routed accumulated value, and TOT is total upstream routed accumulated value) contains information on stream slope (percent rise, also referred to as the percent slope), basin slope (percent rise, also referred to as the percent slope), basin area, minimum basin elevation, maximum basin elevation, mean basin elevation, and stream length. 
+Stream slope was taken directly from the NHDPlusV2 table, elevslope.dbf found under the NHDPlusAttributes folder.
+Basin slope in percent was calculated with the following steps:
+1) Downloaded elevation data in 30-meter format from http://www.horizon-systems.com/nhdplus/
+2) Used the SLOPE command to calculate slope in percent.
+3) Summarized the mean slope by catchment using the ZonalStatisticsAsTable function.
+Basin area was taken directly from the NHDPlucV2 catchment.shp file's item, AreaSqKM for each catchment.
+Mean reach catchment elevation was calculated with the following steps:
+1) Downloaded elevation data in 30-meter format from http://www.horizon-systems.com/nhdplus/
+2) Summarized the elevation by catchment using the ZONALMEAN, ZONALMIN, and ZONALMAX commands.
+Stream length was taken directly from the NHDPlusV2 NHDflowline.shp file's item, LENGTHKM for each flowline reach.
+
+FTYPE_PCT_CONUS.txt  contains information on each flowline reach type as a percentage to all flowline features per catchment. Each percentage of flowline reach's type is calculated against the sum of all flowline reach types (FTYPE length/sum of all FTYPE lengths) per catchment(s).
+
+RDX_CONUS.txt contains information on TIGER roads and stream crossings. Number of road crossings per reach was calculated by intersecting the road coverage with the NHDPlus stream coverage and summing the intersections.
+
+ROAD_DENS_XXX_CONUS (where XXX is CAT flowline catchment value, ACC is divergence routed accumulated value, and TOT is total upstream routed accumulated value) contains information on road density by road type. Each percentage of TIGER road types is calculated against the sum of all TIGER road types (ROAD type length/sum of all Road type lengths) per catchment(s).
+
+SINUOSITY_CONUS.txt contains information on flowline reach sinuosity at the flowline reach scale only. No accumulation was done for this variable. Sinuosity is calculated by taking the reach length (in meters) and dividing it by its straight line length (in meters). Straight line length is measured from the beginning node of a reach to the end node of the reach. 
+
+STREAM_DENSITY_CONUS.txt (where XXX is CAT flowline catchment value, ACC is divergence routed accumulated value, and TOT is total upstream routed accumulated value) contains information on the density of streams defined as stream length (meters) divided by catchment(s) area (square meters).</procdesc>
+        <procdate>20151221</procdate>
+      </procstep>
+    </lineage>
+  </dataqual>
+  <spdoinfo>
+    <indspref>Common Identifier Code for each catchment and reach segment (COMID)</indspref>
+  </spdoinfo>
+  <eainfo>
+    <detailed>
+      <enttyp>
+        <enttypl>BASIN_CHAR_CAT_CONUS.txt</enttypl>
+        <enttypd>comma separated tabular file of flowline catchment data.</enttypd>
+        <enttypds>U.S. Geological Survey</enttypds>
+      </enttyp>
+      <attr>
+        <attrlabl>COMID</attrlabl>
+        <attrdef>Unique ID to relate to each NHDPlusV2 catchment and flow line.</attrdef>
+        <attrdefs>http://nhd.usgs.gov/NHDDataDictionary_model2.0.pdf</attrdefs>
+        <attrdomv>
+          <udom>Unique numbers that are automatically generated.</udom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_BASIN_AREA</attrlabl>
+        <attrdef>NHDPlusV2 flowline catchment area in square kilometers. -9999 denotes a flowline which has no catchment.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>65014.44</rdommax>
+            <attrunit>square kilometers</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_BASIN_SLOPE</attrlabl>
+        <attrdef>NHDPlusV2 flowline catchment's average slope in percent. -9999 denotes a flowline which has no catchment.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>370.33</rdommax>
+            <attrunit>percent (percent rise, also referred to as the percent slope)</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_ELEV_MEAN</attrlabl>
+        <attrdef>NHDPlusV2 flowline catchment's mean elevation in meters. -9999 denotes a flowline which has no catchment.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>-84.5</rdommin>
+            <rdommax>4095.82</rdommax>
+            <attrunit>meters</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_ELEV_MIN</attrlabl>
+        <attrdef>NHDPlusV2 flowline catchment's minimum elevation in meters. -9999 denotes a flowline which has no catchment.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>-69.9</rdommin>
+            <rdommax>3993.38</rdommax>
+            <attrunit>meters</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_ELEV_MAX</attrlabl>
+        <attrdef>NHDPlusV2 flowline catchment's maximum elevation in meters. -9999 denotes a flowline which has no catchment.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>-84.5</rdommin>
+            <rdommax>4412.66</rdommax>
+            <attrunit>meters</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_STREAM_SLOPE</attrlabl>
+        <attrdef>NHDPlus version 2 flowline's average slope in percent. -9999 denotes a flow line with no change in elevation or unable to determine or flowline has no catchment.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>-9999</rdommin>
+            <rdommax>95.71</rdommax>
+            <attrunit>percent (percent rise, also referred to as the percent slope)</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_STREAM_LENGTH</attrlabl>
+        <attrdef>NHDPlus version 2 flowline's length in kilometers taken directly from NHDPlusv2's NHDflowline shapefile's item, LENGTHKM. -9999 denotes a catchment has no flowline.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>-9999</rdommin>
+            <rdommax>100.0</rdommax>
+            <attrunit>kilometers</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+    </detailed>
+    <detailed>
+      <enttyp>
+        <enttypl>BASIN_CHAR_ACC_CONUS.txt</enttypl>
+        <enttypd>comma separated tabular file of flowline catchment accumulated data based on divergence routing</enttypd>
+        <enttypds>U.S. Geological Survey</enttypds>
+      </enttyp>
+      <attr>
+        <attrlabl>COMID</attrlabl>
+        <attrdef>Unique ID to relate to each NHDPlusV2 catchment and flow line.</attrdef>
+        <attrdefs>http://nhd.usgs.gov/NHDDataDictionary_model2.0.pdf</attrdefs>
+        <attrdomv>
+          <udom>Unique numbers that are automatically generated.</udom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_BASIN_AREA</attrlabl>
+        <attrdef>Accumulated upstream area of NHDPlusV2 flowline catchments in square kilometers, based on divergence routing. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated or  flowline has no catchment.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>-9999</rdommin>
+            <rdommax>2878424</rdommax>
+            <attrunit>square kilometers</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_BASIN_SLOPE</attrlabl>
+        <attrdef>Average slope in percent of all upstream NHDPlusV2 flowline catchments, based on divergence routing.Accumulated upstream area of NHDPlusV2 flowline catchments in square kilometers, based on divergence routing. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated or flowline has no catchment.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>-9999</rdommin>
+            <rdommax>169.28</rdommax>
+            <attrunit>percent (percent rise, also referred to as the percent slope)</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_STREAM_SLOPE</attrlabl>
+        <attrdef>Average slope in percent NHDPlusV2 flowlines, based on divergence routing. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated or flowline has no catchment.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>-9999</rdommin>
+            <rdommax>35.2</rdommax>
+            <attrunit>percent (percent rise, also referred to as the percent slope)</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_ELEV_MEAN</attrlabl>
+        <attrdef>Mean elevation in meters of all upstream NHDPlusV2 flowline catchments, based on divergence routing.Accumulated upstream area of NHDPlusV2 flowline catchments in square kilometers, based on divergence routing. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated or flowline has no catchment.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>-9999</rdommin>
+            <rdommax>4095.82</rdommax>
+            <attrunit>meters</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_ELEV_MIN</attrlabl>
+        <attrdef>Minimum elevation in meters of all upstream NHDPlusV2 flowline catchments, based on divergence routing. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated or flowline has no catchment.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>-9999</rdommin>
+            <rdommax>3993.38</rdommax>
+            <attrunit>meters</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_ELEV_MAX</attrlabl>
+        <attrdef>Maximum elevation in meters of all upstream NHDPlusV2 flowline catchments, based on divergence routing. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated or flowline has no catchment.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>-9999</rdommin>
+            <rdommax>4412.66</rdommax>
+            <attrunit>meters</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_STREAM_LENGTH</attrlabl>
+        <attrdef>Total length of all upstream NHDPlusV2 flowlines in kilometers, based on divergence routing. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated or flowline has no catchment.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>-9999</rdommin>
+            <rdommax>2304791.44</rdommax>
+            <attrunit>kilometers</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+    </detailed>
+    <detailed>
+      <enttyp>
+        <enttypl>BASIN_CHAR_TOT_CONUS.txt</enttypl>
+        <enttypd>comma separated tabular file of flowline catchment accumulated data based on total upstream routing.</enttypd>
+        <enttypds>U.S. Geological Survey</enttypds>
+      </enttyp>
+      <attr>
+        <attrlabl>COMID</attrlabl>
+        <attrdef>Unique ID to relate to each NHDPlusV2 catchment and flow line.</attrdef>
+        <attrdefs>http://nhd.usgs.gov/NHDDataDictionary_model2.0.pdf</attrdefs>
+        <attrdomv>
+          <udom>Unique numbers that are automatically generated.</udom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_BASIN_AREA</attrlabl>
+        <attrdef>Accumulated upstream area of NHDPlusV2 flowline catchments in square kilometers, based on total upstream routing.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>-9999</rdommin>
+            <rdommax>3133386.89</rdommax>
+            <attrunit>square kilometers</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_BASIN_SLOPE</attrlabl>
+        <attrdef>Average slope in percent of all upstream NHDPlusV2 flowline catchments, based on total upstream routing. -9999 denotes flow line reach is disconnected from the network and has no catchment or not part of the network and cannot be accumulated. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated or flowline has no catchment.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>-9999</rdommin>
+            <rdommax>27.08</rdommax>
+            <attrunit>percent (percent rise, also referred to as the percent slope)</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_STREAM_SLOPE</attrlabl>
+        <attrdef>Average slope in percent NHDPlusV2 flowlines, based on total upstream routing. -9999 denotes a flow line with no change in elevation or unable to determine. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated or flowline has no catchment.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>-9999</rdommin>
+            <rdommax>27.08</rdommax>
+            <attrunit>percent (percent rise, also referred to as the percent slope)</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_ELEV_MEAN</attrlabl>
+        <attrdef>Mean elevation in meters of all upstream NHDPlusV2 flowline catchments, based on total upstream routing. -9999 denotes flow line reach is disconnected from the network and has no catchment or not part of the network and cannot be accumulated. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated or flowline has no catchment.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>-9999</rdommin>
+            <rdommax>4095.82</rdommax>
+            <attrunit>meters</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_ELEV_MIN</attrlabl>
+        <attrdef>Minimum elevation in meters of all upstream NHDPlusV2 flowline catchments, based on total upstream routing. -9999 denotes flow line reach is disconnected from the network and has no catchment or not part of the network and cannot be accumulated. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated or flowline has no catchment.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>-9999</rdommin>
+            <rdommax>3993.38</rdommax>
+            <attrunit>meters</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_ELEV_MAX</attrlabl>
+        <attrdef>Maximum elevation in meters of all upstream NHDPlusV2 flowline catchments, based on total upstream routing. -9999 denotes flow line reach is disconnected from the network and has no catchment or not part of the network and cannot be accumulated. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated or flowline has no catchment.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>-9999</rdommin>
+            <rdommax>4412.66</rdommax>
+            <attrunit>meters</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_STREAM_LENGTH</attrlabl>
+        <attrdef>Total length of all upstream NHDPlusV2 flowlines in kilometers, based on total upstream routing. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated or flowline has no catchment.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>-9999</rdommin>
+            <rdommax>2306998.53</rdommax>
+            <attrunit>kilometers</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+    </detailed>
+    <detailed>
+      <enttyp>
+        <enttypl>FTYPE_PCT_CONUS.txt</enttypl>
+        <enttypd>comma separated tabular file of flowline feature type data. There are less records for catchments than flowline reaches in NHDPlus and therefore less records for this variable.</enttypd>
+        <enttypds>U.S. Geological Survey</enttypds>
+      </enttyp>
+      <attr>
+        <attrlabl>COMID</attrlabl>
+        <attrdef>Unique ID to relate to each NHDPlusV2 catchment and flow line.</attrdef>
+        <attrdefs>http://nhd.usgs.gov/NHDDataDictionary_model2.0.pdf</attrdefs>
+        <attrdomv>
+          <udom>Unique numbers that are automatically generated.</udom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_STREAMRIVER</attrlabl>
+        <attrdef>Percentage of all flowline reach lengths per NHDPlusV2 catchment that is a stream or river.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>100</rdommax>
+            <attrunit>percentage</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_ARTIFICIAL</attrlabl>
+        <attrdef>Percentage of all flowline reach lengths per NHDPlusV2 catchment that is an artificial reach. An artificial path is a flowline feature that represents the assumed and generalized flow through a 2-dimensional feature, such as a lake or a wide double-banked stream. The artificial path will carry the GNIS name (Geographical Name Information System from NHDPlusV2 flowine shapefile's item GNIS of the major stream it represents and not the waterbody feature.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>100</rdommax>
+            <attrunit>percentage</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_CANALDITCH</attrlabl>
+        <attrdef>Percentage of all flowline reach lengths per NHDPlusV2 catchment that is a canal.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>100</rdommax>
+            <attrunit>percentage</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_CONNECTOR</attrlabl>
+        <attrdef>Percentage of all flowline reach lengths per NHDPlusV2 catchment that is a connector. The NHDFlowline feature type connector establishes a known, but non-specific (unseen) connection between two non-adjacent geometric network (flowline) segments that have flow. These features are usually associated with the results of a dye-trace injection that ties the two surface water features together through some groundwater connection.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>100</rdommax>
+            <attrunit>percentage</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_PIPELINE</attrlabl>
+        <attrdef>Percentage of all flowline reach lengths per NHDPlusV2 catchment that is a pipe line. Pipelines are specifically man-made structures of steel, concrete, or polymers that direct surface water flows from one area to another.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>100</rdommax>
+            <attrunit>percentage</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_STREAMRIVER</attrlabl>
+        <attrdef>Accumulated upstream percentage of all flowline reach lengths per NHDPlusV2 catchment that is a stream or river, based on divergence routing. -9999 denotes flow line reach is disconnected from the network and has no catchment or not part of the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>100</rdommax>
+            <attrunit>percentage</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_ARTIFICIAL</attrlabl>
+        <attrdef>Accumulated upstream percentage of all flowline reach lengths per NHDPlusV2 catchment that is an artificial reach, based on divergence routing. An artificial path is a flowline feature that represents the assumed and generalized flow through a 2-dimensional feature, such as a lake or a wide double-banked stream. The artificial path will carry the GNIS name of the major stream it represents and not the waterbody feature. -9999 denotes flow line reach is disconnected from the network and has no catchment or not part of the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>100</rdommax>
+            <attrunit>percent (percent rise, also referred to as the percent slope)</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_CANALDITCH</attrlabl>
+        <attrdef>Accumulated upstream percentage of all flowline reach lengths per NHDPlusV2 catchment that is a canal, based on divergence routing. -9999 denotes flow line reach is disconnected from the network and has no catchment or not part of the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>100</rdommax>
+            <attrunit>percentage</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_CONNECTOR</attrlabl>
+        <attrdef>Accumulated upstream percentage of all flowline reach lengths per NHDPlusV2 catchment that is a connector, based on divergence routing. The NHDFlowline feature type connector establishes a known, but non-specific (unseen) connection between two non-adjacent geometric network (flowline) segments that have flow. These features are usually associated with the results of a dye-trace injection that ties the two surface water features together through some groundwater connection. If there is a visible surface connection, example a culvert, manmade tunnel, or pipelines users should not use connector to define the interaction. -9999 denotes flow line reach is disconnected from the network and has no catchment or not part of the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>100</rdommax>
+            <attrunit>percentage</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_PIPELINE</attrlabl>
+        <attrdef>Accumulated upstream percentage of all flowline reach lengths per NHDPlusV2 catchment that is a pipe line, based on divergence routing. Pipelines are specifically man-made structures of steel, concrete, or polymers that direct surface water flows from one area to another. -9999 denotes flow line reach is disconnected from the network and has no catchment or not part of the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>100</rdommax>
+            <attrunit>percentage</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_STREAMRIVER</attrlabl>
+        <attrdef>Accumulated upstream percentage of all flowline reach lengths per NHDPlusV2 catchment that is a stream or river, based on total upstream routing. -9999 denotes flow line reach is disconnected from the network and has no catchment or not part of the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>100</rdommax>
+            <attrunit>percentage</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_ARTIFICIAL</attrlabl>
+        <attrdef>Accumulated upstream percentage of all flowline reach lengths per NHDPlusV2 catchment that is an artificial reach, based on total upstream routing. An artificial path is a flowline feature that represents the assumed and generalized flow through a 2-dimensional feature, such as a lake or a wide double-banked stream. The artificial path will carry the GNIS name of the major stream it represents and not the waterbody feature. -9999 denotes flow line reach is disconnected from the network and has no catchment or not part of the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>100</rdommax>
+            <attrunit>percent (percent rise, also referred to as the percent slope)</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_CANALDITCH</attrlabl>
+        <attrdef>Accumulated upstream percentage of all flowline reach lengths per NHDPlusV2 catchment that is a canal, based on total upstream routing. -9999 denotes flow line reach is disconnected from the network and has no catchment or not part of the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>100</rdommax>
+            <attrunit>percentage</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_CONNECTOR</attrlabl>
+        <attrdef>Accumulated upstream percentage of all flowline reach lengths per NHDPlusV2 catchment that is a connector, based on total upstream routing. The NHDFlowline feature type connector establishes a known, but non-specific (unseen) connection between two non-adjacent geometric network (flowline) segments that have flow. These features are usually associated with the results of a dye-trace injection that ties the two surface water features together through some groundwater connection. If there is a visible surface connection, example a culvert, manmade tunnel, or pipelines users should not use connector to define the interaction. -9999 denotes flow line reach is disconnected from the network and has no catchment or not part of the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>100</rdommax>
+            <attrunit>percentage</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_PIPELINE</attrlabl>
+        <attrdef>Accumulated upstream percentage of all flowline reach lengths per NHDPlusV2 catchment that is a pipe line, based on total upstream routing. Pipelines are specifically man-made structures of steel, concrete, or polymers that direct surface water flows from one area to another. -9999 denotes flow line reach is disconnected from the network and has no catchment or not part of the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>100</rdommax>
+            <attrunit>percentage</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+    </detailed>
+    <detailed>
+      <enttyp>
+        <enttypl>RDX_CONUS.txt</enttypl>
+        <enttypd>comma separated tabular file of road to stream crossings.</enttypd>
+        <enttypds>U.S. Geological Survey</enttypds>
+      </enttyp>
+      <attr>
+        <attrlabl>COMID</attrlabl>
+        <attrdef>Unique ID to relate to each NHDPlusV2 catchment and flow line.</attrdef>
+        <attrdefs>http://nhd.usgs.gov/NHDDataDictionary_model2.0.pdf</attrdefs>
+        <attrdomv>
+          <udom>Unique numbers that are automatically generated.</udom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_RDX</attrlabl>
+        <attrdef>Number of road to stream crossings per NHDPlusV2 catchment.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>127</rdommax>
+            <attrunit>count</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_RDX</attrlabl>
+        <attrdef>Accumulated upstream number of road to stream crossings for all upstream NHDPlusV2 catchments, based on divergence routing. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>1429118</rdommax>
+            <attrunit>count</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_RDX</attrlabl>
+        <attrdef>Accumulated upstream number of road to stream crossings for all upstream NHDPlusV2 catchments, based on total upstream routing. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>1429118</rdommax>
+            <attrunit>count</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+    </detailed>
+    <detailed>
+      <enttyp>
+        <enttypl>ROAD_DENS_CAT_CONUS.txt</enttypl>
+        <enttypd>comma separated tabular file of road densities.</enttypd>
+        <enttypds>U.S. Geological Survey</enttypds>
+      </enttyp>
+      <attr>
+        <attrlabl>COMID</attrlabl>
+        <attrdef>Unique ID to relate to each NHDPlusV2 catchment and flow line.</attrdef>
+        <attrdefs>http://nhd.usgs.gov/NHDDataDictionary_model2.0.pdf</attrdefs>
+        <attrdomv>
+          <udom>Unique numbers that are automatically generated.</udom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_S1100</attrlabl>
+        <attrdef>Density of primary roads per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. Primary roads are generally divided, limited-access highways within the interstate highway system or under state management, and are distinguished by the presence of interchanges. These highways are accessible by ramps and may include some toll highways.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>42.87</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_S1200</attrlabl>
+        <attrdef>Density of secondary roads per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. Secondary roads are main arteries, usually in the U.S. Highway, State Highway or kilometer of roads per square kilometer Highway system. These roads have one or more lanes of traffic in each direction, may or may not be divided, and usually have at-grade intersections with many other roads and driveways. They often have both a local name and a route number.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>66.89</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_S1400</attrlabl>
+        <attrdef>Density of local neighborhood roads, rural roads, and city streets per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. Generally a paved non-arterial street, road, or byway that usually has a single lane of traffic in each direction. Roads in this feature class may be privately or publicly maintained. Scenic park roads would be included in this feature class, as would (depending on the region of the kilometer of roads per square kilometer) some unpaved roads.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>62.52</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_S1500</attrlabl>
+        <attrdef>Density of vehicular trails (4WD) per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. An unpaved dirt trail where a four-wheel drive vehicle is required. These vehicular trails are found almost exclusively in very rural areas. Minor, unpaved roads usable by ordinary cars and trucks belong in the S1400 category.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>35</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_S1630</attrlabl>
+        <attrdef>Density of ramps per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. A road that allows controlled access from adjacent roads onto a limited access highway, often in the form of a cloverleaf interchange. These roads are not addressable.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>30.06</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_S1640</attrlabl>
+        <attrdef>Density of service drives usually along highways per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. A road, usually paralleling a limited access highway that provides access to structures along the highway. These roads can be named and may intersect with other roads.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>33.58</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_S1710</attrlabl>
+        <attrdef>Density of walkways or pedestrian trails per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. A path that is used for walking, being either too narrow for or legally restricted from vehicular traffic</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>35.52</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_S1720</attrlabl>
+        <attrdef>Density of stairways per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. A pedestrian passageway from one level to another by a series of steps.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>0.3</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_S1730</attrlabl>
+        <attrdef>Density of alleys per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. A service road that does not generally have associated addressed structures and is usually unnamed. It is located at the rear of buildings and properties and is used for deliveries.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>12.88</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_S1740</attrlabl>
+        <attrdef>Density of private roads for service vehicles (logging, oil fields, ranches, etc.) per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. A road within private property that is privately maintained for service, extractive, or other purposes. These roads are often unnamed.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>34.78</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_S1750</attrlabl>
+        <attrdef>Density of internal U.S. Census Bureau use per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>22.09</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_S1780</attrlabl>
+        <attrdef>Density of parking lot roads per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. The main travel route for vehicles through a paved parking area.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>16.93</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_S1820</attrlabl>
+        <attrdef>Density of bike paths or trails per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. A path that is used for manual or small, motorized bicycles, being either too narrow for or legally restricted from vehicular traffic.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>26.31</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_S1830</attrlabl>
+        <attrdef>Density of bridle paths per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. Primary roads are generally divided, limited-access highways within the interstate highway system or under state management, and are distinguished by the presence of interchanges. These highways are accessible by ramps and may include some toll highways.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>1.06</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_TOTAL_ROAD_DENS</attrlabl>
+        <attrdef>Density of all road types per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>66.89</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+    </detailed>
+    <detailed>
+      <enttyp>
+        <enttypl>ROAD_DENS_ACC_CONUS.txt</enttypl>
+        <enttypd>comma separated tabular file of road densities.</enttypd>
+        <enttypds>U.S. Geological Survey</enttypds>
+      </enttyp>
+      <attr>
+        <attrlabl>COMID</attrlabl>
+        <attrdef>Unique ID to relate to each NHDPlusV2 catchment and flow line.</attrdef>
+        <attrdefs>http://nhd.usgs.gov/NHDDataDictionary_model2.0.pdf</attrdefs>
+        <attrdomv>
+          <udom>Unique numbers that are automatically generated.</udom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_S1100</attrlabl>
+        <attrdef>Divergence routed accumulated density of primary roads per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. Primary roads are generally divided, limited-access highways within the interstate highway system or under state management, and are distinguished by the presence of interchanges. These highways are accessible by ramps and may include some toll highways. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>22.94</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_S1200</attrlabl>
+        <attrdef>Divergence routed accumulated density of secondary roads per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. Secondary roads are main arteries, usually in the U.S. Highway, State Highway or kilometer of roads per square kilometer Highway system. These roads have one or more lanes of traffic in each direction, may or may not be divided, and usually have at-grade intersections with many other roads and driveways. They often have both a local name and a route number. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>33.35</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_S1400</attrlabl>
+        <attrdef>Divergence routed accumulated density of local neighborhood roads, rural roads, and city streets per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. Generally a paved non-arterial street, road, or byway that usually has a single lane of traffic in each direction. Roads in this feature class may be privately or publicly maintained. Scenic park roads would be included in this feature class, as would (depending on the region of the kilometer of roads per square kilometer) some unpaved roads.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>43.18</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_S1500</attrlabl>
+        <attrdef>Divergence routed accumulated density of vehicular trails (4WD) per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. An unpaved dirt trail where a four-wheel drive vehicle is required. These vehicular trails are found almost exclusively in very rural areas. Minor, unpaved roads usable by ordinary cars and trucks belong in the S1400 category. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>13.63</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_S1630</attrlabl>
+        <attrdef>Divergence routed accumulated density of ramps per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. A road that allows controlled access from adjacent roads onto a limited access highway, often in the form of a cloverleaf interchange. These roads are not addressable.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>17.53</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_S1640</attrlabl>
+        <attrdef>Divergence routed accumulated density of service drives usually along highways per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. A road, usually paralleling a limited access highway that provides access to structures along the highway. These roads can be named and may intersect with other roads. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>17.06</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_S1710</attrlabl>
+        <attrdef>Divergence routed accumulated density of walkways or pedestrian trails per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. A path that is used for walking, being either too narrow for or legally restricted from vehicular traffic</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>11.9</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_S1720</attrlabl>
+        <attrdef>Divergence routed accumulated density of stairways per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. A pedestrian passageway from one level to another by a series of steps. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>0.22</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_S1730</attrlabl>
+        <attrdef>Divergence routed accumulated density of alleys per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. A service road that does not generally have associated addressed structures and is usually unnamed. It is located at the rear of buildings and properties and is used for deliveries.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>9.19</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_S1740</attrlabl>
+        <attrdef>Divergence routed accumulated density of private roads for service vehicles (logging, oil fields, ranches, etc.) per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. A road within private property that is privately maintained for service, extractive, or other purposes. These roads are often unnamed. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>21.78</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_S1750</attrlabl>
+        <attrdef>Divergence routed accumulated density of internal U.S. Census Bureau use per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>10.41</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_S1780</attrlabl>
+        <attrdef>Divergence routed accumulated density of parking lot roads per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. The main travel route for vehicles through a paved parking area. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>6.56</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_S1820</attrlabl>
+        <attrdef>Divergence routed accumulated density of bike paths or trails per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. A path that is used for manual or small, motorized bicycles, being either too narrow for or legally restricted from vehicular traffic. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>7.61</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_S1830</attrlabl>
+        <attrdef>Divergence routed accumulated density of bridle paths per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. Primary roads are generally divided, limited-access highways within the interstate highway system or under state management, and are distinguished by the presence of interchanges. These highways are accessible by ramps and may include some toll highways. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>1.06</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_TOTAL_ROAD_DENS</attrlabl>
+        <attrdef>Divergence routed accumulated density of all road types per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>43.18</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+    </detailed>
+    <detailed>
+      <enttyp>
+        <enttypl>ROAD_DENS_TOT_CONUS.txt</enttypl>
+        <enttypd>comma separated tabular file of road densities.</enttypd>
+        <enttypds>U.S. Geological Survey</enttypds>
+      </enttyp>
+      <attr>
+        <attrlabl>COMID</attrlabl>
+        <attrdef>Unique ID to relate to each NHDPlusV2 catchment and flow line.</attrdef>
+        <attrdefs>http://nhd.usgs.gov/NHDDataDictionary_model2.0.pdf</attrdefs>
+        <attrdomv>
+          <udom>Unique numbers that are automatically generated.</udom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_S1100</attrlabl>
+        <attrdef>Total upstream routed accumulated density of primary roads per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. Primary roads are generally divided, limited-access highways within the interstate highway system or under state management, and are distinguished by the presence of interchanges. These highways are accessible by ramps and may include some toll highways. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>16.23</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_S1200</attrlabl>
+        <attrdef>Total upstream routed accumulated density of secondary roads per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. Secondary roads are main arteries, usually in the U.S. Highway, State Highway or County Highway system. These roads have one or more lanes of traffic in each direction, may or may not be divided, and usually have at-grade intersections with many other roads and driveways. They often have both a local name and a route number. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>33.35</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_S1400</attrlabl>
+        <attrdef>Total upstream routed accumulated density of local neighborhood roads, rural roads, and city streets per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. Generally a paved non-arterial street, road, or byway that usually has a single lane of traffic in each direction. Roads in this feature class may be privately or publicly maintained. Scenic park roads would be included in this feature class, as would (depending on the region of the country) some unpaved roads.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>41.81</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_S1500</attrlabl>
+        <attrdef>Total upstream routed accumulated density of vehicular trails (4WD) per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. An unpaved dirt trail where a four-wheel drive vehicle is required. These vehicular trails are found almost exclusively in very rural areas. Minor, unpaved roads usable by ordinary cars and trucks belong in the S1400 category. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>13.37</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_S1630</attrlabl>
+        <attrdef>Total upstream routed accumulated density of ramps per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. A road that allows controlled access from adjacent roads onto a limited access highway, often in the form of a cloverleaf interchange. These roads are not addressable.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>17.53</rdommax>
+            <attrunit>count</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_S1640</attrlabl>
+        <attrdef>Total upstream routed accumulated density of service drives usually along highways per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. A road, usually paralleling a limited access highway that provides access to structures along the highway. These roads can be named and may intersect with other roads. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>17.06</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_S1710</attrlabl>
+        <attrdef>Total upstream routed accumulated density of walkways or pedestrian trails per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. A path that is used for walking, being either too narrow for or legally restricted from vehicular traffic</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>11.9</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_S1720</attrlabl>
+        <attrdef>Total upstream routed accumulated density of stairways per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. A pedestrian passageway from one level to another by a series of steps. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>0.22</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_S1730</attrlabl>
+        <attrdef>Total upstream routed accumulated density of alleys per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. A service road that does not generally have associated addressed structures and is usually unnamed. It is located at the rear of buildings and properties and is used for deliveries.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>9.19</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_S1740</attrlabl>
+        <attrdef>Total upstream routed accumulated density of private roads for service vehicles (logging, oil fields, ranches, etc.) per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. A road within private property that is privately maintained for service, extractive, or other purposes. These roads are often unnamed. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>20.17</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_S1750</attrlabl>
+        <attrdef>Total upstream routed accumulated density of internal U.S. Census Bureau use per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>10.41</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_S1780</attrlabl>
+        <attrdef>Total upstream routed accumulated density of parking lot roads per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. The main travel route for vehicles through a paved parking area. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>6.56</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_S1820</attrlabl>
+        <attrdef>Total upstream routed accumulated density of bike paths or trails per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. A path that is used for manual or small, motorized bicycles, being either too narrow for or legally restricted from vehicular traffic. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>7.61</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_S1830</attrlabl>
+        <attrdef>Total upstream routed accumulated density of bridle paths per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. Primary roads are generally divided, limited-access highways within the interstate highway system or under state management, and are distinguished by the presence of interchanges. These highways are accessible by ramps and may include some toll highways. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>1.06</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_TOTAL_ROAD_DENS</attrlabl>
+        <attrdef>Total upstream routed accumulated density of all road types per NHDPlusV2 catchment. Density is defined as the length of road divided by the catchment area. -9999 denotes flow line reach is disconnected from the network and cannot be accumulated.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>42.82</rdommax>
+            <attrunit>kilometer of roads per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+    </detailed>
+    <detailed>
+      <enttyp>
+        <enttypl>SINUOSITY_CONUS.txt</enttypl>
+        <enttypd>comma separated tabular file of flowline reach sinuosity. Sinuosity is only computed for those catchments that have flowline reaches. This file will contain less records than the other files and contain no negative COMIDs which denote sinks.</enttypd>
+        <enttypds>U.S. Geological Survey</enttypds>
+      </enttyp>
+      <attr>
+        <attrlabl>COMID</attrlabl>
+        <attrdef>Unique ID to relate to each NHDPlusV2 catchment and flow line.</attrdef>
+        <attrdefs>http://nhd.usgs.gov/NHDDataDictionary_model2.0.pdf</attrdefs>
+        <attrdomv>
+          <udom>Unique numbers that are automatically generated.</udom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>sinuosity</attrlabl>
+        <attrdef>Flowline reach's sinuosity calculated as the reach length (in meters) divided by its Euclidean distance (straight line in meters). Straight-line length is measured from the beginning node of a reach to the end node of the reach.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>3530.62</rdommax>
+            <attrunit>ratio</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+    </detailed>
+    <detailed>
+      <enttyp>
+        <enttypl>STREAM_DENSITY_CONUS.txt</enttypl>
+        <enttypd>comma separated tabular file of road to stream crossings.</enttypd>
+        <enttypds>U.S. Geological Survey</enttypds>
+      </enttyp>
+      <attr>
+        <attrlabl>COMID</attrlabl>
+        <attrdef>Unique ID to relate to each NHDPlusV2 catchment and flow line.</attrdef>
+        <attrdefs>http://nhd.usgs.gov/NHDDataDictionary_model2.0.pdf</attrdefs>
+        <attrdomv>
+          <udom>Unique numbers that are automatically generated.</udom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>CAT_STRM_DENS</attrlabl>
+        <attrdef>Flowline catchment stream density calculated as stream length (meters) divided by catchment(s) area (square kilometers).</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>0</rdommin>
+            <rdommax>1405.3</rdommax>
+            <attrunit>meters per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>ACC_STRM_DENS</attrlabl>
+        <attrdef>Flowline catchment stream density calculated as all upstream stream lengths (meters) divided by all upstream catchment areas (square kilometers). Upstream is defined by divergence routing.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>-9999</rdommin>
+            <rdommax>1405.3</rdommax>
+            <attrunit>meters per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>TOT_STRM_DENS</attrlabl>
+        <attrdef>Flowline catchment stream density calculated as all upstream stream lengths (meters) divided by all upstream catchment areas (square kilometers). Upstream is defined by total upstream routing.</attrdef>
+        <attrdefs>U.S. Geological Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>-9999</rdommin>
+            <rdommax>1405.3</rdommax>
+            <attrunit>meters per square kilometer</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+    </detailed>
+  </eainfo>
+  <distinfo>
+    <distrib>
+      <cntinfo>
+        <cntperp>
+          <cntper>Michael E. Wieczorek</cntper>
+          <cntorg>U.S. Geological Survey - ScienceBase</cntorg>
+        </cntperp>
+        <cntaddr>
+          <addrtype>mailing and physical</addrtype>
+          <address>Denver Federal Center, Building 810, Mail Stop 302</address>
+          <city>Denver</city>
+          <state>CO</state>
+          <postal>80225</postal>
+          <country>USA</country>
+        </cntaddr>
+        <cntvoice>443-498-5550</cntvoice>
+        <cntemail>mewieczo@usgs.gov</cntemail>
+      </cntinfo>
+    </distrib>
+    <distliab>Any use of trade, firm, or product names is for descriptive purposes only and does not imply endorsement by the U.S. Government.
+Although this database has been subjected to rigorous review and is substantially complete, the USGS reserves the right to revise the data pursuant to further analysis and review. Furthermore, it is released on condition that neither the USGS nor the U.S. Government may be held liable for any damages resulting from its authorized or unauthorized use.
+Although these data have been processed successfully on a computer system at the U.S. Geological Survey, no warranty expressed or implied is made regarding the display or utility of the data on any other system, or for general or scientific purposes, nor shall the act of distribution constitute any such warranty.  The U.S. Geological Survey shall not be held liable for improper or incorrect use of the data described and/or contained herein.</distliab>
+  </distinfo>
+  <metainfo>
+    <metd>20230802</metd>
+    <metc>
+      <cntinfo>
+        <cntperp>
+          <cntper>Michael Wieczorek</cntper>
+          <cntorg>US Geological Survey</cntorg>
+        </cntperp>
+        <cntaddr>
+          <addrtype>mailing and physical</addrtype>
+          <address>5522 Research Park Drive</address>
+          <city>Baltimore</city>
+          <state>Maryland</state>
+          <postal>21228</postal>
+          <country>USA</country>
+        </cntaddr>
+        <cntvoice>443-498-5550</cntvoice>
+        <cntemail>mewieczo@usgs.gov</cntemail>
+      </cntinfo>
+    </metc>
+    <metstdn>FGDC Content Standard for Digital Geospatial Metadata</metstdn>
+    <metstdv>FGDC-STD-001-1998</metstdv>
+  </metainfo>
+</metadata>

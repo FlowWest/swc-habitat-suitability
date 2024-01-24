@@ -381,7 +381,7 @@ flowline_attributes <-
          grain_size_suspended_mm = 10 * grain_size_suspended_ndim * rho_cgs * nu_cgs^2 /
                          ((rho_s_cgs - rho_cgs) * g_cgs)^(1/3))
 
-flowline_attributes |> saveRDS("flowline_attributes.Rds")
+flowline_attributes |> saveRDS("../data/flowline_attributes.Rds")
   
 #} else {
 #  
@@ -866,14 +866,13 @@ ggplot() +
 proj_crs <- st_crs(flowlines)
   
 vb1 <- 
-flowlines |> filter(huc_8 %in% selected_huc_8) |> head(2) |> #filter(comid==8062593) |>
+flowlines |> filter(huc_8 %in% selected_huc_8) |> #filter(comid==8062593) |>
   mutate(flowline = st_set_crs(st_zm(geometry),proj_crs)) |>
   st_drop_geometry() |>
   mutate(valley_bottom_geoms = st_as_sfc(bind_rows(map(comid, possibly(function(x) valley_bottom_by_comid(x), otherwise=NA))), crs=proj_crs)) |>
-  mutate(vb_width_simple = map(valley_bottom_geoms, possibly(function(x) valley_width(x), otherwise=NA))) |> 
-  unnest(vb_width_simple) |>
-  mutate(vb_width_transect = map2(valley_bottom_geoms, flowline, function(x, y) valley_width_via_transects(x, y, 1000))) |> 
-  unnest(vb_width_transect) |>
+  mutate(vb_width_simple = map_dbl(valley_bottom_geoms, possibly(function(x) valley_width(x), otherwise=NA))) |> 
+  mutate(vb_width_transect = map2_dbl(valley_bottom_geoms, flowline, function(x, y) valley_width_via_transects(x, y, 1000)),
+         vb_width_transect = if_else(!is.nan(vb_width_transect),vb_width_transect,NA)) |> 
   select(comid, flowline, valley_bottom_geoms, vb_width_simple, vb_width_transect) 
 
 ggplot() +  geom_sf(data=vb1$valley_bottom_geoms) + geom_sf(data=vb1$flowline)

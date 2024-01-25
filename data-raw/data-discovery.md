@@ -1,7 +1,7 @@
 SWC Habitat Model Data Discovery
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-01-24
+2024-01-25
 
 - [Case study geographic scope](#case-study-geographic-scope)
 - [Data Import](#data-import)
@@ -11,7 +11,7 @@ SWC Habitat Model Data Discovery
   - [Import Flowline Geometry](#import-flowline-geometry)
 - [Maps of attribute data
   (exploratory)](#maps-of-attribute-data-exploratory)
-  - [Import catchments](#import-catchments)
+- [Import catchments](#import-catchments)
 
 ## Case study geographic scope
 
@@ -368,6 +368,12 @@ catchment_ndvi
 ### Combine all attributes
 
 ``` r
+# mTPI calculated in terrain-attributes.Rmd
+# just for Yuba for now, but should be generated for everywhere later
+attr_mtpi <- readRDS("../data/attr_mtpi.Rds")
+```
+
+``` r
 # gravitational constant, cm/s2
 g_cgs <- 981
 # grain density and water density, g/cm3
@@ -406,7 +412,8 @@ flowline_attributes <-
                          ((rho_s_cgs - rho_cgs) * g_cgs * nu_cgs),
          grain_size_suspended_ndim = sqrt(5832 * settling_velocity_ndim),
          grain_size_suspended_mm = 10 * grain_size_suspended_ndim * rho_cgs * nu_cgs^2 /
-                         ((rho_s_cgs - rho_cgs) * g_cgs)^(1/3))
+                         ((rho_s_cgs - rho_cgs) * g_cgs)^(1/3)) |>
+  left_join(attr_mtpi)
 
 flowline_attributes |> saveRDS("../data/flowline_attributes.Rds")
   
@@ -706,7 +713,21 @@ flowlines |>
 
 ![](data-discovery_files/figure-gfm/plot-grain_size_mobilized_mm-1.png)<!-- -->
 
-### Import catchments
+``` r
+# plot showing mTPI (meters) (negative = more confined)
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = mtpi30_min)) +
+  geom_sf(aes(color = mtpi30_min), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(direction=1)
+```
+
+![](data-discovery_files/figure-gfm/plot-mtpi-1.png)<!-- -->
+
+## Import catchments
 
 ``` r
 # local catchment associated with each flowline reach (COMID)
@@ -736,3 +757,7 @@ ggplot() + geom_sf(data = catchments, color="orange") +
 ```
 
 ![](data-discovery_files/figure-gfm/catchments-1.png)<!-- -->
+
+``` r
+catchments |> saveRDS("../data/catchments.Rds")
+```

@@ -1,9 +1,11 @@
 Terrain-Derived Predictors
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-01-24
+2024-01-25
 
 - [Load DEM](#load-dem)
+  - [Data Source: 10m NHDPlusHR DEM](#data-source-10m-nhdplushr-dem)
+  - [Data Source: 30m NHDPlusV2 DEM](#data-source-30m-nhdplusv2-dem)
 - [Channel Confinement via mTPI](#channel-confinement-via-mtpi)
   - [Valley Bottom Width via Slope Cutoff
     Method](#valley-bottom-width-via-slope-cutoff-method)
@@ -11,7 +13,7 @@ Terrain-Derived Predictors
 
 ## Load DEM
 
-Data Source: 10m NHDPlusHR DEM
+### Data Source: 10m NHDPlusHR DEM
 
 This input has already been clipped to the AOI, converted from cm to m,
 and crs redefined
@@ -39,6 +41,20 @@ ggplot() + geom_stars(data=slope) + coord_fixed()
 ```
 
 ![](terrain-attributes_files/figure-gfm/calc-slope-1.png)<!-- -->
+
+### Data Source: 30m NHDPlusV2 DEM
+
+``` r
+dem30 <- stars::read_stars("nhdplusv2/NEDSnapshot18b/elev_cm")
+
+dem_crs <- st_crs(dem30)
+
+dem30 |> mutate(elev_m = elev_cm/100) |> select(elev_m) |> plot()
+```
+
+    ## downsample set to 48
+
+![](terrain-attributes_files/figure-gfm/import-dem30-1.png)<!-- -->
 
 ## Channel Confinement via mTPI
 
@@ -85,6 +101,72 @@ flowlines |>
     ## Joining with `by = join_by(comid)`
 
 ![](terrain-attributes_files/figure-gfm/intersect-mtpi-1.png)<!-- -->
+
+Version converting to function and using the basin-wide 30m DEM
+
+``` r
+calc_mtpi <- function(dem, cell_size, neighborhoods=c(90,270,810,2430)) {
+  is_stars <- "stars" %in% class(dem)
+  if(is_stars){
+    dem <- terra::rast(dem)
+  }
+  tpis <- terra::rast(lapply(neighborhoods, function(x) dem - terra::focal(dem, w=x/cell_size, fun="mean", na.rm=TRUE, na.policy="omit")))
+  mtpi <- terra::app(tpis, mean)
+  if(is_stars) {
+    mtpi <- st_as_stars(mtpi)
+  }
+  return(mtpi)
+}
+
+# dem30_mtpi <- dem30 |> 
+#   mutate(elev_m = elev_cm/100) |>
+#   mutate(mtpi = calc_mtpi(elev_cm, 30, c(90,270,810)))
+# # this proxy uses lazy operations that are only evaluated when called
+# 
+# flow_buffered <- terra::vect(flowlines) |> terra::buffer(width=50)
+# mtpi30_aoi <- dem30_mtpi |> st_crop(aoi) |> select(mtpi) |> terra::rast()
+# vec_mtpi30_min <- terra::zonal(mtpi_aoi, flow_buffered, "min") |> rename(mtpi30_min = mean)
+# 
+# #dem30_mtpi |> saveRDS("../data/dem30.Rds")
+# 
+# dem30_mtpi |> st_crop(aoi) |> select(mtpi) |> plot()
+
+
+# alternate order not relying entirely on proxies
+cell_size <- 30
+
+flow_buffered <- terra::vect(flowlines) |> terra::buffer(width=cell_size/2)
+
+aoi_buffer <- aoi |> st_buffer(2430/2) # big enough to not create edge effects
+dem30_rast <- dem30 |> st_crop(aoi_buffer) |> terra::rast()
+```
+
+``` r
+# uncomment to implement for entire watershed
+# dem30_rast <- dem30 |> terra::rast()
+
+dem30_rast_mtpi <- (calc_mtpi(dem30_rast, cell_size, c(90,270,810, 2430)) / 100) |> terra::app(round) |> terra::as.int() # convert to m, 16-bit integer
+
+vec_mtpi30_min <- terra::zonal(dem30_rast_mtpi, flow_buffered, "min") |> rename(mtpi30_min = lyr.1)
+
+dem30_rast_mtpi |> st_as_stars() |> plot()
+```
+
+    ## downsample set to 4
+
+![](terrain-attributes_files/figure-gfm/calc-mtpi-30m-1.png)<!-- -->
+
+``` r
+flowlines_mtpi <- flowlines |> select(comid) |> mutate(vec_mtpi30_min) 
+
+flowlines_mtpi |> st_zm() |> select(mtpi30_min) |> plot()
+```
+
+![](terrain-attributes_files/figure-gfm/calc-mtpi-30m-2.png)<!-- -->
+
+``` r
+flowlines_mtpi |> st_drop_geometry() |> saveRDS("../data/attr_mtpi.Rds")
+```
 
 ### Valley Bottom Width via Slope Cutoff Method
 
@@ -213,7 +295,7 @@ vb1 <- flowlines |>
 ggplot() +  geom_sf(data=vb1$valley_bottom_geoms) + geom_sf(data=vb1$flowline)
 ```
 
-![](terrain-attributes_files/figure-gfm/vbw-batch-1.png)<!-- -->
+![](terrain-attributes_files/figure-gfm/vbw-batch-plot-1.png)<!-- -->
 
 ### Valley Bottom Width via VBET
 

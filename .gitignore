@@ -50,3 +50,6 @@ rsconnect/
 
 # temp folder in data-raw for unzipped files
 data-raw/temp/
+
+# temp folder in data-raw for big files that shouldn't be tracked
+data-raw/git_ignore/

@@ -184,7 +184,7 @@ valley_bottom <- function(catchment, flowline, dem) {
     st_filter(st_zm(flowline)) #|> st_as_sfc()
 }
 
-valley_bottom_by_comid <- function(x) {
+valley_bottom_by_comid <- function(x, dem) {
   c <- catchments |> filter(comid==x)
   f <- flowlines |> filter(comid==x)
   valley_bottom(c, f, dem)
@@ -274,26 +274,93 @@ ggplot() +
 ![](terrain-attributes_files/figure-gfm/vbw-example1-2.png)<!-- -->
 
 ``` r
-vb1 <- flowlines |> 
-  filter(huc_8 %in% selected_huc_8) |> 
-  filter(comid==8062593) |> # comment out the filter to process all
+dem30_m <- st_as_stars(dem30_rast/100) 
+
+flowline <- flowlines |> filter(comid==8062593) |> st_zm()
+catchment <- catchments |> filter(comid==8062593) |> st_transform(st_crs(flowline))
+ggplot() + 
+  #geom_stars(data=catchment_confinement(catchment, flowline, dem)) + 
+  geom_sf(data=valley_bottom(catchment, flowline, dem30_m)) +
+  geom_sf(data=st_zm(flowline))
+```
+
+![](terrain-attributes_files/figure-gfm/vbw-example2-1.png)<!-- -->
+
+``` r
+valley_width_naive(valley_bottom(catchment, flowline, dem30_m))
+```
+
+    ## [1] 1069.055
+
+``` r
+valley_polygon <- valley_bottom(catchment, flowline, dem30_m)
+valley_width_via_transects(valley_bottom(catchment, flowline, dem30_m), flowline, max_width=1000)
+```
+
+    ## 178.2545 [m]
+
+``` r
+ggplot() + 
+  geom_sf(data=catchment) +
+  geom_sf(data=valley_polygon, fill="lightblue") +
+  geom_sf(data=flowline, color="blue") +
+  geom_sf(data=perpendicular_transects(flowline, length=1000) |> st_intersection(valley_polygon), color="red") 
+```
+
+![](terrain-attributes_files/figure-gfm/vbw-example2-2.png)<!-- -->
+
+``` r
+#vb1 <- flowlines |> 
+#  filter(huc_8 %in% selected_huc_8) |> 
+#  #filter(comid==8062593) |> # comment out the filter to process all
+#  mutate(flowline = st_set_crs(st_zm(geometry),project_crs)) |>
+#  st_drop_geometry() |>
+#  mutate(valley_bottom_geoms = st_as_sfc(bind_rows(map(comid, possibly(function(x) valley_bottom_by_comid(x, dem), otherwise=NA))), crs=project_crs)) |>
+#  mutate(vb_width_simple = map_dbl(valley_bottom_geoms, possibly(function(x) valley_width_naive(x), otherwise=NA))) |> 
+#  mutate(vb_width_transect = map2_dbl(valley_bottom_geoms, flowline, function(x, y) valley_width_via_transects(x, y, 1000)),
+#         vb_width_transect = if_else(!is.nan(vb_width_transect),vb_width_transect,NA)) |> 
+#  select(comid, flowline, valley_bottom_geoms, vb_width_simple, vb_width_transect) 
+#
+#vb1 |> saveRDS("../data/attr_vb1.Rds")
+```
+
+``` r
+vb1 <- 
+  flowlines |> 
+  filter(huc_8 %in% selected_huc_8) |> #|> head(10) |>
+  #filter(comid==8062593 | (comid>8062580 & comid<8062599)) |> # comment out the filter to process all
   mutate(flowline = st_set_crs(st_zm(geometry),project_crs)) |>
   st_drop_geometry() |>
-  mutate(valley_bottom_geoms = st_as_sfc(bind_rows(map(comid, possibly(function(x) valley_bottom_by_comid(x), otherwise=NA))), crs=project_crs)) |>
+  #mutate(valley_bottom_geoms = st_as_sfc(bind_rows(map(comid, possibly(function(x) valley_bottom_by_comid(x, dem30_m), otherwise=NA))), crs=project_crs))# |>
+  mutate(valley_bottom_geoms = st_sfc(map(comid, possibly(function(x) st_union(valley_bottom_by_comid(x, dem30_m)$geometry)[[1]], otherwise=st_polygon())), crs=dem_crs)) |>
   mutate(vb_width_simple = map_dbl(valley_bottom_geoms, possibly(function(x) valley_width_naive(x), otherwise=NA))) |> 
   mutate(vb_width_transect = map2_dbl(valley_bottom_geoms, flowline, function(x, y) valley_width_via_transects(x, y, 1000)),
-         vb_width_transect = if_else(!is.nan(vb_width_transect),vb_width_transect,NA)) |> 
+         vb_width_transect = if_else(!is.nan(vb_width_transect),vb_width_transect,0)) |> 
   select(comid, flowline, valley_bottom_geoms, vb_width_simple, vb_width_transect) 
 ```
 
-    ## Warning: There was 1 warning in `mutate()`.
+    ## Warning: There were 2264 warnings in `mutate()`.
+    ## The first warning was:
     ## ℹ In argument: `vb_width_simple = map_dbl(...)`.
     ## Caused by warning:
     ## ! [perim] unknown CRS. Results can be wrong
+    ## ℹ Run `dplyr::last_dplyr_warnings()` to see the 2263 remaining warnings.
 
 ``` r
-ggplot() +  geom_sf(data=vb1$valley_bottom_geoms) + geom_sf(data=vb1$flowline)
+#vb1 |> saveRDS("../data/attr_vb1.Rds")
 ```
+
+``` r
+vb1 |> 
+  filter(!is.na(vb_width_transect)) |> 
+  st_set_geometry("flowline") |> 
+  ggplot() +
+  geom_sf(data=vb1$valley_bottom_geoms, color=NA, fill="orange") + 
+  geom_sf(aes(color=vb_width_transect)) + 
+  scale_color_viridis_c(direction=-1, trans="log10")
+```
+
+    ## Warning: Transformation introduced infinite values in discrete y-axis
 
 ![](terrain-attributes_files/figure-gfm/vbw-batch-plot-1.png)<!-- -->
 

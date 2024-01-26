@@ -11,7 +11,6 @@ SWC Habitat Model Data Discovery
   - [Import Flowline Geometry](#import-flowline-geometry)
 - [Maps of attribute data
   (exploratory)](#maps-of-attribute-data-exploratory)
-- [Import catchments](#import-catchments)
 
 ## Case study geographic scope
 
@@ -367,10 +366,15 @@ catchment_ndvi
 
 ### Combine all attributes
 
+Import attributes calculated in `terrain-attributes.Rmd` just for Yuba
+for now, but should be generated for everywhere later
+
 ``` r
-# mTPI calculated in terrain-attributes.Rmd
-# just for Yuba for now, but should be generated for everywhere later
+# mTPI 
 attr_mtpi <- readRDS("../data/attr_mtpi.Rds")
+
+# Valley bottom width
+attr_vb1 <- readRDS("../data/attr_vb1.Rds") 
 ```
 
 ``` r
@@ -384,6 +388,7 @@ nu_cgs <- 0.01
 
 flowline_attributes <-
   flowline_table |>
+  #filter(huc_8 %in% selected_huc_8) |>
   left_join(flowline_vaattr) |> 
   left_join(flowline_slopes) |>
   mutate(stream_power = slope * da_area_sq_km) |>
@@ -413,7 +418,10 @@ flowline_attributes <-
          grain_size_suspended_ndim = sqrt(5832 * settling_velocity_ndim),
          grain_size_suspended_mm = 10 * grain_size_suspended_ndim * rho_cgs * nu_cgs^2 /
                          ((rho_s_cgs - rho_cgs) * g_cgs)^(1/3)) |>
-  left_join(attr_mtpi)
+  left_join(attr_mtpi) |>
+  left_join(attr_vb1 |> select(comid, vb_width_transect)) |>
+  mutate(vb_width_transect = coalesce(pmax(vb_width_transect, bf_width_m), vb_width_transect),
+         vb_bf_w_ratio = vb_width_transect / bf_width_m)
 
 flowline_attributes |> saveRDS("../data/flowline_attributes.Rds")
   
@@ -727,7 +735,36 @@ flowlines |>
 
 ![](data-discovery_files/figure-gfm/plot-mtpi-1.png)<!-- -->
 
-## Import catchments
+``` r
+# plot showing valley bottom width calculated from terrain
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = vb_width_transect)) +
+  geom_sf(aes(color = vb_width_transect), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(direction=1, trans="log10")
+```
+
+    ## Warning: Transformation introduced infinite values in discrete y-axis
+
+![](data-discovery_files/figure-gfm/plot-vb_width_transect-1.png)<!-- -->
+
+``` r
+# plot showing valley bottom width - channel width ratio
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = vb_bf_w_ratio)) +
+  geom_sf(aes(color = vb_bf_w_ratio), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(direction=-1, trans="log10")
+```
+
+![](data-discovery_files/figure-gfm/plot-vb_bf_w_ratio-1.png)<!-- -->
+\## Import catchments
 
 ``` r
 # local catchment associated with each flowline reach (COMID)

@@ -11,22 +11,25 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(sf)
 library(stars)
+library(googledrive)
 
 theme_set(theme_minimal())
 
-#project_crs <- "EPSG:3310" # NAD83 California Teale Albers
-#project_crs <- "EPSG:5070" # NAD83 CONUS Albers
-project_crs <- "ESRI:102039" # NAD83 CONUS Albers USGS Version
+# This needs to be run if the device is not yet authenticated
+#google_auth()
 ```
 
 ```{r watersheds}
+project_crs <- "ESRI:102039" # NAD83 CONUS Albers USGS Version
+
 selected_huc_8 <- c("18020107", "18020125")
 
-# HUC-12 watersheds and higher level heirarchies
-watersheds <- st_read("/vsizip/nhdplusv2/WBD_Subwatershed.zip") |> 
-  janitor::clean_names() |>
+flowlines <- readRDS("../data/flowline_geometries.Rds") |>
+  left_join(readRDS("../data/flowline_attributes.Rds")) |>
   filter(huc_8 %in% selected_huc_8) |>
   st_transform(project_crs)
+
+catchments <- readRDS("../data/catchments.Rds")
 ```
 
 ##### Aquatic Biodiveristy Summary
@@ -39,20 +42,33 @@ https://data-cdfw.opendata.arcgis.com/datasets/CDFW::aquatic-species-list-ace-ds
 ```{r aqu-spec, message=FALSE, warning=FALSE}
 
 # CDFW:
-aquatic_sf <- read_sf('aquatic_species_list/Aquatic_Species_List_-_ACE_[ds2740].shp') |> 
+drive_download(file = 'Aquatic_Species_List_-_ACE_[ds2740].geojson', path = "git_ignore/Aquatic_Species_List_-_ACE_[ds2740].geojson", overwrite = TRUE)
+
+aquatic_sf <- read_sf('git_ignore/Aquatic_Species_List_-_ACE_[ds2740].geojson') |> 
   janitor::clean_names() |> 
-  rename(huc_12 = huc12) |> glimpse()
+  rename(huc_12_aq = huc12) |> 
+  select(huc_12_aq, bio_aq_rank_sw) |> 
+  mutate(huc_8 = str_sub(huc_12_aq, start=1, end=8)) |> 
+  glimpse()
 
-aquatic_sf|>
-  st_transform(project_crs) |> 
-  #st_intersection(watersheds) |>
-  filter(huc_12 %in% unique(watersheds$huc_12)) |>
-  ggplot() +
-  geom_sf(aes(fill = bio_aq_rank_s))
+aquatic_selected <- aquatic_sf |> filter(huc_8 %in% selected_huc_8) |> st_transform(project_crs)
+flowlines_selected <- flowlines |> filter(huc_8 %in% selected_huc_8) |> st_zm()
 
-aquatic <- aquatic_sf |> st_drop_geometry()
+crosswalk <- 
+  flowlines_selected |> 
+  st_point_on_surface() |> 
+  st_join(aquatic_selected, join=st_within) |>
+  select(comid, huc_12_aq) |>
+  st_drop_geometry()
 
+flowlines_joined <-
+  flowlines_selected |>
+  left_join(crosswalk) |>
+  left_join(st_drop_geometry(aquatic_selected))
 
+ggplot() + 
+  geom_sf(data=aquatic_selected, aes(fill=bio_aq_rank_sw)) 
+  
 ```
 ##### California Freshwater Species Database V2
 
@@ -67,20 +83,38 @@ https://www.scienceforconservation.org/products/california-freshwater-species-da
 richness <- read_csv('ca_freshwater_species/RichnessSummary.csv') |> 
   janitor::clean_names() |> 
   rename(huc_12 = au_id) |> 
-  mutate(huc_12 = as.character(huc_12)) 
+  mutate(huc_12_aq = as.character(huc_12)) |> glimpse()
 
 analysis_units <- read_sf('ca_freshwater_species/AnalysisUnits.shp') |> 
   janitor::clean_names() |> 
-  rename(huc_12 = au_id) |> 
+  rename(huc_12_aq = au_id) |> 
+  mutate(huc_12_aq = as.character(huc_12_aq)) |> 
   left_join(richness) |> 
+  mutate(huc_8 = str_sub(huc_12_aq, start=1, end=8)) |> 
+  select(-huc_12) |> 
   glimpse()
 
-analysis_units |> 
-  st_transform(project_crs) |> 
-  filter(huc_12 %in% unique(watersheds$huc_12)) |>
-  #st_intersection(watersheds) |> 
-  ggplot() +
-  geom_sf(aes(fill = species))
-  
+analysis_units_selected <- analysis_units |> filter(huc_8 %in% selected_huc_8) |> st_transform(project_crs)
+flowlines_selected <- flowlines |> filter(huc_8 %in% selected_huc_8) |> st_zm()
+
+crosswalk_tnc <- 
+  flowlines_selected |> 
+  st_point_on_surface() |> 
+  st_join(analysis_units_selected, join=st_within) |>
+  select(comid, huc_12_aq) |>
+  st_drop_geometry()
+
+flowlines_joined_tnc <-
+  flowlines_selected |>
+  left_join(crosswalk_tnc) |>
+  left_join(st_drop_geometry(analysis_units_selected))
+
+ggplot() + 
+  geom_sf(data=analysis_units_selected, aes(fill=species)) 
+
+```
+### Save files 
+```{r}
+
 
 ```

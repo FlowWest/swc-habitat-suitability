@@ -1,0 +1,86 @@
+---
+title: "Aquatic Species"
+author: "Maddee Rubenson (FlowWest)"
+date: "`r Sys.Date()`"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(sf)
+library(stars)
+
+theme_set(theme_minimal())
+
+#project_crs <- "EPSG:3310" # NAD83 California Teale Albers
+#project_crs <- "EPSG:5070" # NAD83 CONUS Albers
+project_crs <- "ESRI:102039" # NAD83 CONUS Albers USGS Version
+```
+
+```{r watersheds}
+selected_huc_8 <- c("18020107", "18020125")
+
+# HUC-12 watersheds and higher level heirarchies
+watersheds <- st_read("/vsizip/nhdplusv2/WBD_Subwatershed.zip") |> 
+  janitor::clean_names() |>
+  filter(huc_8 %in% selected_huc_8) |>
+  st_transform(project_crs)
+```
+
+##### Aquatic Biodiveristy Summary
+
+The aquatic biodiversity summary combines the three measures of biodiversity developed for ACE into a single metric: 1) aquatic native species richness, which represents overall native diversity of all species in the state, both common and rare; 2) aquatic rare species richness, which represents diversity of rare species; and, 3) aquatic irreplaceability, which is a weighted measure of rarity and endemism.
+
+https://data-cdfw.opendata.arcgis.com/datasets/CDFW::aquatic-species-list-ace-ds2740-2/explore
+
+
+```{r aqu-spec, message=FALSE, warning=FALSE}
+
+# CDFW:
+aquatic_sf <- read_sf('aquatic_species_list/Aquatic_Species_List_-_ACE_[ds2740].shp') |> 
+  janitor::clean_names() |> 
+  rename(huc_12 = huc12) |> glimpse()
+
+aquatic_sf|>
+  st_transform(project_crs) |> 
+  #st_intersection(watersheds) |>
+  filter(huc_12 %in% unique(watersheds$huc_12)) |>
+  ggplot() +
+  geom_sf(aes(fill = bio_aq_rank_s))
+
+aquatic <- aquatic_sf |> st_drop_geometry()
+
+
+```
+##### California Freshwater Species Database V2
+
+The California Freshwater Species Database is the first comprehensive geospatial database of California’s freshwater species compiled and standardized into single format from nearly 500 sources. It provides a single source for geodata covering the plants and animals that rely on California’s freshwater resources to survive.
+
+https://www.scienceforconservation.org/products/california-freshwater-species-database
+
+
+```{r}
+## TNC: 
+
+richness <- read_csv('ca_freshwater_species/RichnessSummary.csv') |> 
+  janitor::clean_names() |> 
+  rename(huc_12 = au_id) |> 
+  mutate(huc_12 = as.character(huc_12)) 
+
+analysis_units <- read_sf('ca_freshwater_species/AnalysisUnits.shp') |> 
+  janitor::clean_names() |> 
+  rename(huc_12 = au_id) |> 
+  left_join(richness) |> 
+  glimpse()
+
+analysis_units |> 
+  st_transform(project_crs) |> 
+  filter(huc_12 %in% unique(watersheds$huc_12)) |>
+  #st_intersection(watersheds) |> 
+  ggplot() +
+  geom_sf(aes(fill = species))
+  
+
+```

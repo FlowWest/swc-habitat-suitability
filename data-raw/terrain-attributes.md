@@ -1,7 +1,7 @@
 Terrain-Derived Predictors
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-01-25
+2024-01-29
 
 - [Load DEM](#load-dem)
   - [Data Source: 10m NHDPlusHR DEM](#data-source-10m-nhdplushr-dem)
@@ -10,6 +10,23 @@ Terrain-Derived Predictors
   - [Valley Bottom Width via Slope Cutoff
     Method](#valley-bottom-width-via-slope-cutoff-method)
   - [Valley Bottom Width via VBET](#valley-bottom-width-via-vbet)
+
+``` r
+selected_huc_8 <- c("18020107", "18020125")
+
+flowlines <- readRDS("../data/flowline_geometries.Rds") |>
+  left_join(readRDS("../data/flowline_attributes.Rds")) |>
+  filter(huc_8 %in% selected_huc_8) |>
+  st_transform(project_crs)
+```
+
+    ## Joining with `by = join_by(comid)`
+
+``` r
+catchments <- readRDS("../data/catchments.Rds")
+# for now, this is just the catchments exported for the selected hucs
+aoi <- catchments |> summarize() |> st_union()
+```
 
 ## Load DEM
 
@@ -45,7 +62,51 @@ ggplot() + geom_stars(data=slope) + coord_fixed()
 ### Data Source: 30m NHDPlusV2 DEM
 
 ``` r
-dem30 <- stars::read_stars("nhdplusv2/NEDSnapshot18b/elev_cm")
+dir.create("temp/NEDSnapshot18b", recursive = TRUE)
+```
+
+    ## Warning in dir.create("temp/NEDSnapshot18b", recursive = TRUE):
+    ## 'temp\NEDSnapshot18b' already exists
+
+``` r
+drive_file_by_id("1mBCDj4vd8DvJecm99FF6_kX5YKfg78hr") |>
+  archive::archive_extract(dir = "temp/NEDSnapshot18b")
+```
+
+    ## ! Using an auto-discovered, cached token.
+
+    ##   To suppress this message, modify your code or options to clearly consent to
+    ##   the use of a cached token.
+
+    ##   See gargle's "Non-interactive auth" vignette for more details:
+
+    ##   <https://gargle.r-lib.org/articles/non-interactive-auth.html>
+
+    ## ℹ The googledrive package is using a cached token for 'slewis@flowwest.com'.
+
+    ## ⠙ 8 extracted | 281 MB (137 MB/s) | 2s⠹ 8 extracted | 287 MB (128 MB/s) | 2.2s⠸
+    ## 8 extracted | 302 MB (124 MB/s) | 2.4s⠼ 8 extracted | 314 MB (118 MB/s) | 2.7s⠴
+    ## 8 extracted | 323 MB (113 MB/s) | 2.9s⠦ 10 extracted | 332 MB (109 MB/s) |
+    ## 3.1s⠧ 10 extracted | 342 MB (105 MB/s) | 3.3s⠇ 10 extracted | 356 MB (103 MB/s)
+    ## | 3.5s⠏ 10 extracted | 369 MB (101 MB/s) | 3.7s⠋ 10 extracted | 384 MB ( 99
+    ## MB/s) | 3.9s⠙ 10 extracted | 393 MB ( 96 MB/s) | 4.1s⠹ 10 extracted | 408 MB (
+    ## 95 MB/s) | 4.3s⠸ 10 extracted | 417 MB ( 93 MB/s) | 4.5s⠼ 10 extracted | 427 MB
+    ## ( 91 MB/s) | 4.7s⠴ 10 extracted | 437 MB ( 89 MB/s) | 4.9s⠦ 10 extracted | 445
+    ## MB ( 87 MB/s) | 5.1s⠧ 10 extracted | 454 MB ( 86 MB/s) | 5.3s⠇ 10 extracted |
+    ## 462 MB ( 84 MB/s) | 5.5s⠏ 10 extracted | 470 MB ( 82 MB/s) | 5.7s⠋ 10 extracted
+    ## | 482 MB ( 81 MB/s) | 5.9s⠙ 10 extracted | 494 MB ( 81 MB/s) | 6.1s⠹ 10
+    ## extracted | 501 MB ( 79 MB/s) | 6.3s⠸ 10 extracted | 508 MB ( 78 MB/s) | 6.5s⠼
+    ## 10 extracted | 512 MB ( 76 MB/s) | 6.7s⠴ 10 extracted | 518 MB ( 75 MB/s) |
+    ## 6.9s⠦ 10 extracted | 520 MB ( 73 MB/s) | 7.1s⠧ 10 extracted | 523 MB ( 71 MB/s)
+    ## | 7.3s⠇ 10 extracted | 532 MB ( 71 MB/s) | 7.5s⠏ 10 extracted | 537 MB ( 69
+    ## MB/s) | 7.7s⠋ 10 extracted | 546 MB ( 69 MB/s) | 7.9s⠙ 10 extracted | 558 MB (
+    ## 68 MB/s) | 8.1s⠹ 10 extracted | 566 MB ( 68 MB/s) | 8.4s⠸ 10 extracted | 574 MB
+    ## ( 67 MB/s) | 8.6s⠼ 10 extracted | 583 MB ( 67 MB/s) | 8.8s⠴ 10 extracted | 594
+    ## MB ( 66 MB/s) | 9s ⠦ 10 extracted | 604 MB ( 66 MB/s) | 9.2s⠧ 10 extracted |
+    ## 616 MB ( 66 MB/s) | 9.4s⠇ 10 extracted | 624 MB ( 65 MB/s) | 9.6s
+
+``` r
+dem30 <- stars::read_stars("temp/NEDSnapshot18b/elev_cm")
 
 dem_crs <- st_crs(dem30)
 

@@ -30,6 +30,22 @@ theme_set(theme_minimal())
 #project_crs <- "EPSG:5070" # NAD83 CONUS Albers
 project_crs <- "ESRI:102039" # NAD83 CONUS Albers USGS Version
 
+library(googledrive)
+drive_file_by_id <- function(id=character(), dir="temp", vsizip=FALSE) {
+  d <- googledrive::as_dribble(googledrive::as_id(id))
+  p <- file.path(dir, d$name)
+  if(!file.exists(p)){
+    googledrive::drive_download(file = d, path = p)
+  }
+  if(vsizip){
+    return(file.path("/vsizip",p))
+  } else {
+    return(p)
+  }
+}
+```
+
+```{r imports}
 selected_huc_8 <- c("18020107", "18020125")
 
 flowlines <- readRDS("../data/flowline_geometries.Rds") |>
@@ -70,7 +86,11 @@ ggplot() + geom_stars(data=slope) + coord_fixed()
 ### Data Source: 30m NHDPlusV2 DEM
 
 ```{r import-dem30}
-dem30 <- stars::read_stars("nhdplusv2/NEDSnapshot18b/elev_cm")
+dir.create("temp/NEDSnapshot18b", recursive = TRUE)
+drive_file_by_id("1mBCDj4vd8DvJecm99FF6_kX5YKfg78hr") |>
+  archive::archive_extract(dir = "temp/NEDSnapshot18b")
+
+dem30 <- stars::read_stars("temp/NEDSnapshot18b/elev_cm")
 
 dem_crs <- st_crs(dem30)
 
@@ -327,7 +347,4 @@ flowlines_for_vbet <- flowlines |>
   st_crop(st_bbox(dem)) |>
   smoothr::densify(5)
 ```
-
-
-
 

@@ -1,7 +1,7 @@
 SWC Habitat Model Data Discovery
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-01-25
+2024-01-29
 
 - [Case study geographic scope](#case-study-geographic-scope)
 - [Data Import](#data-import)
@@ -22,15 +22,28 @@ SWC Habitat Model Data Discovery
 ``` r
 selected_huc_8 <- c("18020107", "18020125")
 
-# HUC-12 watersheds and higher level heirarchies
-watersheds <- st_read("/vsizip/nhdplusv2/WBD_Subwatershed.zip") |> 
+# HUC-12 watersheds and higher level hierarchies
+watersheds <-
+  drive_file_by_id("1ncwKAUNoJUNkPLEy6NzrUKCYqVG681p-", vsizip=T) |>
+  st_read() |> 
   janitor::clean_names() |>
   filter(huc_8 %in% selected_huc_8) |>
   st_transform(project_crs)
 ```
 
+    ## ! Using an auto-discovered, cached token.
+
+    ##   To suppress this message, modify your code or options to clearly consent to
+    ##   the use of a cached token.
+
+    ##   See gargle's "Non-interactive auth" vignette for more details:
+
+    ##   <https://gargle.r-lib.org/articles/non-interactive-auth.html>
+
+    ## ℹ The googledrive package is using a cached token for 'slewis@flowwest.com'.
+
     ## Reading layer `WBD_Subwatershed' from data source 
-    ##   `/vsizip/nhdplusv2/WBD_Subwatershed.zip' using driver `ESRI Shapefile'
+    ##   `/vsizip/temp/WBD_Subwatershed.zip' using driver `ESRI Shapefile'
     ## Simple feature collection with 4564 features and 21 fields
     ## Geometry type: POLYGON
     ## Dimension:     XY
@@ -67,7 +80,8 @@ EPA](https://www.epa.gov/waterdata/nhdplus-california-data-vector-processing-uni
 
 ``` r
 fcodes <- 
-  foreign::read.dbf("nhdplusv2/NHDFCode.dbf") |> 
+  drive_file_by_id("1DwrieA-jrEsY8hnuEMFAqeAjsu7sB1D7") |>
+  foreign::read.dbf() |> 
   as_tibble() |> 
   janitor::clean_names() |>
   rename(fcode = f_code, fcode_desc = descriptio) |>
@@ -76,7 +90,8 @@ fcodes <-
   select(fcode, ftype_desc)
 
 # flowline shapefile attribute table
-archive::archive_extract("nhdplusv2/Hydrography/NHDFlowline.zip", dir="temp", file="NHDFlowline.dbf")
+drive_file_by_id("1UiG8AeMr6mFOw7Jx--LyNRzez7GsDhzK") |>
+  archive::archive_extract(dir = "temp", file = "NHDFlowline.dbf")
 flowline_table <- 
   foreign::read.dbf("temp/NHDFlowline.dbf") |> 
   janitor::clean_names() |>
@@ -98,7 +113,8 @@ flowline_table <-
 #   rename(comid = com_id)
 
 # flow routing attributes as described in https://www.usgs.gov/national-hydrography/value-added-attributes-vaas
-archive::archive_extract("nhdplusv2/NHDPlusAttributes.zip", dir="temp")
+drive_file_by_id("1sf3hKUmo6ZvJwnfyR9m4PoeY9V2n4hou") |>
+  archive::archive_extract(dir = "temp")
 
 flowline_vaattr <- 
   foreign::read.dbf("temp/PlusFlowlineVAA.dbf") |> 
@@ -123,33 +139,27 @@ flowline_slopes <-
          elev_min = MINELEVSMO/100, # convert from cm to m
          elev_max = MAXELEVSMO/100) |>
   select(comid = COMID, slope, elev_min, elev_max)
-
-# # identifiers of each flowline (COMID)
-# flowline_comid_huc_crosswalk <- 
-#   foreign::read.dbf("nhdplusv2/NHDReachCode_Comid.dbf") |> 
-#   as_tibble() |> 
-#   janitor::clean_names() |>
-#   mutate(huc_8 = substr(reachcode, 1, 8),
-#          huc_10 = substr(reachcode, 1, 10),
-#          huc_12 = substr(reachcode, 1, 12)) |>
-#   filter(huc_8 %in% selected_huc_8) |>
-#   select(comid, huc_8, huc_10, huc_12)
 ```
 
 #### NHDPlusV2 extension tables
 
 ``` r
-archive::archive_extract("nhdplusv2/VogelExtension.zip", dir="temp")
-
 # vogel method mean annual flow and mean annual velocity
+drive_file_by_id("1SiiIXQmr4mFD4Q-EVp1-7K-wAAnMoJ94") |> 
+  archive::archive_extract(dir = "temp")
+
 vogel_flow <- 
   foreign::read.dbf("temp/vogelflow.dbf") |> 
   as_tibble() |>
   janitor::clean_names() |>
   mutate(across(maflowv:mavelv, function(x) if_else(x>=0, x, NA))) |>
   select(comid, vogel_q_ma_cfs = maflowv, vogel_v_ma_fps = mavelv)
+```
 
-archive::archive_extract("nhdplusv2/VPUAttributeExtension.zip", dir="temp")
+``` r
+# VPU attribute extension
+drive_file_by_id("1loos7RIjkQR8RHQjvcKOL9M-TmyE1SFV") |> 
+  archive::archive_extract(dir = "temp")
 
   # incremental precipitation at reach
 loc_precip_annual <- 
@@ -186,9 +196,13 @@ precip_monthly <-
   map(import_precip) |> 
   reduce(bind_rows) |>
   pivot_wider(names_from = month, names_prefix = "da_ppt_mean_mm_", values_from = da_ppt_mean_mm)
+```
 
+``` r
 # EROM method mean annual and monthly flows
-archive::archive_extract("nhdplusv2/EROMExtension.zip", dir="temp")
+drive_file_by_id("1VUYyewjm-0nxUxyBWA7-Ch8H1fni55N0") |> 
+  archive::archive_extract(dir = "temp")
+
 erom_annual <- 
   foreign::read.dbf("temp/EROM_MA0001.DBF") |>
   as_tibble() |>
@@ -231,14 +245,16 @@ August 2023): U.S. Geological Survey data release,
 ``` r
 # sinuosity from https://www.sciencebase.gov/catalog/item/57976a0ce4b021cadec97890
 flowline_sinuosity <- 
-  archive::archive_read("nhdplusv2_suppl/Sinuousity_CONUS.zip", file="Sinuousity_CONUS.TXT") |>
+  drive_file_by_id("1efPQ3C9I6UtJdgQUMSS-dbauEO5a6ykP") |>
+  archive::archive_read(file = "Sinuousity_CONUS.TXT") |>
   read_delim() |>
   janitor::clean_names() |>
   filter(comid %in% flowline_table$comid)
 
 # catchment characteristics from https://www.sciencebase.gov/catalog/item/57976a0ce4b021cadec97890
 da_suppl_attrs <- # using divergence routed version
-  archive::archive_read("nhdplusv2_suppl/BASIN_CHAR_CONUS.zip", file="BASIN_CHAR_ACC_CONUS.TXT") |>
+  drive_file_by_id("1yKSz9tznTYMei9axkmFJXo2McwcePErG") |>
+  archive::archive_read(file = "BASIN_CHAR_ACC_CONUS.TXT") |>
   read_delim() |>
   filter(COMID %in% flowline_table$comid) |>
   select(comid = COMID, 
@@ -257,22 +273,24 @@ da_suppl_attrs <- # using divergence routed version
 
 ``` r
 # supplemental data from Streamcat
+streamcat_zip <- drive_file_by_id("1da-_LuHsKlNnkeAeG1uiJjzs8gZEcbiU")
+
 bfi <- 
-  archive::archive_read("nhdplusv2_suppl/streamcat_region18_selected.zip", file="BFI_Region18.csv") |>
+  archive::archive_read(streamcat_zip, file = "BFI_Region18.csv") |>
   read_csv() |>
   select(comid = COMID,
          loc_bfi = BFICat,
-         da_bfi= BFIWs
+         da_bfi = BFIWs
          )
 twi <- 
-  archive::archive_read("nhdplusv2_suppl/streamcat_region18_selected.zip", file="WetIndx_Region18.csv") |>
+  archive::archive_read(streamcat_zip, file = "WetIndx_Region18.csv") |>
   read_csv() |>
   select(comid = COMID,
          loc_twi = WetIndexCat,
-         da_twi= WetIndexWs
+         da_twi = WetIndexWs
          )
 soiltext <- 
-  archive::archive_read("nhdplusv2_suppl/streamcat_region18_selected.zip", file="STATSGO_Set1_Region18.csv") |>
+  archive::archive_read(streamcat_zip, file = "STATSGO_Set1_Region18.csv") |>
   read_csv() |>
   select(comid = COMID,
          loc_pct_clay = ClayCat,
@@ -281,7 +299,7 @@ soiltext <-
          da_pct_sand = SandWs,
          )
 soilprop <- 
-  archive::archive_read("nhdplusv2_suppl/streamcat_region18_selected.zip", file="STATSGO_Set2_Region18.csv") |>
+  archive::archive_read(streamcat_zip, file = "STATSGO_Set2_Region18.csv") |>
   read_csv() |>
   select(comid = COMID,
          loc_permeability = PermCat,
@@ -290,28 +308,28 @@ soilprop <-
          da_bedrock_depth = RckDepWs,
          )
 kffact <- 
-  archive::archive_read("nhdplusv2_suppl/streamcat_region18_selected.zip", file="Kffact_Region18.csv") |>
+  archive::archive_read(streamcat_zip, file = "Kffact_Region18.csv") |>
   read_csv() |>
   select(comid = COMID,
          loc_k_erodibility = KffactCat,
          da_k_erodibility = KffactWs,
          )
 precip <- 
-  archive::archive_read("nhdplusv2_suppl/streamcat_region18_selected.zip", file="PRISM_1981_2010_Region18.csv") |>
+  archive::archive_read(streamcat_zip, file = "PRISM_1981_2010_Region18.csv") |>
   read_csv() |>
   select(comid = COMID,
          loc_precip = Precip8110Cat,
          da_precip = Precip8110Ws,
          )
 runoff <- 
-  archive::archive_read("nhdplusv2_suppl/streamcat_region18_selected.zip", file="Runoff_Region18.csv") |>
+  archive::archive_read(streamcat_zip, file = "Runoff_Region18.csv") |>
   read_csv() |>
   select(comid = COMID,
          loc_runoff = RunoffCat,
          da_runoff = RunoffWs,
          )
 bankfull <- 
-  archive::archive_read("nhdplusv2_suppl/streamcat_region18_selected.zip", file="Bankfull_Region18.csv") |>
+  archive::archive_read(streamcat_zip, file = "Bankfull_Region18.csv") |>
   read_csv() |>
   select(comid = COMID,
          bf_width_m = BANKFULL_WIDTH_M,
@@ -335,7 +353,9 @@ documentation:
 download: <https://gaftp.epa.gov/Exposure/CurveNumberNDVI/>
 
 ``` r
-catchment_ndvi_ts <- archive::archive_read("nhdplusv2_suppl/18-California-NDVI.zip", file="18-California-NDVI.csv") |>
+catchment_ndvi_ts <- 
+  drive_file_by_id("1WZqTooktkCIPfpA2rzxNTlqvO2YP6cef") |>
+  archive::archive_read(file = "18-California-NDVI.csv") |>
   read_csv() |>
   filter(ComID %in% flowline_table$comid) |>
   pivot_longer(cols=-ComID, names_to="modis_date", names_transform = lubridate::ymd, values_to="ndvi") |>
@@ -432,13 +452,13 @@ flowline_attributes |> saveRDS("../data/flowline_attributes.Rds")
 
 ``` r
 flowlines_sf <- 
-  st_read("/vsizip/nhdplusv2/Hydrography/NHDFlowline.zip") |>
+  drive_file_by_id("1UiG8AeMr6mFOw7Jx--LyNRzez7GsDhzK", vsizip=T) |>
+  st_read() |>
   janitor::clean_names() |>
   select(comid) 
 ```
 
-    ## Reading layer `NHDFlowline' from data source 
-    ##   `/vsizip/nhdplusv2/Hydrography/NHDFlowline.zip' using driver `ESRI Shapefile'
+    ## Reading layer `NHDFlowline' from data source `/vsizip/temp/NHDFlowline.zip' using driver `ESRI Shapefile'
     ## Simple feature collection with 178868 features and 14 fields
     ## Geometry type: LINESTRING
     ## Dimension:     XYZM
@@ -462,7 +482,8 @@ flowlines <-
 
 ``` r
 waterbodies <- 
-  st_read("/vsizip/nhdplusv2/Hydrography/NHDWaterbody.zip") |>
+  drive_file_by_id("1ZGS3M97xTPb87k-78sGPJx_c1QkSq3AZ", vsizip=T) |>
+  st_read() |>
   janitor::clean_names() |>
   mutate(huc_8 = substr(reachcode, 1, 8),
          huc_10 = substr(reachcode, 1, 10),
@@ -472,8 +493,7 @@ waterbodies <-
   st_transform(project_crs)
 ```
 
-    ## Reading layer `NHDWaterbody' from data source 
-    ##   `/vsizip/nhdplusv2/Hydrography/NHDWaterbody.zip' using driver `ESRI Shapefile'
+    ## Reading layer `NHDWaterbody' from data source `/vsizip/temp/NHDWaterbody.zip' using driver `ESRI Shapefile'
     ## Simple feature collection with 9651 features and 12 fields
     ## Geometry type: POLYGON
     ## Dimension:     XYZ
@@ -769,7 +789,8 @@ flowlines |>
 ``` r
 # local catchment associated with each flowline reach (COMID)
 catchments <- 
-  st_read("/vsizip/nhdplusv2/Catchment.zip") |> 
+  drive_file_by_id("16RXk1BplBr8v-IO0QodGEnjBlvOGhbM3", vsizip=T) |>
+  st_read() |> 
   janitor::clean_names() |>
   mutate(comid = as.numeric(featureid)) |>
   inner_join(flowlines |> st_drop_geometry() |> select(comid)) |>
@@ -777,7 +798,15 @@ catchments <-
   st_transform(project_crs) 
 ```
 
-    ## Reading layer `Catchment' from data source `/vsizip/nhdplusv2/Catchment.zip' using driver `ESRI Shapefile'
+    ## File downloaded:
+
+    ## • 'Catchment.zip' <id: 16RXk1BplBr8v-IO0QodGEnjBlvOGhbM3>
+
+    ## Saved locally as:
+
+    ## • 'temp/Catchment.zip'
+
+    ## Reading layer `Catchment' from data source `/vsizip/temp/Catchment.zip' using driver `ESRI Shapefile'
     ## Simple feature collection with 140835 features and 4 fields
     ## Geometry type: MULTIPOLYGON
     ## Dimension:     XY

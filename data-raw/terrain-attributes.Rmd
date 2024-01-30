@@ -90,7 +90,7 @@ dir.create("temp/NEDSnapshot18b", recursive = TRUE)
 drive_file_by_id("1mBCDj4vd8DvJecm99FF6_kX5YKfg78hr") |>
   archive::archive_extract(dir = "temp/NEDSnapshot18b")
 
-dem30 <- stars::read_stars("temp/NEDShapshot18b/elev_cm")
+dem30 <- stars::read_stars("temp/NEDSnapshot18b/elev_cm")
 
 dem_crs <- st_crs(dem30)
 

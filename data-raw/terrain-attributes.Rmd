@@ -366,23 +366,25 @@ image server? https://gis.apfo.usda.gov/arcgis/rest/services/NAIP/USDA_CONUS_PRI
 #naip_seam <- read_sf("/vsizip/temp/ca_naip20seam.zip") |>
 #  st_filter(st_transform(aoi, "EPSG:4326"))
 
-naip_qq |>
-  select(file_name) |>
-  mutate(jp2_name = paste0("https://prd-tnm.s3.amazonaws.com/StagedProducts/NAIP/ca_2016/",
-                           str_sub(apfoname, start=1, end=5),
-                           str_sub()))
+#naip_qq |>
+#  select(file_name) |>
+#  mutate(jp2_name = paste0("https://prd-tnm.s3.amazonaws.com/StagedProducts/NAIP/ca_2016/",
+#                           str_sub(apfoname, start=1, end=5),
+#                           str_sub()))
 
 #naip_2020_qq_footprints <- read_sf("/vsizip/naip/ca_naip20qq.zip") |>
 #  st_filter(st_transform(aoi, "EPSG:4326")) |>
 #  janitor::clean_names()
 
-# this page is backed up to 
+# Get spatial index and filenames of NAIP tiles
+
 naip_2016_qq_filenames_raw <- 
   RCurl::getURL("https://thor-f5.er.usgs.gov/ngtoc/metadata/waf/orthoimagery/naip/ca_2016/", ftp.use.epsv = FALSE, dirlistonly = TRUE) |>
   rvest::read_html() |> 
   xml2::xml_find_all("//a") |> 
   xml2::xml_attrs("href") |>
   as.vector()
+
 naip_2016_qq_filenames <- tibble(xml_filename = naip_2016_qq_filenames_raw[-(1:5)]) |> 
   unnest(xml_filename) |>
   mutate(xml_filename = str_replace(xml_filename, ".xml", "")) |>
@@ -390,10 +392,13 @@ naip_2016_qq_filenames <- tibble(xml_filename = naip_2016_qq_filenames_raw[-(1:5
   mutate(naip_entit = str_to_upper(paste(prefix, apfoname, quadrant, zone, suffix, src_img_date, sep="_")),
          filename = paste(paste(prefix, apfoname, quadrant, zone, suffix, src_img_date, ver_date, sep="_"), "jp2", sep="."),
          download = paste("https://prd-tnm.s3.amazonaws.com/StagedProducts/NAIP/ca_2016", str_sub(apfoname, start=1, end=5), filename, sep="/"))
+
 naip_2016_qq_footprints <- 
   read_sf("/vsizip/naip/ca_naip_2016.zip") |>
   janitor::clean_names() |>
   left_join(naip_2016_qq_filenames)
+
+# function to download NAIP tiles
 
 options(timeout = max(3600, getOption("timeout")))
 
@@ -410,19 +415,118 @@ download_naip_tiles <- function(aoi, dir="temp/naip/tiles") {
     possibly(function(x) {
       f = paste0(dir, "/", x , ".jp2")
       if(!file.exists(f)) download.file(url = tile_urls[x], destfile = f, mode = "wb", quiet=T)
-      cat(x, "\n")
+      cat(x, " ")
       return(f)}, otherwise=NA))
   return(local_files)
 }
+
+# download NAIP tiles and mosaic
 
 naip_tiles <- download_naip_tiles(aoi)
 
 naip_mosaic <- terra::rast(naip_tiles)
 
+# calculate NDVI
+
 naip_ndvi <- (naip_mosaic[4] - naip_mosaic[1]) / (naip_mosaic[4] + naip_mosaic[1])
+
+# threshold to identify vegetated pixels
+
+ndvi_threshold <- 0.25
+
+naip_ndvi_cls <- 
+  naip_ndvi |> terra::classify(matrix(c(-1,ndvi_threshold,0,
+                                         ndvi_threshold,1,1), ncol=3, byrow=T), 
+                               include.lowest=T)
+
+# summarize percent vegetated pixels within channels and valleys
+
+buffers <-
+  flowlines |> 
+  mutate(channel_buffer = st_buffer(geometry, width = bf_width_m/2)) |>
+  st_drop_geometry() |>
+  select(comid, channel_buffer) |>
+  left_join(vb1 |> select(comid, valley_bottom_geoms)) |>
+  mutate(valley_bottom = map2(channel_buffer, valley_bottom_geoms, 
+                              function(cb, vb) st_union(cb, vb, by_feature = FALSE) |> st_sfc(crs=st_crs(flowlines))))
+
+ndvi_pct <-
+  buffers |>
+  st_drop_geometry() |>
+  select(comid) |>
+  mutate(pct_ndvi_cb = terra::zonal(naip_ndvi_cls, buffers$channel_buffer, "mean") |> rename(pct_ndvi_cb = mean),
+         pct_ndvi_vb = terra::zonal(naip_ndvi_cls, buffers$valley_bottom, "mean") |> rename(pct_ndvi_vb = mean))
+
+ndvi_pct |> saveRDS("./data/attr_ndvi_pct.Rds")
 
 ```
 
+## Channel Widths
+
+Potential approach:
+
+* Collect some random sample channel widths at transects
+* Fit a curve of measured channel width versus NHD+ bankfull width
+* Transform the NHD+ bankfull width into a "better" estimate using the model
+
+Stratified sample of flowlines with perpendicular transects for manually sampling channel width:
+
+```{r}
+# # approach with one point every 100 ft
+# sample_points_100ft <- 
+#   flowlines |> 
+#   filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+#   st_line_sample(density = 1 / 100) 
+# 
+# # approach with just the midpoint of each segment
+# sample_points_midpt <- 
+#   flowlines |>
+#   filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+#   #st_line_sample(sample = c(0, 0.25, 0.5, 0.75, 1))
+#   st_line_sample(sample = c(0.5))
+# 
+# sample_points_midpt |> ggplot() + geom_sf()
+
+# approach with perpendicular transects on every segment
+
+transects <- 
+  flowlines |> 
+  filter(huc_8 %in% selected_huc_8) |> 
+  st_zm() |>
+  mutate(geometry = map(geometry, function(x) st_union(perpendicular_transects(x, length=1000))[[1]]) |> st_sfc(crs=st_crs(flowlines))) 
+
+#transects <- 
+#  flowlines |> 
+#  filter(huc_8 %in% selected_huc_8) |> #head(100) |>
+#  st_zm() |>
+#  mutate(transect = map(geometry, function(x) perpendicular_transects(x, length=1000))) |>
+#  unnest(transect) |>
+#  st_drop_geometry() 
+# transects |> 
+#   st_set_geometry(transects$transect)
+
+set.seed(255) 
+
+sample_transects <- 
+  transects |> 
+  filter(ftype_desc=="Stream/River" & !is.na(stream_order)) |>
+  group_by(stream_order) |>
+  slice_sample(n = 20) |>
+  st_as_sf(crs=st_crs(flowlines)) |>
+  st_cast("MULTILINESTRING")
+
+sample_transects |>
+  ggplot() + 
+  geom_sf(data=st_zm(filter(flowlines, ftype_desc=="Stream/River" & !is.na(stream_order))),
+          aes(color=as_factor(stream_order)), alpha=0.3) + 
+  geom_sf(aes(color = as_factor(stream_order))) + 
+  theme(legend.position = "top")
+
+sample_transects |> 
+  select(comid, gnis_name, stream_order) |>
+  st_write("out/sample_transects.shp", append=FALSE)
+
+```
 
 
 

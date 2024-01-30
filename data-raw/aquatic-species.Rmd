@@ -42,7 +42,10 @@ https://data-cdfw.opendata.arcgis.com/datasets/CDFW::aquatic-species-list-ace-ds
 ```{r aqu-spec, message=FALSE, warning=FALSE}
 
 # CDFW:
-drive_download(file = 'Aquatic_Species_List_-_ACE_[ds2740].geojson', path = "git_ignore/Aquatic_Species_List_-_ACE_[ds2740].geojson", overwrite = TRUE)
+if(!file.exists('git_ignore/Aquatic_Species_List_-_ACE_[ds2740].geojson')) {
+  drive_download(file = 'Aquatic_Species_List_-_ACE_[ds2740].geojson', 
+                 path = "git_ignore/Aquatic_Species_List_-_ACE_[ds2740].geojson", overwrite = TRUE)
+}
 
 aquatic_sf <- read_sf('git_ignore/Aquatic_Species_List_-_ACE_[ds2740].geojson') |> 
   janitor::clean_names() |> 

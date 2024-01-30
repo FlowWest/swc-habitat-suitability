@@ -31,6 +31,7 @@ theme_set(theme_minimal())
 project_crs <- "ESRI:102039" # NAD83 CONUS Albers USGS Version
 
 library(googledrive)
+#googledrive::drive_auth()
 drive_file_by_id <- function(id=character(), dir="temp", vsizip=FALSE) {
   d <- googledrive::as_dribble(googledrive::as_id(id))
   p <- file.path(dir, d$name)
@@ -451,6 +452,7 @@ flowlines <-
 
 waterbodies <- 
   drive_file_by_id("1ZGS3M97xTPb87k-78sGPJx_c1QkSq3AZ", vsizip=T) |>
+  st_read() |>
   janitor::clean_names() |>
   mutate(huc_8 = substr(reachcode, 1, 8),
          huc_10 = substr(reachcode, 1, 10),

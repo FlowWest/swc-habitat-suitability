@@ -87,7 +87,7 @@ ggplot() + geom_stars(data=slope) + coord_fixed()
 
 ```{r import-dem30}
 dir.create("temp/NEDSnapshot18b", recursive = TRUE)
-drive_file_by_id("ADD ID HERE") |>
+drive_file_by_id("1mBCDj4vd8DvJecm99FF6_kX5YKfg78hr") |>
   archive::archive_extract(dir = "temp/NEDSnapshot18b")
 
 dem30 <- stars::read_stars("temp/NEDShapshot18b/elev_cm")
@@ -347,7 +347,4 @@ flowlines_for_vbet <- flowlines |>
   st_crop(st_bbox(dem)) |>
   smoothr::densify(5)
 ```
-
-
-
 

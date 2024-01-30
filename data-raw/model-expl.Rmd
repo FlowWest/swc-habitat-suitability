@@ -19,7 +19,7 @@ output:
       url: https://latex.codecogs.com/svg.image?
 ---
 
-```{r setup}
+```{r setup, message=FALSE, warning=FALSE}
 library(tidyverse)
 library(sf)
 library(stars)

@@ -1,7 +1,7 @@
 Exploratory Modeling
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-01-26
+2024-01-30
 
 - [Linear](#linear)
 - [Lasso Feature Selection](#lasso-feature-selection)
@@ -9,97 +9,12 @@ Exploratory Modeling
 
 ``` r
 library(tidyverse)
-```
-
-    ## Warning: package 'ggplot2' was built under R version 4.3.1
-
-    ## Warning: package 'dplyr' was built under R version 4.3.1
-
-    ## ── Attaching core tidyverse packages ──────────────────────── tidyverse 2.0.0 ──
-    ## ✔ dplyr     1.1.3     ✔ readr     2.1.4
-    ## ✔ forcats   1.0.0     ✔ stringr   1.5.0
-    ## ✔ ggplot2   3.4.4     ✔ tibble    3.2.1
-    ## ✔ lubridate 1.9.2     ✔ tidyr     1.3.0
-    ## ✔ purrr     1.0.1     
-    ## ── Conflicts ────────────────────────────────────────── tidyverse_conflicts() ──
-    ## ✖ dplyr::filter() masks stats::filter()
-    ## ✖ dplyr::lag()    masks stats::lag()
-    ## ℹ Use the conflicted package (<http://conflicted.r-lib.org/>) to force all conflicts to become errors
-
-``` r
 library(sf)
-```
-
-    ## Warning: package 'sf' was built under R version 4.3.1
-
-    ## Linking to GEOS 3.11.2, GDAL 3.6.2, PROJ 9.2.0; sf_use_s2() is TRUE
-
-``` r
 library(stars)
-```
-
-    ## Warning: package 'stars' was built under R version 4.3.1
-
-    ## Loading required package: abind
-
-``` r
 library(tidymodels)
-```
-
-    ## Warning: package 'tidymodels' was built under R version 4.3.2
-
-    ## ── Attaching packages ────────────────────────────────────── tidymodels 1.1.1 ──
-    ## ✔ broom        1.0.5     ✔ rsample      1.2.0
-    ## ✔ dials        1.2.0     ✔ tune         1.1.2
-    ## ✔ infer        1.0.5     ✔ workflows    1.1.3
-    ## ✔ modeldata    1.3.0     ✔ workflowsets 1.0.1
-    ## ✔ parsnip      1.1.1     ✔ yardstick    1.3.0
-    ## ✔ recipes      1.0.9
-
-    ## Warning: package 'broom' was built under R version 4.3.2
-
-    ## Warning: package 'dials' was built under R version 4.3.2
-
-    ## Warning: package 'infer' was built under R version 4.3.2
-
-    ## Warning: package 'modeldata' was built under R version 4.3.2
-
-    ## Warning: package 'parsnip' was built under R version 4.3.2
-
-    ## Warning: package 'recipes' was built under R version 4.3.2
-
-    ## Warning: package 'rsample' was built under R version 4.3.2
-
-    ## Warning: package 'tune' was built under R version 4.3.2
-
-    ## Warning: package 'workflows' was built under R version 4.3.2
-
-    ## Warning: package 'workflowsets' was built under R version 4.3.2
-
-    ## Warning: package 'yardstick' was built under R version 4.3.2
-
-    ## ── Conflicts ───────────────────────────────────────── tidymodels_conflicts() ──
-    ## ✖ scales::discard() masks purrr::discard()
-    ## ✖ dplyr::filter()   masks stats::filter()
-    ## ✖ recipes::fixed()  masks stringr::fixed()
-    ## ✖ dplyr::lag()      masks stats::lag()
-    ## ✖ yardstick::spec() masks readr::spec()
-    ## ✖ recipes::step()   masks stats::step()
-    ## • Use tidymodels_prefer() to resolve common conflicts.
-
-``` r
 library(broom.mixed) # tidy output of mixed model results
-```
-
-    ## Warning: package 'broom.mixed' was built under R version 4.3.2
-
-``` r
 library(dotwhisker) # visualize regression results
-```
 
-    ## Warning: package 'dotwhisker' was built under R version 4.3.2
-
-``` r
 knitr::opts_chunk$set(eval=TRUE)
 ```
 

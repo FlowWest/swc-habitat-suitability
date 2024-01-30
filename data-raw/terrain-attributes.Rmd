@@ -348,3 +348,90 @@ flowlines_for_vbet <- flowlines |>
   smoothr::densify(5)
 ```
 
+## NDVI
+
+image server? https://gis.apfo.usda.gov/arcgis/rest/services/NAIP/USDA_CONUS_PRIME/ImageServer
+
+2020 seamlines: https://www.fpacbc.usda.gov/geo/customer-service/naip-quarter-quad-shapefiles/index.html
+
+2016 JP2s: https://www.sciencebase.gov/catalog/item/51355312e4b0e1603e4fed62
+
+* example URL: "https://prd-tnm.s3.amazonaws.com/StagedProducts/NAIP/ca_2016/38121/m_3812136_ne_10_h_20160620_20161004.jp2"
+
+* 2016 metadata: https://thor-f5.er.usgs.gov/ngtoc/metadata/waf/orthoimagery/naip/ca_2016/
+
+* footprints generated from earth explorer: ca_naip_2016.zip
+
+```{r}
+#naip_seam <- read_sf("/vsizip/temp/ca_naip20seam.zip") |>
+#  st_filter(st_transform(aoi, "EPSG:4326"))
+
+naip_qq |>
+  select(file_name) |>
+  mutate(jp2_name = paste0("https://prd-tnm.s3.amazonaws.com/StagedProducts/NAIP/ca_2016/",
+                           str_sub(apfoname, start=1, end=5),
+                           str_sub()))
+
+#naip_2020_qq_footprints <- read_sf("/vsizip/naip/ca_naip20qq.zip") |>
+#  st_filter(st_transform(aoi, "EPSG:4326")) |>
+#  janitor::clean_names()
+
+# this page is backed up to 
+naip_2016_qq_filenames_raw <- 
+  RCurl::getURL("https://thor-f5.er.usgs.gov/ngtoc/metadata/waf/orthoimagery/naip/ca_2016/", ftp.use.epsv = FALSE, dirlistonly = TRUE) |>
+  rvest::read_html() |> 
+  xml2::xml_find_all("//a") |> 
+  xml2::xml_attrs("href") |>
+  as.vector()
+naip_2016_qq_filenames <- tibble(xml_filename = naip_2016_qq_filenames_raw[-(1:5)]) |> 
+  unnest(xml_filename) |>
+  mutate(xml_filename = str_replace(xml_filename, ".xml", "")) |>
+  separate_wider_delim(xml_filename, "_", names = c("prefix", "apfoname", "quadrant", "zone", "suffix", "src_img_date", "ver_date")) |>
+  mutate(naip_entit = str_to_upper(paste(prefix, apfoname, quadrant, zone, suffix, src_img_date, sep="_")),
+         filename = paste(paste(prefix, apfoname, quadrant, zone, suffix, src_img_date, ver_date, sep="_"), "jp2", sep="."),
+         download = paste("https://prd-tnm.s3.amazonaws.com/StagedProducts/NAIP/ca_2016", str_sub(apfoname, start=1, end=5), filename, sep="/"))
+naip_2016_qq_footprints <- 
+  read_sf("/vsizip/naip/ca_naip_2016.zip") |>
+  janitor::clean_names() |>
+  left_join(naip_2016_qq_filenames)
+
+options(timeout = max(3600, getOption("timeout")))
+
+download_naip_tiles <- function(aoi, dir="temp/naip/tiles") {
+  dir.create(dir, recursive = TRUE)
+  tile_urls <- 
+    naip_2016_qq_footprints |>
+    st_filter(st_transform(aoi, "EPSG:4326")) |>
+    st_drop_geometry() |>
+    select(naip_entit, download) |>
+    deframe()
+  local_files <- map_vec(
+    names(tile_urls),
+    possibly(function(x) {
+      f = paste0(dir, "/", x , ".jp2")
+      if(!file.exists(f)) download.file(url = tile_urls[x], destfile = f, mode = "wb", quiet=T)
+      cat(x, "\n")
+      return(f)}, otherwise=NA))
+  return(local_files)
+}
+
+naip_tiles <- download_naip_tiles(aoi)
+
+naip_mosaic <- terra::rast(naip_tiles)
+
+naip_ndvi <- (naip_mosaic[4] - naip_mosaic[1]) / (naip_mosaic[4] + naip_mosaic[1])
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+

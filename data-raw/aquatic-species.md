@@ -1,7 +1,7 @@
 Aquatic Species
 ================
 Maddee Rubenson (FlowWest)
-2024-01-26
+2024-01-31
 
 ``` r
 project_crs <- "ESRI:102039" # NAD83 CONUS Albers USGS Version
@@ -20,7 +20,11 @@ flowlines <- readRDS("../data/flowline_geometries.Rds") |>
 catchments <- readRDS("../data/catchments.Rds")
 ```
 
-##### Aquatic Biodiveristy Summary
+## Aquatic Richness Data
+
+**Currently just for Yuba River**
+
+### Aquatic Biodiveristy Summary
 
 The aquatic biodiversity summary combines the three measures of
 biodiversity developed for ACE into a single metric: 1) aquatic native
@@ -33,9 +37,9 @@ irreplaceability, which is a weighted measure of rarity and endemism.
 
 ``` r
 # CDFW:
-drive_download(file = 'Aquatic_Species_List_-_ACE_[ds2740].geojson', path = "git_ignore/Aquatic_Species_List_-_ACE_[ds2740].geojson", overwrite = TRUE)
+drive_file_by_id("13S1YWYP_t7pb2SUmEWEprJA-tJ-8FM-V") 
 
-aquatic_sf <- read_sf('git_ignore/Aquatic_Species_List_-_ACE_[ds2740].geojson') |> 
+aquatic_sf <- read_sf('temp/Aquatic_Species_List_-_ACE_[ds2740].geojson') |> 
   janitor::clean_names() |> 
   rename(huc_12_aq = huc12) |> 
   select(huc_12_aq, bio_aq_rank_sw) |> 
@@ -51,8 +55,12 @@ aquatic_sf <- read_sf('git_ignore/Aquatic_Species_List_-_ACE_[ds2740].geojson') 
     ## $ huc_8          <chr> "18020159", "18060008", "18040001", "18070304", "180902…
 
 ``` r
-aquatic_selected <- aquatic_sf |> filter(huc_8 %in% selected_huc_8) |> st_transform(project_crs)
-flowlines_selected <- flowlines |> filter(huc_8 %in% selected_huc_8) |> st_zm()
+aquatic_selected <- aquatic_sf |> 
+  filter(huc_8 %in% selected_huc_8) |> 
+  st_transform(project_crs)
+flowlines_selected <- flowlines |> 
+  filter(huc_8 %in% selected_huc_8) |> 
+  st_zm()
 
 crosswalk <- 
   flowlines_selected |> 
@@ -67,11 +75,19 @@ flowlines_joined <-
   left_join(st_drop_geometry(aquatic_selected))
 
 ggplot() + 
-  geom_sf(data=aquatic_selected, aes(fill=bio_aq_rank_sw)) 
+  geom_sf(data=flowlines_joined, aes(color=as.factor(bio_aq_rank_sw))) 
 ```
 
-![](aquatic-species_files/figure-gfm/aqu-spec-1.png)<!-- --> \#####
-California Freshwater Species Database V2
+![](aquatic-species_files/figure-gfm/aqu-spec-1.png)<!-- -->
+
+``` r
+flowlines_joined |> 
+  select(comid, bio_aq_rank_sw) |> 
+  st_drop_geometry() |> 
+  saveRDS('aquatic/cdfw_aquatic_species_rank.RDS')
+```
+
+### California Freshwater Species Database V2
 
 The California Freshwater Species Database is the first comprehensive
 geospatial database of California’s freshwater species compiled and
@@ -214,7 +230,14 @@ flowlines_joined_tnc <-
 
 ``` r
 ggplot() + 
-  geom_sf(data=analysis_units_selected, aes(fill=species)) 
+  geom_sf(data=flowlines_joined_tnc, aes(color=species)) 
 ```
 
 ![](aquatic-species_files/figure-gfm/unnamed-chunk-1-1.png)<!-- -->
+
+``` r
+flowlines_joined_tnc |> 
+  select(comid, species, species_fish:species_endemic) |> 
+  st_drop_geometry() |> 
+  saveRDS('aquatic/tnc_aquatic_species_rank.RDS')
+```

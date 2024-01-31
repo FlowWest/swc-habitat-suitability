@@ -424,52 +424,84 @@ download_naip_tiles <- function(aoi, dir="temp/naip/tiles") {
 
 naip_tiles <- download_naip_tiles(aoi)
 
-### STARS VERSION
-
-naip_mosaic <- 
-  st_mosaic(naip_tiles, file_ext=".vrt") |> 
-  read_stars(along="band", proxy=TRUE)
-
-naip_mosaic |>
-  mutate(# add code here for doing naip math and thresholding, keep it all as a proxy!)
-
-
-### TERRA VERSION (try stars instead, too big to read into memory)
-
-naip_mosaic <- naip_tiles |> terra::vrt(filename="temp/naip/naip.vrt", overwrite=TRUE)
-
-# calculate NDVI
-
-naip_ndvi <- (naip_mosaic["naip_4"] - naip_mosaic["naip_1"]) / (naip_mosaic["naip_4"] + naip_mosaic["naip_1"])
-
-# threshold to identify vegetated pixels
-
-ndvi_threshold <- 0.25
-
-naip_ndvi_cls <- 
-  naip_ndvi |> terra::classify(matrix(c(-1,ndvi_threshold,0,
-                                         ndvi_threshold,1,1), ncol=3, byrow=T), 
-                               include.lowest=T)
-
-# summarize percent vegetated pixels within channels and valleys
-
 buffers <-
   flowlines |> 
-  mutate(channel_buffer = st_buffer(geometry, width = bf_width_m/2)) |>
+  st_zm() |>
+  #  mutate(channel_buffer = map2(geometry, bf_width_m, function(g, d) st_buffer(g, dist = d/2))) |>
+  filter(is.finite(bf_width_m)) |>
+  mutate(channel_buffer = st_buffer(geometry, dist = bf_width_m/2)) |>
   st_drop_geometry() |>
   select(comid, channel_buffer) |>
   left_join(vb1 |> select(comid, valley_bottom_geoms)) |>
   mutate(valley_bottom = map2(channel_buffer, valley_bottom_geoms, 
                               function(cb, vb) st_union(cb, vb, by_feature = FALSE) |> st_sfc(crs=st_crs(flowlines))))
 
-ndvi_pct <-
-  buffers |>
-  st_drop_geometry() |>
-  select(comid) |>
-  mutate(pct_ndvi_cb = terra::zonal(naip_ndvi_cls, buffers$channel_buffer, "mean") |> rename(pct_ndvi_cb = mean),
-         pct_ndvi_vb = terra::zonal(naip_ndvi_cls, buffers$valley_bottom, "mean") |> rename(pct_ndvi_vb = mean))
+### TERRA VERSION (try stars instead, too big to read into memory)
+# naip_mosaic <- naip_tiles |> terra::vrt(filename="temp/naip/naip.vrt", overwrite=TRUE)
+# naip_ndvi <- (naip_mosaic["naip_4"] - naip_mosaic["naip_1"]) / (naip_mosaic["naip_4"] + naip_mosaic["naip_1"])
+# ndvi_threshold <- 0.25
+# naip_ndvi_cls <- 
+#   naip_ndvi |> terra::classify(matrix(c(-1,ndvi_threshold,0,
+#                                          ndvi_threshold,1,1), ncol=3, byrow=T), 
+#                                include.lowest=T)
+# ndvi_pct <-
+#   buffers |>
+#   st_drop_geometry() |>
+#   select(comid) |>
+#   mutate(pct_ndvi_cb = terra::zonal(naip_ndvi_cls, buffers$channel_buffer, "mean") |> rename(pct_ndvi_cb = mean),
+#          pct_ndvi_vb = terra::zonal(naip_ndvi_cls, buffers$valley_bottom, "mean") |> rename(pct_ndvi_vb = mean))
+# 
+# ndvi_pct |> saveRDS("./data/attr_ndvi_pct.Rds")
 
-ndvi_pct |> saveRDS("./data/attr_ndvi_pct.Rds")
+### STARS VERSION: better because of lazy evaluation
+ndvi_threshold <- 0.25
+naip_mosaic <- 
+  st_mosaic(naip_tiles, file_ext=".vrt") |> 
+  read_stars(proxy=TRUE) #along="band"
+
+# define functions
+rf_ndvi = function(x1, x2, x3, x4) (x4 - x1)/(x4 + x1 + 1)
+rf_rveg = function(ndvi) ndvi >= ndvi_threshold
+
+get_veg_cls <- function(geom) {
+  rveg <- naip_mosaic |>
+    st_crop(st_bbox(geom)) |>
+    st_apply(c("x", "y"), rf_ndvi, keep=T) |>
+    st_apply(c("x", "y"), rf_rveg, keep=T) 
+  #rveg[drop=TRUE] |>
+  #  starsExtra::extract2(st_as_sfc(geom), mean, na.rm = TRUE)
+    #aggregate(geom, mean) 
+}
+
+get_veg_pct <- function(geom) {
+  agg <- geom |> 
+    get_veg_cls() |> 
+    aggregate(geom, mean, na.rm=T)
+  return(agg[[1]])
+}
+
+# test
+test_geom <- flowlines |> st_zm() |> head(1) |> st_buffer(dist=100) |> st_transform(st_crs(naip_mosaic)) 
+geom |> get_veg_cls() |> plot()
+geom |> get_veg_pct()
+
+# batch test
+flowlines |> 
+  st_zm() |> 
+  head(3) |> 
+  st_buffer(dist=100) |> 
+  st_transform(st_crs(naip_mosaic)) |>
+  mutate(veg_pct = map_dbl(geometry, function(x) get_veg_pct(st_sfc(x, crs=st_crs(naip_mosaic)))))
+
+# batch actual
+veg_pcts <- buffers |>
+  head(3) |> # commment out to do all
+  mutate(channel_buffer = st_transform(channel_buffer, st_crs(naip_mosaic)),
+         valley_bottom = st_transform(valley_bottom, st_crs(naip_mosaic))) |>
+  mutate(veg_pct_cb = map_dbl(channel_buffer, function(x) get_veg_pct(st_sfc(x, crs=st_crs(naip_mosaic)))),
+         veg_pct_vb = map_dbl(valley_bottom, function(x) get_veg_pct(st_sfc(x, crs=st_crs(naip_mosaic))))) |>
+  select(comid, veg_pct_cb, veg_pct_vb)
+#veg_pcts |> saveRDS("./data/attr_veg_pct.Rds")
 
 ```
 

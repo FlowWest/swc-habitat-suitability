@@ -1,5 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
-*.RDS filter=lfs diff=lfs merge=lfs -text
-*.ZIP filter=lfs diff=lfs merge=lfs -text
-data-raw/nhdplus/**/*.DBF filter=lfs diff=lfs merge=lfs -text
+# *.RDS filter=lfs diff=lfs merge=lfs -text
+# *.ZIP filter=lfs diff=lfs merge=lfs -text
+# data-raw/nhdplusv2/**/*.DBF filter=lfs diff=lfs merge=lfs -text
+# data-raw/nhdplusv2/**/*.ADF filter=lfs diff=lfs merge=lfs -text

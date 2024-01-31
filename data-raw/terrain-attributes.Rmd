@@ -424,11 +424,23 @@ download_naip_tiles <- function(aoi, dir="temp/naip/tiles") {
 
 naip_tiles <- download_naip_tiles(aoi)
 
-naip_mosaic <- terra::rast(naip_tiles)
+### STARS VERSION
+
+naip_mosaic <- 
+  st_mosaic(naip_tiles, file_ext=".vrt") |> 
+  read_stars(along="band", proxy=TRUE)
+
+naip_mosaic |>
+  mutate(# add code here for doing naip math and thresholding, keep it all as a proxy!)
+
+
+### TERRA VERSION (try stars instead, too big to read into memory)
+
+naip_mosaic <- naip_tiles |> terra::vrt(filename="temp/naip/naip.vrt", overwrite=TRUE)
 
 # calculate NDVI
 
-naip_ndvi <- (naip_mosaic[4] - naip_mosaic[1]) / (naip_mosaic[4] + naip_mosaic[1])
+naip_ndvi <- (naip_mosaic["naip_4"] - naip_mosaic["naip_1"]) / (naip_mosaic["naip_4"] + naip_mosaic["naip_1"])
 
 # threshold to identify vegetated pixels
 

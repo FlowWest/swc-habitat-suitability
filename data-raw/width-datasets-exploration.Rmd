@@ -1,0 +1,94 @@
+---
+title: "Width Datasets"
+author: "Maddee Rubenson (FlowWest)"
+date: "`r Sys.Date()`"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+library(sf)
+library(tidyverse)
+
+# googledrive::drive_auth()
+ 
+theme_set(theme_minimal())
+
+source('data-functions.R')
+
+project_crs <- "ESRI:102039"
+
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+## River Channel Width Dataset Exploration
+
+### Global River Width Database
+
+* http://hydro.iis.u-tokyo.ac.jp/~yamadai/GWD-LR/
+* downloadable link here:https://zenodo.org/records/1269595
+
+```{r include=FALSE}
+
+watersheds <-
+  drive_file_by_id("1ncwKAUNoJUNkPLEy6NzrUKCYqVG681p-", vsizip=T) |>
+  st_read() |>
+  janitor::clean_names() |>
+  st_transform(project_crs) |>
+  st_union()
+
+```
+
+```{r eval=FALSE, include=FALSE}
+# this script finds which datasets overlap with the Central Valley
+files <- list.files('../../../../Downloads/GRWL_centerlineData/')
+
+files_cali <- data.frame(
+  file_name = files,
+  number = str_extract(files, "\\d{2}(?=\\.)"),
+  extension = substring(files, nchar(files) - 3, nchar(files))
+  ) |>
+  filter(number %in% c(10, 11)) |>
+  filter(extension == ".shp")
+
+for(i in 1:length(files_cali$file_name)) {
+
+  dataset <- read_sf(paste0('../../../../Downloads/GRWL_centerlineData/', files_cali$file_name[i])) |>
+    st_transform(project_crs)
+
+  ggplot() +
+    geom_sf(data = watersheds) +
+    geom_sf(data = dataset, aes(color = 'GRWL dataset')) +
+    ggtitle(files_cali$file_name[i])
+
+  ggsave(filename = paste0('plots/', files_cali$file_name[i], '.png'),  plot = last_plot())
+}
+
+```
+
+#### Vector files that overlap with the Central Valley
+
+```{r}
+
+files_in_cv <- c('NK10.shp', 'NJ10.shp')
+
+nk10 <- drive_file_by_id('1H-oAmip5Pp2H0sQJnGRT_srypQGy8dWE', vsizip=T) |>
+  st_read()
+
+nj10 <- drive_file_by_id('1xq-0uoJbCA5fQE38OsOK1mi9k3boXsmF', vsizip = T) |> 
+  st_read()
+
+all_width_data_in_cv <- nk10 |> 
+  bind_rows(nj10) |> 
+  janitor::clean_names() |> 
+  filter(lake_flag == 0) |> 
+  glimpse()
+
+ggplot() +
+    geom_sf(data = watersheds) +
+    geom_sf(data = all_width_data_in_cv, aes(color = width_m))
+
+ggplot(all_width_data_in_cv, aes(x = width_m)) +
+  geom_freqpoly(bins = 10)
+
+```

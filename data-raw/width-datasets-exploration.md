@@ -188,6 +188,7 @@ all_merit_trunc <- all_merit |>
   filter(width_m <= 165.43)
 
 ggplot() + 
+  geom_sf(data = watersheds) +
   geom_sf(data = all_merit_trunc, aes(color = width_feet))
 ```
 

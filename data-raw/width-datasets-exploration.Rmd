@@ -69,9 +69,6 @@ for(i in 1:length(files_cali$file_name)) {
 #### Vector files that overlap with the Central Valley
 
 ```{r}
-
-files_in_cv <- c('NK10.shp', 'NJ10.shp')
-
 nk10 <- drive_file_by_id('1H-oAmip5Pp2H0sQJnGRT_srypQGy8dWE', vsizip=T) |>
   st_read()
 
@@ -82,13 +79,91 @@ all_width_data_in_cv <- nk10 |>
   bind_rows(nj10) |> 
   janitor::clean_names() |> 
   filter(lake_flag == 0) |> 
+  mutate(width_feet = width_m * 3.28084) |> 
   glimpse()
+
+# ggplot(all_width_data_in_cv, aes(x = width_feet)) +
+#   geom_histogram(bins = 100)
+
+summary(all_width_data_in_cv$width_feet)
+
+all_width_data_in_cv_trunc <- all_width_data_in_cv |> 
+  filter(width_feet < 354) #3rd quantile 
+
+ggplot(all_width_data_in_cv_trunc, aes(x = width_feet)) +
+  geom_histogram()
 
 ggplot() +
     geom_sf(data = watersheds) +
-    geom_sf(data = all_width_data_in_cv, aes(color = width_m))
+    geom_sf(data = all_width_data_in_cv_trunc, aes(color = width_feet))
 
-ggplot(all_width_data_in_cv, aes(x = width_m)) +
-  geom_freqpoly(bins = 10)
+
+saveRDS(all_width_data_in_cv_trunc, 'width_data/global_width_dataset.RDS')
 
 ```
+
+### Merit Hydro
+
+Data source: https://hydro.iis.u-tokyo.ac.jp/~yamadai/MERIT_Hydro/
+
+River width is reprepared in 4-byte float (float32), in meter. The values larger than 0 represents the river width at the channel centerlines. The value "-1" represents non-centerline water pixels, and the value "0" corresponds to the non-water pixels.
+
+The undefined pixels (oceans) are represented by the value -9999.
+River channel width is calculated by the method described in [Yamazaki et al. 2012, WRR], with some improvements/changes on the algorithm.
+
+
+```{r}
+library(stars)
+library(sf)
+
+flowlines <- readRDS("../data/flowline_geometries.Rds") |>
+  left_join(readRDS("../data/flowline_attributes.Rds")) |>
+  st_transform(project_crs)
+
+merit_1 <- drive_file_by_id('17vpwVL4HYa74-VrXkewWvWg2YUjyqVfC', vsizip = F) |>
+  raster::raster() |> 
+  st_as_stars() |> 
+  st_as_sf(merge = TRUE) |> 
+  st_cast("MULTILINESTRING") |> 
+  st_transform(project_crs) |> 
+  rename(width_m = n40w125_wth) |> 
+  filter(width_m > 0)
+
+merit_2 <- drive_file_by_id('10D-q6xHkVNqqqGVS98XpGYVrn2oqFDAi', vsizip = F) |>
+  raster::raster() |> 
+  st_as_stars() |> 
+  st_as_sf(merge = TRUE) |> 
+  st_cast("MULTILINESTRING") |> 
+  st_transform(project_crs) |> 
+  rename(width_m = n35w125_wth) |> 
+  filter(width_m > 0)
+
+merit_3 <- drive_file_by_id('1EU8qVDJy-UXfehkxgXXNbM1x5AJpxrpu', vsizip = F) |>
+  raster::raster() |> 
+  st_as_stars() |> 
+  st_as_sf(merge = TRUE) |> 
+  st_cast("MULTILINESTRING") |> 
+  st_transform(project_crs) |> 
+  rename(width_m = n30w125_wth) |> 
+  filter(width_m > 0)
+
+all_merit <- bind_rows(merit_1, merit_2, merit_3) |> 
+  mutate(width_feet = width_m * 3.28084) 
+
+summary(all_merit)
+
+# filter by third quartile
+
+all_merit_trunc <- all_merit |> 
+  filter(width_m <= 165.43)
+
+ggplot() + 
+  geom_sf(data = all_merit_trunc, aes(color = width_feet))
+
+ggplot() +
+  geom_histogram(data = all_merit_trunc, aes(x = width_feet))
+
+saveRDS(all_merit_trunc, 'width_data/merit_width_data.RDS')
+
+```
+

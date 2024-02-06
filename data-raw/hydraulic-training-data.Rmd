@@ -1,0 +1,136 @@
+---
+title: "Data Prep"
+output: github_document
+---
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(sf)
+library(stars)
+```
+
+Define habitat suitability functions
+
+```{r}
+# simple linear interpolation function
+linterp <- function(x, x1, x2, y1, y2){
+  y1 + ((x-x1)/(x2-x1)) * (y2-y1)
+}
+
+# vectorized function to calculate the depth*velocity suitability factor
+# frac=FALSE uses simple 1/0 thresholds; frac=TRUE uses ranges defined in Yuba tables 8-9
+dvhsi <- function(d, v, frac=FALSE) {
+  if(frac){
+    dhsi <- case_when(
+      d<=0.5 ~ 0,
+      d<=0.9 ~ linterp(d, 0.5, 0.9, 0, 1),
+      d<=4.0 ~ 1,
+      d<=5.2 ~ linterp(d, 4.0, 5.2, 1, 0),
+      d>5.2 ~ 0
+    )
+    vhsi <- case_when(
+      v<=0.1 ~ linterp(v, 0.0, 0.1, 0, 1),
+      v<=0.8 ~ 1,
+      v<=1.8 ~ linterp(v, 0.8, 1.8, 1, 0.35),
+      v<=4.0 ~ linterp(v, 1.8, 4.0, 0.35, 0),
+      v>4.0 ~ 0
+    )
+    return(sqrt(dhsi*vhsi)) 
+  }else{
+    return(if_else(d>0.5 & d<=5.2 & v>0.1 & v<=4.0, 1, 0))
+  }
+}
+```
+
+## Stanislaus
+
+Import SRH2D model data for Stanislaus (unlike HEC-RAS, the SRH2D outputs are natively vector format)
+
+```{r message=FALSE, warning=FALSE}
+# SRH2D model domain, dissolved from SRH2D mesh faces using QGIS
+stan_domain <- st_read("/vsizip/hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_Domain.shp.zip", as_tibble=T)
+
+# SRH2D model domain, manually split into polygons aligning with COMID segments
+stan_comid <- st_read("/vsizip/hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_Domain_COMID.shp.zip", as_tibble=T) |>
+  st_zm() |> janitor::clean_names()
+
+# SRH2D mesh vertices, converted from 2DM using QGIS 
+stan_vertices <- st_read("/vsizip/hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_Vertices.shp.zip", as_tibble=T) |>
+  mutate(vid = row_number())
+
+# Thiessen (aka Voronoi) polygons for mesh vertices, generated using QGIS
+stan_thiessen <- st_read("/vsizip/hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_Thiessen.shp.zip", as_tibble=T) |>
+  mutate(vid = row_number())
+
+# Bed elevations, extracted from mesh using QGIS "Export time series values from points of a mesh dataset"
+stan_elev <- read_csv("hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_BedElevation.csv.gz") |>
+  janitor::clean_names() |>
+  mutate(vid = row_number()) |>
+  select(vid, bed_elevation)
+
+# Material IDs (Manning's roughness classes) extracted from mesh using QGIS "Export time series values from points of a mesh dataset"
+stan_material <- 
+  read_csv("hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_MaterialID.csv.gz") |>
+  janitor::clean_names() |>
+  mutate(vid = row_number()) |>
+  select(vid, material_id)
+
+# SRH2D results by vertex point, incl. depth, velocity, shear stress, froude
+stan_result_filenames <- c(
+   "500" = "hydraulic_model_data/stanislaus_srh2d_2013/500cfs_072313.csv.gz",
+   "750" = "hydraulic_model_data/stanislaus_srh2d_2013/750cfs_072413.csv.gz",
+  "1000" = "hydraulic_model_data/stanislaus_srh2d_2013/1000cfs_072413.csv.gz",
+  "1250" = "hydraulic_model_data/stanislaus_srh2d_2013/1250cfs_090313.csv.gz",
+  "1500" = "hydraulic_model_data/stanislaus_srh2d_2013/1500cfs_071013.csv.gz",
+  "1750" = "hydraulic_model_data/stanislaus_srh2d_2013/1750cfs_090313.csv.gz",
+  "2250" = "hydraulic_model_data/stanislaus_srh2d_2013/2250cfs_121713.csv.gz",
+  "3000" = "hydraulic_model_data/stanislaus_srh2d_2013/3000cfs_061913.csv.gz",
+  "5000" = "hydraulic_model_data/stanislaus_srh2d_2013/5000cfs_071113.csv.gz"
+)
+stan_result_cols <- c("x_m"="n", "y_m"="n", "z_m"="n", 
+                      "wse_m"="n", "wdepth_m"="n", 
+                      "vel_x"="n", "vel_y"="n", "vel_mag"="n", 
+                      "froude"="n", "stress"="n")
+
+stan_result <- 
+  names(stan_result_filenames) |>
+  lapply(function(x) read_csv(stan_result_filenames[x], col_names=names(stan_result_cols), col_types=stan_result_cols, skip=1) |> 
+           mutate(discharge_cfs = as.numeric(x), vid=row_number())) |>
+  bind_rows() |>
+  mutate(across(everything(), function(x) if_else(x==-999,NA,x))) |>
+  mutate(depth_ft = wdepth_m*3.28084, velocity_fps = vel_mag*3.28084) |>
+  select(discharge_cfs, vid, depth_ft, velocity_fps) |>
+  left_join(stan_elev, by=join_by(vid)) |> 
+  left_join(stan_material, by=join_by(vid)) |>
+  mutate(
+    cover_hs = 1, # cover habitat suitability, for now, actually need to get it from stan_material
+    hsi_simp = dvhsi(depth_ft, velocity_fps, frac=F) * cover_hs,
+    hsi_frac = dvhsi(depth_ft, velocity_fps, frac=T) * cover_hs,
+  ) |>
+  glimpse()
+
+```
+
+Import polygons created for each COMID reach, and calculate suitable area for each
+
+```{r}
+stan_calc_hsi <- function(g, q){
+  stan_thiessen |>
+    left_join(filter(stan_result, discharge_cfs==q), by=join_by(vid)) |> 
+    st_intersection(g) |>
+    mutate(area = st_area(geometry)) |>
+    summarize(area = units::drop_units(sum(area)),
+              wua_simp = sum(hsi_simp),
+              wua_frac = sum(hsi_frac)) |>
+    mutate(pcthab_simp = wua_simp / area,
+           pcthab_frac = wua_frac / area) |>
+    st_drop_geometry()
+}
+
+stan_hsi <- 
+  stan_comid |>
+  expand_grid(discharge_cfs = names(stan_result_filenames)) |>
+  mutate(result = map2(geometry, discharge_cfs, function(g, q) stan_calc_hsi(st_sfc(g, crs=st_crs(stan_comid)), q))) |>
+  unnest_wider(result) |>
+  glimpse()
+```

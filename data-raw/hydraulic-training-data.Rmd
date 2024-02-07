@@ -196,7 +196,6 @@ if(!file.exists("../data/fsa_stanislaus.Rds")) {
 ```
 
 ```{r stan-plot-hsi, fig.width=6.5, fig.height=4, dpi=300}
-fsa_stanislaus |> 
-  ggplot() + geom_line(aes(x = discharge_cfs, y = pcthab_frac, color=factor(comid)))
+fsa_stanislaus |> ggplot() + geom_line(aes(x = flow_cfs, y = pcthab_frac, color=factor(comid))) 
 ```
 

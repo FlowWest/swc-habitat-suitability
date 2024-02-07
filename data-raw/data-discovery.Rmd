@@ -367,6 +367,15 @@ catchment_ndvi <-
 catchment_ndvi
 ```
 
+#### Width Data
+
+Data source: https://hydro.iis.u-tokyo.ac.jp/~yamadai/MERIT_Hydro/
+
+```{r width-data}
+width_data <- readRDS('width_data/merit_width_dataset_comid_join.RDS') |> 
+  st_drop_geometry()
+```
+
 ### Combine all attributes
 
 Import attributes calculated in `terrain-attributes.Rmd`
@@ -404,6 +413,7 @@ flowline_attributes <-
   left_join(da_suppl_attrs) |> 
   left_join(streamcat_data) |>
   left_join(catchment_ndvi) |> 
+  left_join(width_data) |> 
   # fill in gaps in the RF bankfull estimates with the simple Bieger model
   mutate(bf_width_m = coalesce(bf_width_m, 2.76*da_area_sq_km^0.399),
          bf_depth_m = coalesce(bf_depth_m, 0.23*da_area_sq_km^0.294),

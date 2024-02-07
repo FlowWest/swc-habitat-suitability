@@ -372,8 +372,7 @@ catchment_ndvi
 Data source: https://hydro.iis.u-tokyo.ac.jp/~yamadai/MERIT_Hydro/
 
 ```{r width-data}
-width_data <- readRDS('width_data/merit_width_dataset_comid_join.RDS') |> 
-  st_drop_geometry()
+width_data <- readRDS('width_data/merit_width_dataset_comid_join.RDS') 
 ```
 
 ### Combine all attributes
@@ -715,6 +714,20 @@ flowlines |>
   geom_sf(data=waterbodies, fill="gray", color="gray") +
   scale_color_viridis_c(direction=-1, trans="log10")
 ```
+
+```{r plot-width}
+# plot showing merit width data
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = merit_width_m)) +
+  geom_sf(aes(color = merit_width_m), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(trans = "log")
+
+```
+
 ## Import catchments
 
 ```{r catchments}

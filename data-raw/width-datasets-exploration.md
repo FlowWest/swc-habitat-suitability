@@ -1,11 +1,18 @@
 Channel Width Datasets
 ================
 Maddee Rubenson (FlowWest)
-2024-02-06
+2024-02-07
 
 ## River Channel Width Dataset Exploration
 
-### Global River Width Database
+#### Summary
+
+Aggregated channel width measurements for two datasets: Global River
+Width Database (GRWD) and Merit Hydro. The dataset from Merit hydro was
+more robust and covered a large spatial area than GRWD and therefore
+will be used in this analysis by merging with NHD COMIDs.
+
+## Global River Width Database
 
 - <http://hydro.iis.u-tokyo.ac.jp/~yamadai/GWD-LR/>
 - downloadable link here:<https://zenodo.org/records/1269595>
@@ -16,8 +23,6 @@ Maddee Rubenson (FlowWest)
 nk10 <- drive_file_by_id('1H-oAmip5Pp2H0sQJnGRT_srypQGy8dWE', vsizip=T) |>
   st_read()
 ```
-
-    ## temp/NK10.zip already exists and will be used...
 
     ## Reading layer `NK10' from data source `/vsizip/temp/NK10.zip' using driver `ESRI Shapefile'
     ## Simple feature collection with 52767 features and 10 fields
@@ -30,8 +35,6 @@ nk10 <- drive_file_by_id('1H-oAmip5Pp2H0sQJnGRT_srypQGy8dWE', vsizip=T) |>
 nj10 <- drive_file_by_id('1xq-0uoJbCA5fQE38OsOK1mi9k3boXsmF', vsizip = T) |> 
   st_read()
 ```
-
-    ## temp/NJ10.zip already exists and will be used...
 
     ## Reading layer `NJ10' from data source `/vsizip/temp/NJ10.zip' using driver `ESRI Shapefile'
     ## Simple feature collection with 29601 features and 10 fields
@@ -82,8 +85,6 @@ ggplot(all_width_data_in_cv_trunc, aes(x = width_feet)) +
   geom_histogram()
 ```
 
-    ## `stat_bin()` using `bins = 30`. Pick better value with `binwidth`.
-
 ![](width-datasets-exploration_files/figure-gfm/unnamed-chunk-3-1.png)<!-- -->
 
 ``` r
@@ -98,7 +99,7 @@ ggplot() +
 #saveRDS(all_width_data_in_cv_trunc, 'width_data/global_width_dataset.RDS')
 ```
 
-### Merit Hydro
+## Merit Hydro
 
 Data source: <https://hydro.iis.u-tokyo.ac.jp/~yamadai/MERIT_Hydro/>
 
@@ -112,113 +113,76 @@ channel width is calculated by the method described in \[Yamazaki et
 al. 2012, WRR\], with some improvements/changes on the algorithm.
 
 ``` r
-library(stars)
-```
-
-    ## Loading required package: abind
-
-``` r
-library(sf)
-
 flowlines <- readRDS("../data/flowline_geometries.Rds") |>
-  #left_join(readRDS("../data/flowline_attributes.Rds")) |>
   st_transform(project_crs)
 
-merit_1 <- drive_file_by_id('17vpwVL4HYa74-VrXkewWvWg2YUjyqVfC', vsizip = F) |>
+import_merit <- function(fileid, varname) {
+  drive_file_by_id(fileid, vsizip = F) |>
   raster::raster() |> 
   st_as_stars() |> 
   st_as_sf(merge = TRUE) |> 
   st_cast("MULTILINESTRING") |> 
   st_transform(project_crs) |> 
-  rename(width_m = n40w125_wth) |> 
+  rename_at(1, ~'width_m') |> 
   filter(width_m > 0)
-```
+}
 
-    ## temp/n40w125_wth.tif already exists and will be used...
+merit_ids <- c(
+  n40w125_wth = '1EU8qVDJy-UXfehkxgXXNbM1x5AJpxrpu',
+  n35w125_wth = '10D-q6xHkVNqqqGVS98XpGYVrn2oqFDAi',
+  n30w125_wth = '17vpwVL4HYa74-VrXkewWvWg2YUjyqVfC',
+  n40w120_wth = '1JRH0pFpW-RcmRspJDSnf7OS2gwvlQPiQ',
+  n35w120_wth = '1IO6URekLRy0OQmPubSml0vLs_3SyGWz_',
+  n30w120_wth = '16g2VNKhS_W6gmu6LH8JXrLUrd9C4hnEb',
+  n35w115_wth = '1ZHuuqAEKKBcH4bjzCQ3cvzNeMuy7aVVI',
+  n30w115_wth = '1hD6xcG5lp77Qm2bJx0Z8E3X8PRIbn12S')
 
-``` r
-merit_2 <- drive_file_by_id('10D-q6xHkVNqqqGVS98XpGYVrn2oqFDAi', vsizip = F) |>
-  raster::raster() |> 
-  st_as_stars() |> 
-  st_as_sf(merge = TRUE) |> 
-  st_cast("MULTILINESTRING") |> 
-  st_transform(project_crs) |> 
-  rename(width_m = n35w125_wth) |> 
-  filter(width_m > 0)
-```
-
-    ## temp/n35w125_wth.tif already exists and will be used...
-
-``` r
-merit_3 <- drive_file_by_id('1EU8qVDJy-UXfehkxgXXNbM1x5AJpxrpu', vsizip = F) |>
-  raster::raster() |> 
-  st_as_stars() |> 
-  st_as_sf(merge = TRUE) |> 
-  st_cast("MULTILINESTRING") |> 
-  st_transform(project_crs) |> 
-  rename(width_m = n30w125_wth) |> 
-  filter(width_m > 0)
-```
-
-    ## temp/n30w125_wth.tif already exists and will be used...
-
-``` r
-all_merit <- bind_rows(merit_1, merit_2, merit_3) |> 
-  mutate(width_feet = width_m * 3.28084) 
+all_merit <- bind_rows(lapply(names(merit_ids), function(x) import_merit(merit_ids[x], x))) |>
+  mutate(width_feet = width_m * 3.28084)
 
 summary(all_merit)
 ```
 
     ##     width_m                    geometry        width_feet      
-    ##  Min.   :    0.45   MULTILINESTRING:170928   Min.   :    1.48  
-    ##  1st Qu.:   30.71   epsg:NA        :     0   1st Qu.:  100.77  
-    ##  Median :   52.57   +proj=aea ...  :     0   Median :  172.46  
-    ##  Mean   :  228.66                            Mean   :  750.19  
-    ##  3rd Qu.:  165.43                            3rd Qu.:  542.76  
-    ##  Max.   :13873.50                            Max.   :45516.74
+    ##  Min.   :    0.45   MULTILINESTRING:367273   Min.   :    1.48  
+    ##  1st Qu.:   14.97   epsg:NA        :     0   1st Qu.:   49.11  
+    ##  Median :   47.35   +proj=aea ...  :     0   Median :  155.34  
+    ##  Mean   :  227.53                            Mean   :  746.50  
+    ##  3rd Qu.:  153.26                            3rd Qu.:  502.83  
+    ##  Max.   :20567.65                            Max.   :67479.17
 
 ``` r
 # filter by third quartile
-
 all_merit_trunc <- all_merit |> 
-  filter(width_m <= 165.43)
+  filter(width_m <= 153.26)
 
-ggplot() + 
-  geom_sf(data = watersheds) +
-  geom_sf(data = all_merit_trunc, aes(color = width_feet))
-```
+# ggplot() + 
+#   geom_sf(data = watersheds) +
+#   geom_sf(data = all_merit_trunc, aes(color = width_feet))
 
-![](width-datasets-exploration_files/figure-gfm/unnamed-chunk-4-1.png)<!-- -->
-
-``` r
 ggplot() +
   geom_histogram(data = all_merit_trunc, aes(x = width_feet))
 ```
 
-    ## `stat_bin()` using `bins = 30`. Pick better value with `binwidth`.
-
-![](width-datasets-exploration_files/figure-gfm/unnamed-chunk-4-2.png)<!-- -->
-
-``` r
-#saveRDS(all_merit_trunc, 'width_data/merit_width_data.RDS')
-```
+![](width-datasets-exploration_files/figure-gfm/unnamed-chunk-4-1.png)<!-- -->
 
 ## Aggregate width measurements by NHD
 
 ### Merit data
 
 ``` r
-join_width_and_flowlines <- st_join(all_merit_trunc |> st_transform(project_crs), flowlines |> st_zm()) |> filter(!is.na(comid))
+join_width_and_flowlines <- st_join(all_merit_trunc |> st_transform(project_crs), flowlines |> st_zm()) |> filter(!is.na(comid)) |> 
+  select(comid, merit_width_m = width_m)
 
 ggplot() +
   geom_sf(data = watersheds) + 
-  geom_sf(data = join_width_and_flowlines, aes(color = width_m)) 
+  geom_sf(data = join_width_and_flowlines, aes(color = merit_width_m)) 
 ```
 
 ![](width-datasets-exploration_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
 
 ``` r
-saveRDS(join_width_and_flowlines, 'width_data/merit_width_dataset_comid_join.RDS')
+saveRDS(join_width_and_flowlines |> st_drop_geometry(), 'width_data/merit_width_dataset_comid_join.RDS')
 ```
 
 ### Global Width Database
@@ -226,15 +190,16 @@ saveRDS(join_width_and_flowlines, 'width_data/merit_width_dataset_comid_join.RDS
 ``` r
 join_width_and_flowlines_gwd <- st_join(all_width_data_in_cv_trunc |> st_transform(project_crs), flowlines |> st_zm()) |> 
   filter(!is.na(comid)) |> 
-  select(comid, width_m)
+  select(comid, gwd_width_m = width_m) |> 
+  mutate(gwd_width_m = as.numeric(gwd_width_m))
 
 ggplot() +
   geom_sf(data = watersheds) + 
-  geom_sf(data = join_width_and_flowlines_gwd) 
+  geom_sf(data = join_width_and_flowlines_gwd, aes(color = gwd_width_m))
 ```
 
 ![](width-datasets-exploration_files/figure-gfm/unnamed-chunk-6-1.png)<!-- -->
 
 ``` r
-saveRDS(join_width_and_flowlines_gwd, "width_data/gwd_width_dataset_comid_join.RDS")
+saveRDS(join_width_and_flowlines_gwd |> st_drop_geometry(), "width_data/gwd_width_dataset_comid_join.RDS")
 ```

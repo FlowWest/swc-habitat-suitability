@@ -8,6 +8,7 @@ output: github_document
 ```{r setup, include=FALSE}
 library(sf)
 library(tidyverse)
+library(stars)
 
 # googledrive::drive_auth()
 
@@ -22,7 +23,10 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## River Channel Width Dataset Exploration
 
-### Global River Width Database
+#### Summary
+Aggregated channel width measurements for two datasets: Global River Width Database (GRWD) and Merit Hydro. The dataset from Merit hydro was more robust and covered a large spatial area than GRWD and therefore will be used in this analysis by merging with NHD COMIDs.
+
+## Global River Width Database
 
 * http://hydro.iis.u-tokyo.ac.jp/~yamadai/GWD-LR/
 * downloadable link here:https://zenodo.org/records/1269595
@@ -70,7 +74,7 @@ for(i in 1:length(files_cali$file_name)) {
 
 #### Vector files that overlap with the Central Valley
 
-```{r}
+```{r echo=TRUE, message=FALSE, warning=FALSE}
 nk10 <- drive_file_by_id('1H-oAmip5Pp2H0sQJnGRT_srypQGy8dWE', vsizip=T) |>
   st_read()
 
@@ -104,7 +108,7 @@ ggplot() +
 
 ```
 
-### Merit Hydro
+## Merit Hydro
 
 Data source: https://hydro.iis.u-tokyo.ac.jp/~yamadai/MERIT_Hydro/
 
@@ -114,90 +118,77 @@ The undefined pixels (oceans) are represented by the value -9999.
 River channel width is calculated by the method described in [Yamazaki et al. 2012, WRR], with some improvements/changes on the algorithm.
 
 
-```{r}
-library(stars)
-library(sf)
-
+```{r echo=TRUE, message=FALSE, warning=FALSE}
 flowlines <- readRDS("../data/flowline_geometries.Rds") |>
-  #left_join(readRDS("../data/flowline_attributes.Rds")) |>
   st_transform(project_crs)
 
-merit_1 <- drive_file_by_id('17vpwVL4HYa74-VrXkewWvWg2YUjyqVfC', vsizip = F) |>
+import_merit <- function(fileid, varname) {
+  drive_file_by_id(fileid, vsizip = F) |>
   raster::raster() |> 
   st_as_stars() |> 
   st_as_sf(merge = TRUE) |> 
   st_cast("MULTILINESTRING") |> 
   st_transform(project_crs) |> 
-  rename(width_m = n40w125_wth) |> 
+  rename_at(1, ~'width_m') |> 
   filter(width_m > 0)
+}
 
-merit_2 <- drive_file_by_id('10D-q6xHkVNqqqGVS98XpGYVrn2oqFDAi', vsizip = F) |>
-  raster::raster() |> 
-  st_as_stars() |> 
-  st_as_sf(merge = TRUE) |> 
-  st_cast("MULTILINESTRING") |> 
-  st_transform(project_crs) |> 
-  rename(width_m = n35w125_wth) |> 
-  filter(width_m > 0)
+merit_ids <- c(
+  n40w125_wth = '1EU8qVDJy-UXfehkxgXXNbM1x5AJpxrpu',
+  n35w125_wth = '10D-q6xHkVNqqqGVS98XpGYVrn2oqFDAi',
+  n30w125_wth = '17vpwVL4HYa74-VrXkewWvWg2YUjyqVfC',
+  n40w120_wth = '1JRH0pFpW-RcmRspJDSnf7OS2gwvlQPiQ',
+  n35w120_wth = '1IO6URekLRy0OQmPubSml0vLs_3SyGWz_',
+  n30w120_wth = '16g2VNKhS_W6gmu6LH8JXrLUrd9C4hnEb',
+  n35w115_wth = '1ZHuuqAEKKBcH4bjzCQ3cvzNeMuy7aVVI',
+  n30w115_wth = '1hD6xcG5lp77Qm2bJx0Z8E3X8PRIbn12S')
 
-merit_3 <- drive_file_by_id('1EU8qVDJy-UXfehkxgXXNbM1x5AJpxrpu', vsizip = F) |>
-  raster::raster() |> 
-  st_as_stars() |> 
-  st_as_sf(merge = TRUE) |> 
-  st_cast("MULTILINESTRING") |> 
-  st_transform(project_crs) |> 
-  rename(width_m = n30w125_wth) |> 
-  filter(width_m > 0)
-
-all_merit <- bind_rows(merit_1, merit_2, merit_3) |> 
-  mutate(width_feet = width_m * 3.28084) 
+all_merit <- bind_rows(lapply(names(merit_ids), function(x) import_merit(merit_ids[x], x))) |>
+  mutate(width_feet = width_m * 3.28084)
 
 summary(all_merit)
 
 # filter by third quartile
-
 all_merit_trunc <- all_merit |> 
-  filter(width_m <= 165.43)
+  filter(width_m <= 153.26)
 
-ggplot() + 
-  geom_sf(data = watersheds) +
-  geom_sf(data = all_merit_trunc, aes(color = width_feet))
+# ggplot() + 
+#   geom_sf(data = watersheds) +
+#   geom_sf(data = all_merit_trunc, aes(color = width_feet))
 
 ggplot() +
   geom_histogram(data = all_merit_trunc, aes(x = width_feet))
-
-#saveRDS(all_merit_trunc, 'width_data/merit_width_data.RDS')
 
 ```
 
 ## Aggregate width measurements by NHD
 
 ### Merit data 
-```{r echo=TRUE}
+```{r echo=TRUE, message=FALSE, warning=FALSE}
 join_width_and_flowlines <- st_join(all_merit_trunc |> st_transform(project_crs), flowlines |> st_zm()) |> filter(!is.na(comid)) |> 
-  select(comid, width_m)
+  select(comid, merit_width_m = width_m)
 
 ggplot() +
   geom_sf(data = watersheds) + 
-  geom_sf(data = join_width_and_flowlines, aes(color = width_m)) 
+  geom_sf(data = join_width_and_flowlines, aes(color = merit_width_m)) 
 
-saveRDS(join_width_and_flowlines, 'width_data/merit_width_dataset_comid_join.RDS')
+saveRDS(join_width_and_flowlines |> st_drop_geometry(), 'width_data/merit_width_dataset_comid_join.RDS')
 
 ```
 
 ### Global Width Database
 
-```{r echo=TRUE}
+```{r echo=TRUE, message=FALSE, warning=FALSE}
 join_width_and_flowlines_gwd <- st_join(all_width_data_in_cv_trunc |> st_transform(project_crs), flowlines |> st_zm()) |> 
   filter(!is.na(comid)) |> 
-  select(comid, width_m) |> 
-  mutate(width_m = as.numeric(width_m))
+  select(comid, gwd_width_m = width_m) |> 
+  mutate(gwd_width_m = as.numeric(gwd_width_m))
 
 ggplot() +
   geom_sf(data = watersheds) + 
-  geom_sf(data = join_width_and_flowlines_gwd, aes(color = width_m))
+  geom_sf(data = join_width_and_flowlines_gwd, aes(color = gwd_width_m))
 
-saveRDS(join_width_and_flowlines_gwd, "width_data/gwd_width_dataset_comid_join.RDS")
+saveRDS(join_width_and_flowlines_gwd |> st_drop_geometry(), "width_data/gwd_width_dataset_comid_join.RDS")
 
 ```
 

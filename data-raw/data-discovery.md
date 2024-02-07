@@ -1,7 +1,7 @@
 SWC Habitat Model Data Discovery
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-02-06
+2024-02-07
 
 - [Case study geographic scope](#case-study-geographic-scope)
 - [Data Import](#data-import)
@@ -389,8 +389,7 @@ catchment_ndvi
 Data source: <https://hydro.iis.u-tokyo.ac.jp/~yamadai/MERIT_Hydro/>
 
 ``` r
-width_data <- readRDS('width_data/merit_width_dataset_comid_join.RDS') |> 
-  st_drop_geometry()
+width_data <- readRDS('width_data/merit_width_dataset_comid_join.RDS') 
 ```
 
 ### Combine all attributes
@@ -794,7 +793,21 @@ flowlines |>
 ```
 
 ![](data-discovery_files/figure-gfm/plot-vb_bf_w_ratio-1.png)<!-- -->
-\## Import catchments
+
+``` r
+# plot showing merit width data
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = merit_width_m)) +
+  geom_sf(aes(color = merit_width_m), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(trans = "log")
+```
+
+![](data-discovery_files/figure-gfm/plot-width-1.png)<!-- --> \## Import
+catchments
 
 ``` r
 # local catchment associated with each flowline reach (COMID)

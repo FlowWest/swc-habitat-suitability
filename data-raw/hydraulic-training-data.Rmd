@@ -11,6 +11,8 @@ library(stars)
 
 Define habitat suitability functions
 
+Source: 1029_Yuba_Flow_Effects_Modeling_Task_1_2022-09-30_reduced.pdf
+
 ```{r funcs}
 # simple linear interpolation function
 linterp <- function(x, x1, x2, y1, y2){
@@ -74,12 +76,19 @@ stan_elev <- read_csv("hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313
   mutate(vid = row_number()) |>
   select(vid, bed_elevation)
 
+# Material Manning coefficients, extracted from SRH2D DAT files for runs
+stan_material_n <-
+  read_delim("hydraulic_model_data/stanislaus_srh2d_2013/manning_coef.txt", delim="\t", col_names=c("manning_coef")) |>
+  mutate(material_id = row_number())
+
 # Material IDs (Manning's roughness classes) extracted from mesh using QGIS "Export time series values from points of a mesh dataset"
 stan_material <- 
   read_csv("hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_MaterialID.csv.gz") |>
   janitor::clean_names() |>
   mutate(vid = row_number()) |>
-  select(vid, material_id)
+  select(vid, material_id) |>
+  left_join(stan_material_n)
+
 # alternate approach with spatial join yields the same result
 # stan_material <- 
 #   read_csv("hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_MaterialID.csv.gz") |>
@@ -173,8 +182,8 @@ stan_calc_hsi <- function(g, q){
 if(!file.exists("../data/fsa_stanislaus.Rds")) {
   fsa_stanislaus <- 
     stan_comid |>
-    expand_grid(discharge_cfs = as.numeric(names(stan_result_filenames))) |>
-    mutate(result = map2(geometry, discharge_cfs, function(g, q) stan_calc_hsi(st_sfc(g, crs=st_crs(stan_comid)), q))) |>
+    expand_grid(flow_cfs = as.numeric(names(stan_result_filenames))) |>
+    mutate(result = map2(geometry, flow_cfs, function(g, q) stan_calc_hsi(st_sfc(g, crs=st_crs(stan_comid)), q))) |>
     unnest_wider(result) |>
     st_as_sf() |>
     glimpse()

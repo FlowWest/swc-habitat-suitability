@@ -1,4 +1,4 @@
-Training Data - Stanislaus
+Hydraulic Training Data
 ================
 
 ``` r
@@ -79,7 +79,8 @@ stan_comid <- st_read("/vsizip/hydraulic_model_data/stanislaus_srh2d_2013/StanMe
 ``` r
 # SRH2D mesh vertices, converted from 2DM using QGIS 
 stan_vertices <- st_read("/vsizip/hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_Vertices.shp.zip", as_tibble=T) |>
-  mutate(vid = row_number())
+  mutate(vid = row_number()) |>
+  select(vid)
 ```
 
     ## Reading layer `StanMesh072313_Vertices' from data source 
@@ -95,7 +96,10 @@ stan_vertices <- st_read("/vsizip/hydraulic_model_data/stanislaus_srh2d_2013/Sta
 ``` r
 # Thiessen (aka Voronoi) polygons for mesh vertices, generated using QGIS
 stan_thiessen <- st_read("/vsizip/hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_Thiessen.shp.zip", as_tibble=T) |>
-  mutate(vid = row_number())
+  #mutate(vid = row_number()) # row order doesn't match the SRH2D outputs so need to spatial join
+  st_join(stan_vertices, join=st_nearest_feature) |>
+  select(vid) |>
+  arrange(vid)
 ```
 
     ## Reading layer `StanMesh072313_Thiessen' from data source 
@@ -108,6 +112,9 @@ stan_thiessen <- st_read("/vsizip/hydraulic_model_data/stanislaus_srh2d_2013/Sta
     ## Projected CRS: NAD83 / UTM zone 10N
 
 ``` r
+# confirm correct join via:
+# ggplot() + geom_sf(data=stan_thiessen|>filter(vid<50)) + geom_sf(data=stan_vertices|>filter(vid<50)) 
+
 # Bed elevations, extracted from mesh using QGIS "Export time series values from points of a mesh dataset"
 stan_elev <- read_csv("hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_BedElevation.csv.gz") |>
   janitor::clean_names() |>
@@ -120,6 +127,12 @@ stan_material <-
   janitor::clean_names() |>
   mutate(vid = row_number()) |>
   select(vid, material_id)
+# alternate approach with spatial join yields the same result
+# stan_material <- 
+#   read_csv("hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_MaterialID.csv.gz") |>
+#   janitor::clean_names() |>
+#   st_as_sf(coords=c("x","y"), crs=st_crs(stan_thiessen)) |>
+#   st_join(stan_thiessen, join=st_nearest_feature)
 
 # SRH2D results by vertex point, incl. depth, velocity, shear stress, froude
 stan_result_filenames <- c(
@@ -187,22 +200,21 @@ test <- stan_thiessen |>
     ## all geometries
 
     ## Rows: 244,606
-    ## Columns: 15
-    ## $ FID           <dbl> 216994, 217673, 217313, 217311, 215710, 218190, 218708, …
-    ## $ vid           <int> 9658, 9659, 9849, 9850, 10034, 10035, 10185, 10186, 1032…
+    ## Columns: 14
+    ## $ vid           <int> 194330, 194471, 194472, 194473, 194475, 194476, 194477, …
     ## $ discharge_cfs <dbl> 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 5…
-    ## $ depth_ft      <dbl> 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.0000…
-    ## $ velocity_fps  <dbl> 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.000000…
-    ## $ bed_elevation <dbl> 48.53050, 65.92336, 65.44435, 64.93144, 61.25634, 61.193…
-    ## $ material_id   <dbl> 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 30, 43, 43, 20, …
+    ## $ depth_ft      <dbl> 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,…
+    ## $ velocity_fps  <dbl> 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,…
+    ## $ bed_elevation <dbl> 13.83647, 13.84992, 13.86708, 13.86089, 13.86002, 13.826…
+    ## $ material_id   <dbl> 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, …
     ## $ cover_hs      <dbl> 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,…
     ## $ hsi_simp      <dbl> 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,…
     ## $ hsi_frac      <dbl> 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,…
     ## $ comid         <dbl> 2819852, 2819852, 2819852, 2819852, 2819852, 2819852, 28…
-    ## $ geometry      <POLYGON [m]> POLYGON ((659818.6 4172628,..., POLYGON ((659553…
-    ## $ area_m2       <dbl> 59.92954, 123.85818, 122.89417, 96.65988, 52.58322, 110.…
-    ## $ wua_simp      <dbl> 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.…
-    ## $ wua_frac      <dbl> 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.…
+    ## $ geometry      <POLYGON [m]> POLYGON ((661138 4174738, 6..., POLYGON ((661145…
+    ## $ area_m2       <dbl> 52.027195, 219.927514, 244.153508, 293.728856, 314.55599…
+    ## $ wua_simp      <dbl> 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,…
+    ## $ wua_frac      <dbl> 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,…
 
 ``` r
 #test |> ggplot() + geom_sf(aes(fill=hsi_simp), color=NA)
@@ -226,7 +238,7 @@ stan_calc_hsi <- function(g, q){
     st_drop_geometry()
 }
 
-if(!file.exists("fsa_stanislaus.Rds")) {
+if(!file.exists("../data/fsa_stanislaus.Rds")) {
   fsa_stanislaus <- 
     stan_comid |>
     expand_grid(discharge_cfs = as.numeric(names(stan_result_filenames))) |>
@@ -234,9 +246,9 @@ if(!file.exists("fsa_stanislaus.Rds")) {
     unnest_wider(result) |>
     st_as_sf() |>
     glimpse()
-  fsa_stanislaus |> saveRDS("fsa_stanislaus.Rds")
+  fsa_stanislaus |> saveRDS("../data/fsa_stanislaus.Rds")
 } else {
-  fsa_stanislaus <- readRDS("fsa_stanislaus.Rds") |> glimpse()
+  fsa_stanislaus <- readRDS("../data/fsa_stanislaus.Rds") |> glimpse()
 }
 ```
 
@@ -246,14 +258,18 @@ if(!file.exists("fsa_stanislaus.Rds")) {
     ## $ geometry      <POLYGON [m]> POLYGON ((661091.5 4174815,..., POLYGON ((661091…
     ## $ discharge_cfs <dbl> 500, 750, 1000, 1250, 1500, 1750, 2250, 3000, 5000, 500,…
     ## $ area_m2       <dbl> 2973283.79, 2973283.79, 2973283.79, 2973283.79, 2973283.…
-    ## $ wua_simp      <dbl> 412329.791, 379738.496, 322488.778, 271860.568, 260913.1…
-    ## $ wua_frac      <dbl> 237537.632, 193493.037, 158826.603, 132768.285, 132073.8…
-    ## $ pcthab_simp   <dbl> 0.13867825, 0.12771687, 0.10846216, 0.09143445, 0.087752…
-    ## $ pcthab_frac   <dbl> 0.07989067, 0.06507722, 0.05341791, 0.04465375, 0.044420…
+    ## $ wua_simp      <dbl> 184235.315, 182968.634, 181451.715, 102791.552, 73867.99…
+    ## $ wua_frac      <dbl> 124882.432, 123558.843, 121039.274, 62002.932, 46502.493…
+    ## $ pcthab_simp   <dbl> 0.06196358, 0.06153756, 0.06102738, 0.03457173, 0.024843…
+    ## $ pcthab_frac   <dbl> 0.04200152, 0.04155636, 0.04070895, 0.02085335, 0.015640…
 
 ``` r
 #stan_hsi |> ggplot() + geom_sf(aes(fill=pcthab_simp), color=NA) + facet_wrap(~discharge_cfs)
-fsa_stanislaus |> ggplot() + geom_line(aes(x = discharge_cfs, y = pcthab_frac, color=as.factor(comid)))
 ```
 
-![](hydraulic-training-data_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
+``` r
+fsa_stanislaus |> 
+  ggplot() + geom_line(aes(x = discharge_cfs, y = pcthab_frac, color=factor(comid)))
+```
+
+![](hydraulic-training-data_files/figure-gfm/stan-plot-hsi-1.png)<!-- -->

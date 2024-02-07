@@ -1,9 +1,9 @@
 ---
-title: "Training Data - Stanislaus"
+title: "Hydraulic Training Data"
 output: github_document
 ---
 
-```{r message=FALSE, warning=FALSE}
+```{r setup, message=FALSE, warning=FALSE}
 library(tidyverse)
 library(sf)
 library(stars)
@@ -11,7 +11,7 @@ library(stars)
 
 Define habitat suitability functions
 
-```{r}
+```{r funcs}
 # simple linear interpolation function
 linterp <- function(x, x1, x2, y1, y2){
   y1 + ((x-x1)/(x2-x1)) * (y2-y1)
@@ -46,7 +46,7 @@ dvhsi <- function(d, v, frac=FALSE) {
 
 Import SRH2D model data for Stanislaus (unlike HEC-RAS, the SRH2D outputs are natively vector format)
 
-```{r message=FALSE, warning=FALSE}
+```{r stan-import, message=FALSE, warning=FALSE}
 # SRH2D model domain, dissolved from SRH2D mesh faces using QGIS
 stan_domain <- st_read("/vsizip/hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_Domain.shp.zip", as_tibble=T)
 
@@ -65,8 +65,7 @@ stan_thiessen <- st_read("/vsizip/hydraulic_model_data/stanislaus_srh2d_2013/Sta
   st_join(stan_vertices, join=st_nearest_feature) |>
   select(vid) |>
   arrange(vid)
-
-# confirm correct join
+# confirm correct join via:
 # ggplot() + geom_sf(data=stan_thiessen|>filter(vid<50)) + geom_sf(data=stan_vertices|>filter(vid<50)) 
 
 # Bed elevations, extracted from mesh using QGIS "Export time series values from points of a mesh dataset"
@@ -141,7 +140,7 @@ stan_vertices |> left_join(stan_material) |>
 Import polygons created for each COMID reach, and calculate suitable area for each
 
 Proof of concept, first comid, 500 cfs:
-```{r}
+```{r stan-test}
 test <- stan_thiessen |> 
   left_join(filter(stan_result, discharge_cfs==500), by=join_by(vid)) |>
   st_intersection(stan_comid[1]) |>
@@ -155,7 +154,7 @@ test <- stan_thiessen |>
 
 Batch process, saving flow-to-suitable-area (fsa) by comid to file
 
-```{r, fig.width=15, fig.height=10}
+```{r stan-calc-hsi}
 stan_calc_hsi <- function(g, q){
   stan_thiessen |>
     left_join(filter(stan_result, discharge_cfs==q), by=join_by(vid)) |> 
@@ -171,7 +170,7 @@ stan_calc_hsi <- function(g, q){
     st_drop_geometry()
 }
 
-if(!file.exists("./data/fsa_stanislaus.Rds")) {
+if(!file.exists("../data/fsa_stanislaus.Rds")) {
   fsa_stanislaus <- 
     stan_comid |>
     expand_grid(discharge_cfs = as.numeric(names(stan_result_filenames))) |>
@@ -179,10 +178,16 @@ if(!file.exists("./data/fsa_stanislaus.Rds")) {
     unnest_wider(result) |>
     st_as_sf() |>
     glimpse()
-  fsa_stanislaus |> saveRDS("./data/fsa_stanislaus.Rds")
+  fsa_stanislaus |> saveRDS("../data/fsa_stanislaus.Rds")
 } else {
-  fsa_stanislaus <- readRDS("./data/fsa_stanislaus.Rds") |> glimpse()
+  fsa_stanislaus <- readRDS("../data/fsa_stanislaus.Rds") |> glimpse()
 }
 
 #stan_hsi |> ggplot() + geom_sf(aes(fill=pcthab_simp), color=NA) + facet_wrap(~discharge_cfs)
 ```
+
+```{r stan-plot-hsi, fig.width=6.5, fig.height=4, dpi=300}
+fsa_stanislaus |> 
+  ggplot() + geom_line(aes(x = discharge_cfs, y = pcthab_frac, color=factor(comid)))
+```
+

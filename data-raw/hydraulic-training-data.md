@@ -1,9 +1,7 @@
----
-title: "Training Data - Stanislaus"
-output: github_document
----
+Training Data - Stanislaus
+================
 
-```{r message=FALSE, warning=FALSE}
+``` r
 library(tidyverse)
 library(sf)
 library(stars)
@@ -11,7 +9,7 @@ library(stars)
 
 Define habitat suitability functions
 
-```{r}
+``` r
 # simple linear interpolation function
 linterp <- function(x, x1, x2, y1, y2){
   y1 + ((x-x1)/(x2-x1)) * (y2-y1)
@@ -44,24 +42,72 @@ dvhsi <- function(d, v, frac=FALSE) {
 
 ## Stanislaus
 
-Import SRH2D model data for Stanislaus (unlike HEC-RAS, the SRH2D outputs are natively vector format)
+Import SRH2D model data for Stanislaus (unlike HEC-RAS, the SRH2D
+outputs are natively vector format)
 
-```{r message=FALSE, warning=FALSE}
+``` r
 # SRH2D model domain, dissolved from SRH2D mesh faces using QGIS
 stan_domain <- st_read("/vsizip/hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_Domain.shp.zip", as_tibble=T)
+```
 
+    ## Reading layer `StanMesh072313_Domain' from data source 
+    ##   `/vsizip/hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_Domain.shp.zip' 
+    ##   using driver `ESRI Shapefile'
+    ## Simple feature collection with 1 feature and 1 field
+    ## Geometry type: POLYGON
+    ## Dimension:     XYZ
+    ## Bounding box:  xmin: 655231.1 ymin: 4169204 xmax: 705835.6 ymax: 4188522
+    ## z_range:       zmin: 0 zmax: 0
+    ## Projected CRS: NAD83 / UTM zone 10N
+
+``` r
 # SRH2D model domain, manually split into polygons aligning with COMID segments
 stan_comid <- st_read("/vsizip/hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_Domain_COMID.shp.zip", as_tibble=T) |>
   st_zm() |> janitor::clean_names()
+```
 
+    ## Reading layer `StanMesh072313_Domain_COMID' from data source 
+    ##   `/vsizip/hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_Domain_COMID.shp.zip' 
+    ##   using driver `ESRI Shapefile'
+    ## Simple feature collection with 54 features and 1 field
+    ## Geometry type: POLYGON
+    ## Dimension:     XYZ
+    ## Bounding box:  xmin: 655231.1 ymin: 4169204 xmax: 705835.6 ymax: 4188522
+    ## z_range:       zmin: 0 zmax: 0
+    ## Projected CRS: NAD83 / UTM zone 10N
+
+``` r
 # SRH2D mesh vertices, converted from 2DM using QGIS 
 stan_vertices <- st_read("/vsizip/hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_Vertices.shp.zip", as_tibble=T) |>
   mutate(vid = row_number())
+```
 
+    ## Reading layer `StanMesh072313_Vertices' from data source 
+    ##   `/vsizip/hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_Vertices.shp.zip' 
+    ##   using driver `ESRI Shapefile'
+    ## Simple feature collection with 241395 features and 1 field
+    ## Geometry type: POINT
+    ## Dimension:     XYZ
+    ## Bounding box:  xmin: 655231.1 ymin: 4169204 xmax: 705835.6 ymax: 4188522
+    ## z_range:       zmin: 2.461469 zmax: 151.0898
+    ## Projected CRS: NAD83 / UTM zone 10N
+
+``` r
 # Thiessen (aka Voronoi) polygons for mesh vertices, generated using QGIS
 stan_thiessen <- st_read("/vsizip/hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_Thiessen.shp.zip", as_tibble=T) |>
   mutate(vid = row_number())
+```
 
+    ## Reading layer `StanMesh072313_Thiessen' from data source 
+    ##   `/vsizip/hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_Thiessen.shp.zip' 
+    ##   using driver `ESRI Shapefile'
+    ## Simple feature collection with 241395 features and 1 field
+    ## Geometry type: POLYGON
+    ## Dimension:     XY
+    ## Bounding box:  xmin: 655231.1 ymin: 4169204 xmax: 705835.6 ymax: 4188522
+    ## Projected CRS: NAD83 / UTM zone 10N
+
+``` r
 # Bed elevations, extracted from mesh using QGIS "Export time series values from points of a mesh dataset"
 stan_elev <- read_csv("hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_BedElevation.csv.gz") |>
   janitor::clean_names() |>
@@ -108,13 +154,26 @@ stan_result <-
     hsi_frac = dvhsi(depth_ft, velocity_fps, frac=T) * cover_hs,
   ) |>
   glimpse()
-
 ```
 
-Import polygons created for each COMID reach, and calculate suitable area for each
+    ## Rows: 2,172,555
+    ## Columns: 9
+    ## $ discharge_cfs <dbl> 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 5…
+    ## $ vid           <int> 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1…
+    ## $ depth_ft      <dbl> 0.0000000, 1.1168896, 3.6240659, 3.9757284, 3.9583468, 3…
+    ## $ velocity_fps  <dbl> 0.0000000, 0.6719190, 1.5923429, 1.8671964, 1.2991604, 0…
+    ## $ bed_elevation <dbl> 54.86779, 53.10716, 52.34171, 52.23186, 52.23380, 52.252…
+    ## $ material_id   <dbl> 39, 28, 28, 28, 28, 25, 25, 28, 28, 28, 39, 39, 28, 28, …
+    ## $ cover_hs      <dbl> 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,…
+    ## $ hsi_simp      <dbl> 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1,…
+    ## $ hsi_frac      <dbl> 0.0000000, 1.0000000, 0.6964030, 0.5825029, 0.8219159, 1…
+
+Import polygons created for each COMID reach, and calculate suitable
+area for each
 
 Proof of concept, first comid, 500 cfs:
-```{r}
+
+``` r
 test <- stan_thiessen |> 
   left_join(filter(stan_result, discharge_cfs==500), by=join_by(vid)) |>
   st_intersection(stan_comid[1]) |>
@@ -122,13 +181,36 @@ test <- stan_thiessen |>
            wua_simp = hsi_simp * area_m2,
            wua_frac = hsi_frac * area_m2) |>
   glimpse()
+```
 
+    ## Warning: attribute variables are assumed to be spatially constant throughout
+    ## all geometries
+
+    ## Rows: 244,606
+    ## Columns: 15
+    ## $ FID           <dbl> 216994, 217673, 217313, 217311, 215710, 218190, 218708, …
+    ## $ vid           <int> 9658, 9659, 9849, 9850, 10034, 10035, 10185, 10186, 1032…
+    ## $ discharge_cfs <dbl> 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 5…
+    ## $ depth_ft      <dbl> 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.0000…
+    ## $ velocity_fps  <dbl> 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.000000…
+    ## $ bed_elevation <dbl> 48.53050, 65.92336, 65.44435, 64.93144, 61.25634, 61.193…
+    ## $ material_id   <dbl> 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 30, 43, 43, 20, …
+    ## $ cover_hs      <dbl> 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,…
+    ## $ hsi_simp      <dbl> 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,…
+    ## $ hsi_frac      <dbl> 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,…
+    ## $ comid         <dbl> 2819852, 2819852, 2819852, 2819852, 2819852, 2819852, 28…
+    ## $ geometry      <POLYGON [m]> POLYGON ((659818.6 4172628,..., POLYGON ((659553…
+    ## $ area_m2       <dbl> 59.92954, 123.85818, 122.89417, 96.65988, 52.58322, 110.…
+    ## $ wua_simp      <dbl> 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.…
+    ## $ wua_frac      <dbl> 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.…
+
+``` r
 #test |> ggplot() + geom_sf(aes(fill=hsi_simp), color=NA)
 ```
 
 Batch process, saving flow-to-suitable-area (fsa) by comid to file
 
-```{r, fig.width=15, fig.height=10}
+``` r
 stan_calc_hsi <- function(g, q){
   stan_thiessen |>
     left_join(filter(stan_result, discharge_cfs==q), by=join_by(vid)) |> 
@@ -156,7 +238,22 @@ if(!file.exists("fsa_stanislaus.Rds")) {
 } else {
   fsa_stanislaus <- readRDS("fsa_stanislaus.Rds") |> glimpse()
 }
+```
 
+    ## Rows: 486
+    ## Columns: 8
+    ## $ comid         <dbl> 2819852, 2819852, 2819852, 2819852, 2819852, 2819852, 28…
+    ## $ geometry      <POLYGON [m]> POLYGON ((661091.5 4174815,..., POLYGON ((661091…
+    ## $ discharge_cfs <dbl> 500, 750, 1000, 1250, 1500, 1750, 2250, 3000, 5000, 500,…
+    ## $ area_m2       <dbl> 2973283.79, 2973283.79, 2973283.79, 2973283.79, 2973283.…
+    ## $ wua_simp      <dbl> 412329.791, 379738.496, 322488.778, 271860.568, 260913.1…
+    ## $ wua_frac      <dbl> 237537.632, 193493.037, 158826.603, 132768.285, 132073.8…
+    ## $ pcthab_simp   <dbl> 0.13867825, 0.12771687, 0.10846216, 0.09143445, 0.087752…
+    ## $ pcthab_frac   <dbl> 0.07989067, 0.06507722, 0.05341791, 0.04465375, 0.044420…
+
+``` r
 #stan_hsi |> ggplot() + geom_sf(aes(fill=pcthab_simp), color=NA) + facet_wrap(~discharge_cfs)
 fsa_stanislaus |> ggplot() + geom_line(aes(x = discharge_cfs, y = pcthab_frac, color=as.factor(comid)))
 ```
+
+![](hydraulic-training-data_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->

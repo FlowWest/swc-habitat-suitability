@@ -1,7 +1,7 @@
-Width Datasets
+Channel Width Datasets
 ================
 Maddee Rubenson (FlowWest)
-2024-02-02
+2024-02-06
 
 ## River Channel Width Dataset Exploration
 
@@ -88,14 +88,14 @@ ggplot(all_width_data_in_cv_trunc, aes(x = width_feet)) +
 
 ``` r
 ggplot() +
-    geom_sf(data = watersheds) +
-    geom_sf(data = all_width_data_in_cv_trunc, aes(color = width_feet))
+  geom_sf(data = watersheds) +
+  geom_sf(data = all_width_data_in_cv_trunc, aes(color = width_feet))
 ```
 
 ![](width-datasets-exploration_files/figure-gfm/unnamed-chunk-3-2.png)<!-- -->
 
 ``` r
-saveRDS(all_width_data_in_cv_trunc, 'width_data/global_width_dataset.RDS')
+#saveRDS(all_width_data_in_cv_trunc, 'width_data/global_width_dataset.RDS')
 ```
 
 ### Merit Hydro
@@ -121,13 +121,9 @@ library(stars)
 library(sf)
 
 flowlines <- readRDS("../data/flowline_geometries.Rds") |>
-  left_join(readRDS("../data/flowline_attributes.Rds")) |>
+  #left_join(readRDS("../data/flowline_attributes.Rds")) |>
   st_transform(project_crs)
-```
 
-    ## Joining with `by = join_by(comid)`
-
-``` r
 merit_1 <- drive_file_by_id('17vpwVL4HYa74-VrXkewWvWg2YUjyqVfC', vsizip = F) |>
   raster::raster() |> 
   st_as_stars() |> 
@@ -204,5 +200,41 @@ ggplot() +
 ![](width-datasets-exploration_files/figure-gfm/unnamed-chunk-4-2.png)<!-- -->
 
 ``` r
-saveRDS(all_merit_trunc, 'width_data/merit_width_data.RDS')
+#saveRDS(all_merit_trunc, 'width_data/merit_width_data.RDS')
+```
+
+## Aggregate width measurements by NHD
+
+### Merit data
+
+``` r
+join_width_and_flowlines <- st_join(all_merit_trunc |> st_transform(project_crs), flowlines |> st_zm()) |> filter(!is.na(comid))
+
+ggplot() +
+  geom_sf(data = watersheds) + 
+  geom_sf(data = join_width_and_flowlines, aes(color = width_m)) 
+```
+
+![](width-datasets-exploration_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
+
+``` r
+saveRDS(join_width_and_flowlines, 'width_data/merit_width_dataset_comid_join.RDS')
+```
+
+### Global Width Database
+
+``` r
+join_width_and_flowlines_gwd <- st_join(all_width_data_in_cv_trunc |> st_transform(project_crs), flowlines |> st_zm()) |> 
+  filter(!is.na(comid)) |> 
+  select(comid, width_m)
+
+ggplot() +
+  geom_sf(data = watersheds) + 
+  geom_sf(data = join_width_and_flowlines_gwd) 
+```
+
+![](width-datasets-exploration_files/figure-gfm/unnamed-chunk-6-1.png)<!-- -->
+
+``` r
+saveRDS(join_width_and_flowlines_gwd, "width_data/gwd_width_dataset_comid_join.RDS")
 ```

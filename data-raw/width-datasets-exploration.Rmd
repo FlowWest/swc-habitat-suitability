@@ -1,5 +1,5 @@
 ---
-title: "Width Datasets"
+title: "Channel Width Datasets"
 author: "Maddee Rubenson (FlowWest)"
 date: "`r Sys.Date()`"
 output: github_document
@@ -10,7 +10,7 @@ library(sf)
 library(tidyverse)
 
 # googledrive::drive_auth()
- 
+
 theme_set(theme_minimal())
 
 source('data-functions.R')
@@ -18,7 +18,6 @@ source('data-functions.R')
 project_crs <- "ESRI:102039"
 
 knitr::opts_chunk$set(echo = TRUE)
-
 ```
 
 ## River Channel Width Dataset Exploration
@@ -37,6 +36,9 @@ watersheds <-
   st_transform(project_crs) |>
   st_union()
 
+#selected_huc_8 <- c("18020107", "18020125") # yuba river
+selected_huc_8 <- c("18040010") # stanislaus
+
 ```
 
 ```{r eval=FALSE, include=FALSE}
@@ -47,20 +49,20 @@ files_cali <- data.frame(
   file_name = files,
   number = str_extract(files, "\\d{2}(?=\\.)"),
   extension = substring(files, nchar(files) - 3, nchar(files))
-  ) |>
+) |>
   filter(number %in% c(10, 11)) |>
   filter(extension == ".shp")
 
 for(i in 1:length(files_cali$file_name)) {
-
+  
   dataset <- read_sf(paste0('../../../../Downloads/GRWL_centerlineData/', files_cali$file_name[i])) |>
     st_transform(project_crs)
-
+  
   ggplot() +
     geom_sf(data = watersheds) +
     geom_sf(data = dataset, aes(color = 'GRWL dataset')) +
     ggtitle(files_cali$file_name[i])
-
+  
   ggsave(filename = paste0('plots/', files_cali$file_name[i], '.png'),  plot = last_plot())
 }
 
@@ -94,11 +96,11 @@ ggplot(all_width_data_in_cv_trunc, aes(x = width_feet)) +
   geom_histogram()
 
 ggplot() +
-    geom_sf(data = watersheds) +
-    geom_sf(data = all_width_data_in_cv_trunc, aes(color = width_feet))
+  geom_sf(data = watersheds) +
+  geom_sf(data = all_width_data_in_cv_trunc, aes(color = width_feet))
 
 
-saveRDS(all_width_data_in_cv_trunc, 'width_data/global_width_dataset.RDS')
+#saveRDS(all_width_data_in_cv_trunc, 'width_data/global_width_dataset.RDS')
 
 ```
 
@@ -117,7 +119,7 @@ library(stars)
 library(sf)
 
 flowlines <- readRDS("../data/flowline_geometries.Rds") |>
-  left_join(readRDS("../data/flowline_attributes.Rds")) |>
+  #left_join(readRDS("../data/flowline_attributes.Rds")) |>
   st_transform(project_crs)
 
 merit_1 <- drive_file_by_id('17vpwVL4HYa74-VrXkewWvWg2YUjyqVfC', vsizip = F) |>
@@ -164,7 +166,38 @@ ggplot() +
 ggplot() +
   geom_histogram(data = all_merit_trunc, aes(x = width_feet))
 
-saveRDS(all_merit_trunc, 'width_data/merit_width_data.RDS')
+#saveRDS(all_merit_trunc, 'width_data/merit_width_data.RDS')
+
+```
+
+## Aggregate width measurements by NHD
+
+### Merit data 
+```{r echo=TRUE}
+join_width_and_flowlines <- st_join(all_merit_trunc |> st_transform(project_crs), flowlines |> st_zm()) |> filter(!is.na(comid)) |> 
+  select(comid, width_m)
+
+ggplot() +
+  geom_sf(data = watersheds) + 
+  geom_sf(data = join_width_and_flowlines, aes(color = width_m)) 
+
+saveRDS(join_width_and_flowlines, 'width_data/merit_width_dataset_comid_join.RDS')
+
+```
+
+### Global Width Database
+
+```{r echo=TRUE}
+join_width_and_flowlines_gwd <- st_join(all_width_data_in_cv_trunc |> st_transform(project_crs), flowlines |> st_zm()) |> 
+  filter(!is.na(comid)) |> 
+  select(comid, width_m) |> 
+  mutate(width_m = as.numeric(width_m))
+
+ggplot() +
+  geom_sf(data = watersheds) + 
+  geom_sf(data = join_width_and_flowlines_gwd, aes(color = width_m))
+
+saveRDS(join_width_and_flowlines_gwd, "width_data/gwd_width_dataset_comid_join.RDS")
 
 ```
 

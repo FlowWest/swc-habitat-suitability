@@ -56,11 +56,18 @@ stan_comid <- st_read("/vsizip/hydraulic_model_data/stanislaus_srh2d_2013/StanMe
 
 # SRH2D mesh vertices, converted from 2DM using QGIS 
 stan_vertices <- st_read("/vsizip/hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_Vertices.shp.zip", as_tibble=T) |>
-  mutate(vid = row_number())
+  mutate(vid = row_number()) |>
+  select(vid)
 
 # Thiessen (aka Voronoi) polygons for mesh vertices, generated using QGIS
 stan_thiessen <- st_read("/vsizip/hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_Thiessen.shp.zip", as_tibble=T) |>
-  mutate(vid = row_number())
+  #mutate(vid = row_number()) # row order doesn't match the SRH2D outputs so need to spatial join
+  st_join(stan_vertices, join=st_nearest_feature) |>
+  select(vid) |>
+  arrange(vid)
+
+# confirm correct join
+# ggplot() + geom_sf(data=stan_thiessen|>filter(vid<50)) + geom_sf(data=stan_vertices|>filter(vid<50)) 
 
 # Bed elevations, extracted from mesh using QGIS "Export time series values from points of a mesh dataset"
 stan_elev <- read_csv("hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_BedElevation.csv.gz") |>
@@ -74,6 +81,12 @@ stan_material <-
   janitor::clean_names() |>
   mutate(vid = row_number()) |>
   select(vid, material_id)
+# alternate approach with spatial join yields the same result
+# stan_material <- 
+#   read_csv("hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_MaterialID.csv.gz") |>
+#   janitor::clean_names() |>
+#   st_as_sf(coords=c("x","y"), crs=st_crs(stan_thiessen)) |>
+#   st_join(stan_thiessen, join=st_nearest_feature)
 
 # SRH2D results by vertex point, incl. depth, velocity, shear stress, froude
 stan_result_filenames <- c(
@@ -111,6 +124,20 @@ stan_result <-
 
 ```
 
+```{r fig.width=15, fig.height=10, dpi=300, eval=FALSE, include=FALSE}
+# confirm that using row order is equivalent to spatial joining
+read_csv("hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_MaterialID.csv.gz") |>
+  janitor::clean_names() |>
+  mutate(vid = row_number()) |>
+  st_as_sf(coords = c("x","y")) |>
+  ggplot() + geom_sf(aes(color=factor(material_id)), size=1) + theme(legend.position = "top")
+```
+
+```{r fig.width=15, fig.height=10, dpi=300, eval=FALSE, include=FALSE}
+stan_vertices |> left_join(stan_material) |> 
+  ggplot() + geom_sf(aes(color=factor(material_id)), size=1) + theme(legend.position = "top")
+```
+
 Import polygons created for each COMID reach, and calculate suitable area for each
 
 Proof of concept, first comid, 500 cfs:
@@ -144,7 +171,7 @@ stan_calc_hsi <- function(g, q){
     st_drop_geometry()
 }
 
-if(!file.exists("fsa_stanislaus.Rds")) {
+if(!file.exists("./data/fsa_stanislaus.Rds")) {
   fsa_stanislaus <- 
     stan_comid |>
     expand_grid(discharge_cfs = as.numeric(names(stan_result_filenames))) |>
@@ -152,11 +179,10 @@ if(!file.exists("fsa_stanislaus.Rds")) {
     unnest_wider(result) |>
     st_as_sf() |>
     glimpse()
-  fsa_stanislaus |> saveRDS("fsa_stanislaus.Rds")
+  fsa_stanislaus |> saveRDS("./data/fsa_stanislaus.Rds")
 } else {
-  fsa_stanislaus <- readRDS("fsa_stanislaus.Rds") |> glimpse()
+  fsa_stanislaus <- readRDS("./data/fsa_stanislaus.Rds") |> glimpse()
 }
 
 #stan_hsi |> ggplot() + geom_sf(aes(fill=pcthab_simp), color=NA) + facet_wrap(~discharge_cfs)
-fsa_stanislaus |> ggplot() + geom_line(aes(x = discharge_cfs, y = pcthab_frac, color=as.factor(comid)))
 ```

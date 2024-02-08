@@ -20,26 +20,68 @@ linterp <- function(x, x1, x2, y1, y2){
 }
 
 # vectorized function to calculate the depth*velocity suitability factor
-# frac=FALSE uses simple 1/0 thresholds; frac=TRUE uses ranges defined in Yuba tables 8-9
-dvhsi <- function(d, v, frac=FALSE) {
-  if(frac){
+# if applicable, cover will also need to be applied.
+# method=0 uses simple 1/0 thresholds (CVPIA)
+# method=1 uses ranges defined in CBEC Lower Yuba River report, tables 8-9
+# method=2 uses ranges defined for USBR San Joaquin model (which also did not incorporate cover)
+dvhsi <- function(d, v, method=0) {
+  
+  if(method==0){
+    
+    return(if_else(d>0.5 & d<=5.2 & v>0.1 & v<=4.0, 1, 0))
+    
+  } else if(method==1){
+    
     dhsi <- case_when(
       d<=0.5 ~ 0,
       d<=0.9 ~ linterp(d, 0.5, 0.9, 0, 1),
       d<=4.0 ~ 1,
       d<=5.2 ~ linterp(d, 4.0, 5.2, 1, 0),
-      d>5.2 ~ 0
-    )
+      d>5.2 ~ 0)
     vhsi <- case_when(
       v<=0.1 ~ linterp(v, 0.0, 0.1, 0, 1),
       v<=0.8 ~ 1,
       v<=1.8 ~ linterp(v, 0.8, 1.8, 1, 0.35),
       v<=4.0 ~ linterp(v, 1.8, 4.0, 0.35, 0),
-      v>4.0 ~ 0
-    )
-    return(sqrt(dhsi*vhsi)) 
-  }else{
-    return(if_else(d>0.5 & d<=5.2 & v>0.1 & v<=4.0, 1, 0))
+      v>4.0 ~ 0)
+    return(sqrt(dhsi*vhsi))
+    
+  } else if(method==3){
+    
+    dhsi <- case_when(d<=0.01 ~ 0.00,
+                      d<=0.10 ~ 0.10,
+                      d<=0.20 ~ 0.20,
+                      d<=0.60 ~ 0.15,
+                      d<=0.80 ~ 0.35,
+                      d<=1.00 ~ 0.46,
+                      d<=1.20 ~ 0.53,
+                      d<=1.50 ~ 0.64,
+                      d<=2.10 ~ 0.86,
+                      d<=2.50 ~ 0.86,
+                      d<=2.90 ~ 0.57,
+                      d<=4.00 ~ 0.34,
+                      d<=4.50 ~ 0.14,
+                      d<=5.00 ~ 0.30,
+                      d<=7.00 ~ 0.20,
+                      d<=7.10 ~ 0.10,
+                      d<=10.0 ~ 0.00,
+                      d>10.0 ~ 0.00)
+    vhsi <- case_when(v<=0.1 ~ 0.94,
+                      v<=0.2 ~ 0.98,
+                      v<=0.3 ~ 1.00,
+                      v<=0.5 ~ 0.99,
+                      v<=0.7 ~ 0.98,
+                      v<=1.0 ~ 0.96,
+                      v<=1.2 ~ 0.95,
+                      v<=1.5 ~ 0.93,
+                      v<=2.0 ~ 0.68,
+                      v<=2.5 ~ 0.30,
+                      v<=2.8 ~ 0.08,
+                      v<=3.4 ~ 0.01,
+                      v<=3.5 ~ 0.01,
+                      v>3.5 ~ 0.00)
+    return(pmin(dhsi, vhsi))
+    
   }
 }
 ```
@@ -125,8 +167,8 @@ stan_result <-
   left_join(stan_material, by=join_by(vid)) |>
   mutate(
     cover_hs = 1, # cover habitat suitability, for now, actually need to get it from stan_material
-    hsi_simp = dvhsi(depth_ft, velocity_fps, frac=F) * cover_hs,
-    hsi_frac = dvhsi(depth_ft, velocity_fps, frac=T) * cover_hs,
+    hsi_simp = dvhsi(depth_ft, velocity_fps, method=0) * cover_hs,
+    hsi_frac = dvhsi(depth_ft, velocity_fps, method=1) * cover_hs,
   ) |>
   glimpse()
 

@@ -407,24 +407,25 @@ scheme](https://californiawaterblog.com/wp-content/uploads/2017/07/lane_1.png)
 result](https://github.com/ceff-tech/eflow-readme/raw/master/FinalCAClassification.jpg)
 
 ``` r
-hyd_cls_tbl <- tribble(~class, ~hyd_cls, ~hyd_cls_descrip,
-                       1, "SM", "Snowmelt",
-                       2, "HSR", "High-volume snowmelt and rain",
-                       3, "LSR", "Low-volume snowmelt and rain",
-                       8, "RGW", "Rain and seasonal groundwater",
-                       4, "WS", "Winter storms",
-                       5, "GW", "Groundwater", 
-                       6, "PGR", "Perennial groundwater and rain",
-                       7, "FER", "Flashy, ephemeral rain",
-                       9, "HLP", "High elevation, low precipitation"
+hyd_cls_tbl <- tribble(~class, ~hyd_cls, ~hyd_cat, ~hyd_cls_descrip,
+                       1, "SM", 1, "Snowmelt",
+                       2, "HSR", 2, "High-volume snowmelt and rain",
+                       3, "LSR", 2, "Low-volume snowmelt and rain",
+                       8, "RGW", 3, "Rain and seasonal groundwater",
+                       4, "WS", 3, "Winter storms",
+                       5, "GW", 2, "Groundwater", 
+                       6, "PGR", 3, "Perennial groundwater and rain",
+                       7, "FER", 3, "Flashy, ephemeral rain",
+                       9, "HLP", 1, "High elevation, low precipitation"
                        )
 hyd_cls <- drive_file_by_id("1qABq_Y-ZzuH_Am6pkqpno4K5nGYhYd1R", vsizip=T) |>
   st_read(as_tibble=T) |>
   janitor::clean_names() |>
   st_drop_geometry() |>
   left_join(hyd_cls_tbl, by=join_by(class)) |>
-  mutate(hyd_cls = factor(hyd_cls, levels=hyd_cls_tbl$hyd_cls, labels=hyd_cls_tbl$hyd_cls_descrip)) |>
-  select(comid, hyd_cls) |>
+  mutate(hyd_cls = factor(hyd_cls, levels=hyd_cls_tbl$hyd_cls, labels=hyd_cls_tbl$hyd_cls_descrip),
+         hyd_cat = factor(hyd_cat, levels=c(1,2,3), labels=c("Snowmelt", "Mixed", "Rain"))) |>
+  select(comid, hyd_cat, hyd_cls) |>
   glimpse()
 ```
 
@@ -438,8 +439,9 @@ hyd_cls <- drive_file_by_id("1qABq_Y-ZzuH_Am6pkqpno4K5nGYhYd1R", vsizip=T) |>
     ## m_range:       mmin: 0 mmax: 100
     ## Geodetic CRS:  NAD83
     ## Rows: 70,720
-    ## Columns: 2
+    ## Columns: 3
     ## $ comid   <dbl> 8200535, 8200545, 8200931, 8201087, 8201891, 8202565, 8202567,…
+    ## $ hyd_cat <fct> Rain, Rain, Rain, Rain, Rain, Rain, Rain, Rain, Rain, Rain, Ra…
     ## $ hyd_cls <fct> "Flashy, ephemeral rain", "Flashy, ephemeral rain", "Flashy, e…
 
 ``` r

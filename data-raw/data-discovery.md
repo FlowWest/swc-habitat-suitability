@@ -1,7 +1,7 @@
 SWC Habitat Model Data Discovery
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-02-07
+2024-02-08
 
 - [Case study geographic scope](#case-study-geographic-scope)
 - [Data Import](#data-import)
@@ -11,6 +11,7 @@ SWC Habitat Model Data Discovery
   - [Import Flowline Geometry](#import-flowline-geometry)
 - [Maps of attribute data
   (exploratory)](#maps-of-attribute-data-exploratory)
+- [Import catchments](#import-catchments)
 
 ## Case study geographic scope
 
@@ -40,7 +41,7 @@ watersheds <-
 
     ##   <https://gargle.r-lib.org/articles/non-interactive-auth.html>
 
-    ## ℹ The googledrive package is using a cached token for 'mrubenson@flowwest.com'.
+    ## ℹ The googledrive package is using a cached token for 'slewis@flowwest.com'.
 
     ## Reading layer `WBD_Subwatershed' from data source 
     ##   `/vsizip/temp/WBD_Subwatershed.zip' using driver `ESRI Shapefile'
@@ -392,6 +393,112 @@ Data source: <https://hydro.iis.u-tokyo.ac.jp/~yamadai/MERIT_Hydro/>
 width_data <- readRDS('width_data/merit_width_dataset_comid_join.RDS') 
 ```
 
+#### Stream Classifications
+
+Hydrologic stream classifications from
+<https://doi.org/10.1111/1752-1688.12504>
+
+These classifications were developed using a [series of catchment
+characteristics](https://californiawaterblog.com/2017/07/16/a-simplified-method-to-classify-streams-and-improve-californias-water-management/):
+
+\-[Classification
+scheme](https://californiawaterblog.com/wp-content/uploads/2017/07/lane_1.png)
+-[Final
+result](https://github.com/ceff-tech/eflow-readme/raw/master/FinalCAClassification.jpg)
+
+``` r
+hyd_cls_tbl <- tribble(~class, ~hyd_cls, ~hyd_cat, ~hyd_cls_descrip,
+                       1, "SM", 1, "Snowmelt",
+                       2, "HSR", 2, "High-volume snowmelt and rain",
+                       3, "LSR", 2, "Low-volume snowmelt and rain",
+                       8, "RGW", 3, "Rain and seasonal groundwater",
+                       4, "WS", 3, "Winter storms",
+                       5, "GW", 2, "Groundwater", 
+                       6, "PGR", 3, "Perennial groundwater and rain",
+                       7, "FER", 3, "Flashy, ephemeral rain",
+                       9, "HLP", 1, "High elevation, low precipitation"
+                       )
+hyd_cls <- drive_file_by_id("1qABq_Y-ZzuH_Am6pkqpno4K5nGYhYd1R", vsizip=T) |>
+  st_read(as_tibble=T) |>
+  janitor::clean_names() |>
+  st_drop_geometry() |>
+  left_join(hyd_cls_tbl, by=join_by(class)) |>
+  mutate(hyd_cls = factor(hyd_cls, levels=hyd_cls_tbl$hyd_cls, labels=hyd_cls_tbl$hyd_cls_descrip),
+         hyd_cat = factor(hyd_cat, levels=c(1,2,3), labels=c("Snowmelt", "Mixed", "Rain"))) |>
+  select(comid, hyd_cat, hyd_cls) |>
+  glimpse()
+```
+
+    ## Reading layer `Final_Classification_9CLASS' from data source 
+    ##   `/vsizip/temp/Final_Classification_9CLASS.zip' using driver `ESRI Shapefile'
+    ## Simple feature collection with 70720 features and 5 fields
+    ## Geometry type: MULTILINESTRING
+    ## Dimension:     XY, XYZM
+    ## Bounding box:  xmin: -124.4025 ymin: 32.54011 xmax: -114.6555 ymax: 42.00744
+    ## z_range:       zmin: 0 zmax: 0
+    ## m_range:       mmin: 0 mmax: 100
+    ## Geodetic CRS:  NAD83
+    ## Rows: 70,720
+    ## Columns: 3
+    ## $ comid   <dbl> 8200535, 8200545, 8200931, 8201087, 8201891, 8202565, 8202567,…
+    ## $ hyd_cat <fct> Rain, Rain, Rain, Rain, Rain, Rain, Rain, Rain, Rain, Rain, Ra…
+    ## $ hyd_cls <fct> "Flashy, ephemeral rain", "Flashy, ephemeral rain", "Flashy, e…
+
+``` r
+nf <- 
+  drive_file_by_id("1P9vH9VXbPV9jYuFq35yF3elBRatYKQmU", vsizip=F) |>
+  archive::archive_read() |>
+  read_csv() |>
+  filter(comid %in% flowline_table$comid)
+```
+
+    ## Rows: 8151537 Columns: 15
+    ## ── Column specification ────────────────────────────────────────────────────────
+    ## Delimiter: ","
+    ## chr  (5): ffm, wyt, unit, source, alteration
+    ## dbl (10): comid, p10, p25, p50, p75, p90, gage_id, observed_years, observed_...
+    ## 
+    ## ℹ Use `spec()` to retrieve the full column specification for this data.
+    ## ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+
+``` r
+# A selection of potentially useful flow frequency metrics. There are many other potential options
+nf_ffm <- reduce(list(
+  # dry season baseflow in moderate water year
+  nf |> 
+    filter(ffm=="ds_mag_50" & source=="model" & wyt=="moderate") |> 
+    select(comid, nf_bfl_dry_cfs = p50),
+  # wet season baseflow in moderate water year
+  nf |> 
+    filter(ffm=="wet_bfl_mag_10" & source=="model" & wyt=="moderate") |> 
+    select(comid, nf_bfl_wet_cfs = p50),
+  # start date of wet season in moderate water year
+  nf |> 
+    filter(ffm=="wet_tim" & source=="model" & wyt=="moderate") |> 
+    select(comid, nf_wet_start = p50),
+  # start date of wet season in moderate water year
+  nf |> 
+    filter(ffm=="wet_bfl_dur" & source=="model" & wyt=="moderate") |> 
+    select(comid, nf_wet_dur = p50)
+  ), left_join, by=join_by(comid))
+
+# Peak flows Q2, Q5, Q10 (cfs) 
+peak_flows <- reduce(list(
+  # start date of wet season in moderate water year
+  nf |> 
+    filter(ffm=="peak_2" & source=="model") |> 
+    select(comid, peak_q2_cfs = p50),
+  # start date of wet season in moderate water year
+  nf |> 
+    filter(ffm=="peak_5" & source=="model") |> 
+    select(comid, peak_q5_cfs = p50),
+  # start date of wet season in moderate water year
+  nf |> 
+    filter(ffm=="peak_10" & source=="model") |> 
+    select(comid, peak_q10_cfs = p50)
+  ), left_join, by=join_by(comid))
+```
+
 ### Combine all attributes
 
 Import attributes calculated in `terrain-attributes.Rmd` just for Yuba
@@ -427,13 +534,18 @@ flowline_attributes <-
   left_join(flowline_sinuosity) |>
   left_join(da_suppl_attrs) |> 
   left_join(streamcat_data) |>
-  left_join(catchment_ndvi) |> 
+  left_join(catchment_ndvi) |>
+  left_join(hyd_cls) |>
+  left_join(nf_ffm) |>
+  left_join(peak_flows) |>
   left_join(width_data) |> 
   # fill in gaps in the RF bankfull estimates with the simple Bieger model
   mutate(bf_width_m = coalesce(bf_width_m, 2.76*da_area_sq_km^0.399),
          bf_depth_m = coalesce(bf_depth_m, 0.23*da_area_sq_km^0.294),
          bf_xarea_m = coalesce(bf_width_m*bf_depth_m, 0.87*da_area_sq_km^0.652),
          bf_w_d_ratio = bf_width_m / bf_depth_m) |>
+  # fill in gaps in merit_width_m using bankfull estimates. Prefer merit where available
+  mutate(chan_width_m = coalesce(merit_width_m, bf_width_m)) |>
   # add some back of the envelope sediment transport calculations
   mutate(velocity_m_s = erom_v_ma_fps / 0.3048,
          wetted_perimeter_m = 2*bf_depth_m + bf_width_m,
@@ -449,8 +561,8 @@ flowline_attributes <-
                          ((rho_s_cgs - rho_cgs) * g_cgs)^(1/3)) |>
   left_join(attr_mtpi) |>
   left_join(attr_vb1 |> select(comid, vb_width_transect)) |>
-  mutate(vb_width_transect = coalesce(pmax(vb_width_transect, bf_width_m), vb_width_transect),
-         vb_bf_w_ratio = vb_width_transect / bf_width_m)
+  mutate(vb_width_transect = coalesce(pmax(vb_width_transect, chan_width_m), vb_width_transect),
+         vb_bf_w_ratio = vb_width_transect / chan_width_m)
 
 flowline_attributes |> saveRDS("../data/flowline_attributes.Rds")
   
@@ -795,6 +907,19 @@ flowlines |>
 ![](data-discovery_files/figure-gfm/plot-vb_bf_w_ratio-1.png)<!-- -->
 
 ``` r
+# plot showing hydrologic classification
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = hyd_cls)) +
+  geom_sf(aes(color = hyd_cls), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") 
+```
+
+![](data-discovery_files/figure-gfm/plot-hyd-cls-1.png)<!-- -->
+
+``` r
 # plot showing merit width data
 flowlines |> 
   st_zm() |>
@@ -806,8 +931,25 @@ flowlines |>
   scale_color_viridis_c(trans = "log")
 ```
 
-![](data-discovery_files/figure-gfm/plot-width-1.png)<!-- --> \## Import
-catchments
+![](data-discovery_files/figure-gfm/plot-width-1.png)<!-- -->
+
+``` r
+# plot showing merit width data combined with bankfull where merit is not available
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = chan_width_m)) +
+  geom_sf(aes(color = chan_width_m), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(trans = "log")
+```
+
+    ## Warning: Transformation introduced infinite values in discrete y-axis
+
+![](data-discovery_files/figure-gfm/plot-width-combined-1.png)<!-- -->
+
+## Import catchments
 
 ``` r
 # local catchment associated with each flowline reach (COMID)

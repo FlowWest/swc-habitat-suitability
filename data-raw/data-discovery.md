@@ -1,7 +1,7 @@
 SWC Habitat Model Data Discovery
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-01-29
+2024-02-07
 
 - [Case study geographic scope](#case-study-geographic-scope)
 - [Data Import](#data-import)
@@ -40,7 +40,7 @@ watersheds <-
 
     ##   <https://gargle.r-lib.org/articles/non-interactive-auth.html>
 
-    ## ℹ The googledrive package is using a cached token for 'slewis@flowwest.com'.
+    ## ℹ The googledrive package is using a cached token for 'mrubenson@flowwest.com'.
 
     ## Reading layer `WBD_Subwatershed' from data source 
     ##   `/vsizip/temp/WBD_Subwatershed.zip' using driver `ESRI Shapefile'
@@ -384,6 +384,14 @@ catchment_ndvi
     ## 10 342397     0.310
     ## # ℹ 140,608 more rows
 
+#### Width Data
+
+Data source: <https://hydro.iis.u-tokyo.ac.jp/~yamadai/MERIT_Hydro/>
+
+``` r
+width_data <- readRDS('width_data/merit_width_dataset_comid_join.RDS') 
+```
+
 ### Combine all attributes
 
 Import attributes calculated in `terrain-attributes.Rmd` just for Yuba
@@ -420,6 +428,7 @@ flowline_attributes <-
   left_join(da_suppl_attrs) |> 
   left_join(streamcat_data) |>
   left_join(catchment_ndvi) |> 
+  left_join(width_data) |> 
   # fill in gaps in the RF bankfull estimates with the simple Bieger model
   mutate(bf_width_m = coalesce(bf_width_m, 2.76*da_area_sq_km^0.399),
          bf_depth_m = coalesce(bf_depth_m, 0.23*da_area_sq_km^0.294),
@@ -784,7 +793,21 @@ flowlines |>
 ```
 
 ![](data-discovery_files/figure-gfm/plot-vb_bf_w_ratio-1.png)<!-- -->
-\## Import catchments
+
+``` r
+# plot showing merit width data
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = merit_width_m)) +
+  geom_sf(aes(color = merit_width_m), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(trans = "log")
+```
+
+![](data-discovery_files/figure-gfm/plot-width-1.png)<!-- --> \## Import
+catchments
 
 ``` r
 # local catchment associated with each flowline reach (COMID)
@@ -797,14 +820,6 @@ catchments <-
   arrange(comid) |>
   st_transform(project_crs) 
 ```
-
-    ## File downloaded:
-
-    ## • 'Catchment.zip' <id: 16RXk1BplBr8v-IO0QodGEnjBlvOGhbM3>
-
-    ## Saved locally as:
-
-    ## • 'temp/Catchment.zip'
 
     ## Reading layer `Catchment' from data source `/vsizip/temp/Catchment.zip' using driver `ESRI Shapefile'
     ## Simple feature collection with 140835 features and 4 fields

@@ -8,6 +8,26 @@ library(tidyverse)
 library(sf)
 library(stars)
 library(terra)
+
+theme_set(theme_minimal())
+
+#project_crs <- "EPSG:3310" # NAD83 California Teale Albers
+#project_crs <- "EPSG:5070" # NAD83 CONUS Albers
+project_crs <- "ESRI:102039" # NAD83 CONUS Albers USGS Version
+
+library(googledrive)
+drive_file_by_id <- function(id=character(), dir="temp", vsizip=FALSE) {
+  d <- googledrive::as_dribble(googledrive::as_id(id))
+  p <- file.path(dir, d$name)
+  if(!file.exists(p)){
+    googledrive::drive_download(file = d, path = p)
+  }
+  if(vsizip){
+    return(file.path("/vsizip",p))
+  } else {
+    return(p)
+  }
+}
 ```
 
 Define habitat suitability functions
@@ -242,13 +262,11 @@ if(!file.exists("../data/fsa_stanislaus.Rds")) {
 fsa_stanislaus |> ggplot() + geom_line(aes(x = flow_cfs, y = pcthab_frac, color=factor(comid))) 
 ```
 
-Edit: need to modify pcthab so that denominator is not area of comid, but *inundated* area
-
 ## Deer Creek
 
 Import 2018 HEC-RAS 2D model outputs for Deer Creek
 
-```{r}
+```{r deer-import-lc}
 # get land cover data
 dir.create("temp/deer_land_cover", recursive = TRUE)
 drive_file_by_id("1OMJzuVoFdt1hygfMVPWrQBGr2BIuxSZj") |>
@@ -257,7 +275,7 @@ deer_lcc <- terra::rast("temp/deer_land_cover/existing_landcover_20181109.tif")
 ggplot() + tidyterra::geom_spatraster(data=deer_lcc)
 ```
 
-```{r}
+```{r deer-import-flow}
 # get 
 dir.create("temp/deer_model_output", recursive = TRUE)
 #drive_file_by_id("XXXXX", dir="temp/deer_model_output") |>
@@ -317,45 +335,47 @@ deer_comids <-
   st_read("/vsizip/hydraulic_model_data/deercreek_hecras2d_2018/model_perim_split_comid_generalized.shp.zip", as_tibble=T) |>
   janitor::clean_names() |> filter(comid>0)
 
-raster_hsi <- function(g, q, crs=st_crs(deer_comids)){
+raster_hsi <- function(g, q, crs="EPSG:6416"){
   comid <- terra::vect(st_sfc(g, crs=crs))
   d <- dep_r[[as.character(q)]] |> terra::crop(comid) 
   v <- vel_r[[as.character(q)]] |> terra::crop(comid) 
   ext <- (d>0)
   hsi <- (d>0.5 & d<=5.2) & (v>0.1 & v<=4.0)
-  area_wua <- terra::global(hsi, "sum", na.rm=TRUE)
-  area_tot <- terra::global(ext, "sum", na.rm=TRUE)
+  area_wua <- terra::global(hsi, "sum", na.rm=TRUE)[[1]]
+  area_tot <- terra::global(ext, "sum", na.rm=TRUE)[[1]]
   area_pct <- area_wua / area_tot
-  return(list("ext"=ext, 
-              "hsi"=hsi, 
-              "area_tot"=area_tot, 
+  return(list("area_tot"=area_tot, 
               "area_wua"=area_wua, 
               "area_pct"=area_pct))
 }
 
-# test
-comid <- deer_comids$geometry[[1]]
-q <- 500
-out <- raster_hsi(comid, q)
+# getting a memory error doing this all at once:
+# deer_hsi_result <- 
+#   deer_comids |> 
+#   expand_grid(flow_cfs=filenames$flow_cfs) |>
+#   mutate(result = pmap(list(geometry, flow_cfs), raster_hsi)) |>
+#   unnest_wider(result)
 
-#batch
-deer_hsi_result <- 
+run_for_flow <- function(q){
+  message(paste0("calculating HSI for q=",q))
   deer_comids |> 
-  expand_grid(flow_cfs=filenames$flow_cfs) |>
-  mutate(result = pmap(list(geometry, flow_cfs), raster_hsi)) |>
-  unnest_wider(result)
+    mutate(result = map(geometry, function(g) raster_hsi(g, q))) |>
+    unnest_wider(result) |> 
+    st_drop_geometry() |>
+    mutate(flow_cfs=q)
+}
 
-#result |> terra::writeRaster("temp/deer_creek_hsi.tif")
+if(!file.exists("../data/fsa_deercreek.Rds")) {
+  deer_hsi_result <- bind_rows(lapply(filenames$flow_cfs, run_for_flow))
+  deer_hsi_result |> saveRDS("../data/fsa_deercreek.Rds")
+} else {
+  deer_hsi_result <- readRDS("../data/fsa_deercreek.Rds")
+}
 
+deer_hsi_result |> glimpse()
 ```
 
 ```{r}
 # examples
-dep |> plot() 
-
-dep |>
-  filter(flow==500) |>
-  mutate(suitable=if_else(depth>0.5 & depth<=5.2,1,0)) |>
-  select(suitable) |>
-  plot()
+deer_hsi_result |> ggplot() + geom_line(aes(x = flow_cfs, y = area_pct, color=factor(comid))) 
 ```

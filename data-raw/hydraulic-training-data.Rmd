@@ -7,6 +7,7 @@ output: github_document
 library(tidyverse)
 library(sf)
 library(stars)
+library(terra)
 ```
 
 Define habitat suitability functions
@@ -241,15 +242,27 @@ if(!file.exists("../data/fsa_stanislaus.Rds")) {
 fsa_stanislaus |> ggplot() + geom_line(aes(x = flow_cfs, y = pcthab_frac, color=factor(comid))) 
 ```
 
+Edit: need to modify pcthab so that denominator is not area of comid, but *inundated* area
+
 ## Deer Creek
 
 Import 2018 HEC-RAS 2D model outputs for Deer Creek
 
 ```{r}
+# get land cover data
+dir.create("temp/deer_land_cover", recursive = TRUE)
+drive_file_by_id("1OMJzuVoFdt1hygfMVPWrQBGr2BIuxSZj") |>
+  archive::archive_extract(dir="temp/deer_land_cover")
+deer_lcc <- terra::rast("temp/deer_land_cover/existing_landcover_20181109.tif")
+ggplot() + tidyterra::geom_spatraster(data=deer_lcc)
+```
+
+```{r}
+# get 
 dir.create("temp/deer_model_output", recursive = TRUE)
 #drive_file_by_id("XXXXX", dir="temp/deer_model_output") |>
 #"temp/deer_model_output/Existing_Habitat.7z" |> 
-  archive::archive_extract(dir="temp/deer_model_output")
+#  archive::archive_extract(dir="temp/deer_model_output")
   
 filenames <- tribble(~flow_cfs, ~timestep,
         100, "15NOV2018 06 00 00",
@@ -273,23 +286,67 @@ filenames <- tribble(~flow_cfs, ~timestep,
   mutate(depth = paste0("temp/deer_model_output/Depth (",timestep,").vrt"),
          velocity = paste0("temp/deer_model_output/Velocity (",timestep,").vrt"))
 
-dep_ras <- terra::rast(filenames$depth)
-terra::set.names(dep_ras, filenames$flow_cfs)
-dep <- dep_ras |> 
+dep_r <- terra::rast(filenames$depth)
+terra::set.names(dep_r, filenames$flow_cfs)
+
+vel_r <- terra::rast(filenames$velocity)
+terra::set.names(vel_r, filenames$flow_cfs)
+
+# STARS VERSION
+
+dep_s <- dep_r |> 
   st_as_stars() |> 
   st_set_dimensions(3, names="flow") |>
   setNames("depth")
 
-vel_ras <- terra::rast(filenames$velocity)
-terra::set.names(vel_ras, filenames$flow_cfs)
-vel <- vel_ras |> 
+vel_s <- vel_r |> 
   st_as_stars() |> 
   st_set_dimensions(3, names="flow") |>
   setNames("velocity")
 
-deer_dep_vel <- c(dep, vel)
+#deer_dep_vel <- c(dep_s, vel_s)
+# raster_hsi <- function(q) {
+#   d <- dep_s[,,,q]
+#   v <- vel_s[,,,q]
+#   #...
+# }
 
-print(deer_dep_vel)
+# TERRA VERSION
+
+deer_comids <- 
+  st_read("/vsizip/hydraulic_model_data/deercreek_hecras2d_2018/model_perim_split_comid_generalized.shp.zip", as_tibble=T) |>
+  janitor::clean_names() |> filter(comid>0)
+
+raster_hsi <- function(g, q, crs=st_crs(deer_comids)){
+  comid <- terra::vect(st_sfc(g, crs=crs))
+  d <- dep_r[[as.character(q)]] |> terra::crop(comid) 
+  v <- vel_r[[as.character(q)]] |> terra::crop(comid) 
+  ext <- (d>0)
+  hsi <- (d>0.5 & d<=5.2) & (v>0.1 & v<=4.0)
+  area_wua <- terra::global(hsi, "sum", na.rm=TRUE)
+  area_tot <- terra::global(ext, "sum", na.rm=TRUE)
+  area_pct <- area_wua / area_tot
+  return(list("ext"=ext, 
+              "hsi"=hsi, 
+              "area_tot"=area_tot, 
+              "area_wua"=area_wua, 
+              "area_pct"=area_pct))
+}
+
+# test
+comid <- deer_comids$geometry[[1]]
+q <- 500
+out <- raster_hsi(comid, q)
+
+#batch
+deer_hsi_result <- 
+  deer_comids |> 
+  expand_grid(flow_cfs=filenames$flow_cfs) |>
+  mutate(result = pmap(list(geometry, flow_cfs), raster_hsi)) |>
+  unnest_wider(result)
+
+#result |> terra::writeRaster("temp/deer_creek_hsi.tif")
+
 ```
 
 ```{r}

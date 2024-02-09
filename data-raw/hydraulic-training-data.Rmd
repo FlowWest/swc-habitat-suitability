@@ -211,7 +211,7 @@ stan_calc_hsi <- function(g, q){
   stan_thiessen |>
     left_join(filter(stan_result, discharge_cfs==q), by=join_by(vid)) |> 
     st_intersection(g) |>
-    mutate(area_m2 = units::drop_units(st_area(geometry)),
+    mutate(area_m2 = if_else(depth_ft>0, units::drop_units(st_area(geometry)), 0),
            wua_simp = hsi_simp * area_m2,
            wua_frac = hsi_frac * area_m2) |>
     summarize(area_m2 = sum(area_m2),

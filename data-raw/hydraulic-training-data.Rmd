@@ -276,11 +276,10 @@ ggplot() + tidyterra::geom_spatraster(data=deer_lcc)
 ```
 
 ```{r deer-import-flow}
-# get 
 dir.create("temp/deer_model_output", recursive = TRUE)
-#drive_file_by_id("XXXXX", dir="temp/deer_model_output") |>
+drive_file_by_id("1SbjlGqA96mvlwdmYwq5FbLbb-OhPuF_R", dir="temp/deer_model_output") |>
 #"temp/deer_model_output/Existing_Habitat.7z" |> 
-#  archive::archive_extract(dir="temp/deer_model_output")
+  archive::archive_extract(dir="temp/deer_model_output")
   
 filenames <- tribble(~flow_cfs, ~timestep,
         100, "15NOV2018 06 00 00",

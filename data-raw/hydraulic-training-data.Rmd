@@ -241,3 +241,64 @@ if(!file.exists("../data/fsa_stanislaus.Rds")) {
 fsa_stanislaus |> ggplot() + geom_line(aes(x = flow_cfs, y = pcthab_frac, color=factor(comid))) 
 ```
 
+## Deer Creek
+
+Import 2018 HEC-RAS 2D model outputs for Deer Creek
+
+```{r}
+dir.create("temp/deer_model_output", recursive = TRUE)
+#drive_file_by_id("XXXXX", dir="temp/deer_model_output") |>
+#"temp/deer_model_output/Existing_Habitat.7z" |> 
+  archive::archive_extract(dir="temp/deer_model_output")
+  
+filenames <- tribble(~flow_cfs, ~timestep,
+        100, "15NOV2018 06 00 00",
+        250, "15NOV2018 16 00 00",
+        300, "16NOV2018 02 00 00",
+        400, "16NOV2018 12 00 00",
+        500, "16NOV2018 22 00 00",
+        600, "17NOV2018 08 00 00",
+       1000, "17NOV2018 18 00 00",
+       3000, "18NOV2018 04 00 00",
+       5000, "18NOV2018 14 00 00",
+       6000, "19NOV2018 00 00 00",
+       7000, "19NOV2018 10 00 00",
+       9000, "19NOV2018 20 00 00",
+      10000, "20NOV2018 06 00 00",
+      11000, "20NOV2018 16 00 00",
+      12000, "21NOV2018 02 00 00",
+      13000, "21NOV2018 12 00 00",
+      14000, "21NOV2018 22 00 00",
+      15000, "22NOV2018 08 00 00") |>
+  mutate(depth = paste0("temp/deer_model_output/Depth (",timestep,").vrt"),
+         velocity = paste0("temp/deer_model_output/Velocity (",timestep,").vrt"))
+
+dep_ras <- terra::rast(filenames$depth)
+terra::set.names(dep_ras, filenames$flow_cfs)
+dep <- dep_ras |> 
+  st_as_stars() |> 
+  st_set_dimensions(3, names="flow") |>
+  setNames("depth")
+
+vel_ras <- terra::rast(filenames$velocity)
+terra::set.names(vel_ras, filenames$flow_cfs)
+vel <- vel_ras |> 
+  st_as_stars() |> 
+  st_set_dimensions(3, names="flow") |>
+  setNames("velocity")
+
+deer_dep_vel <- c(dep, vel)
+
+print(deer_dep_vel)
+```
+
+```{r}
+# examples
+dep |> plot() 
+
+dep |>
+  filter(flow==500) |>
+  mutate(suitable=if_else(depth>0.5 & depth<=5.2,1,0)) |>
+  select(suitable) |>
+  plot()
+```

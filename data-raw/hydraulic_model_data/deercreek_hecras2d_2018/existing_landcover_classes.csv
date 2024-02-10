@@ -1,37 +1,37 @@
-ID,Name,ManningsN,Percent Impervious
-0,NoData,,
-1,Bare,0.03,
-2,Canal,0.03,
-3,China DS,0.055,
-4,Dense Riparian,0.08,
-5,Dense Riparian Wetland,0.08,
-6,Dense Seasonal Wetland,0.08,
-7,Dense Woodland,0.08,
-8,Developed,0.025,
-9,Freshwater Marsh,0.05,
-10,Grassland-Pasture,0.035,
-11,Herbaceous Farm,0.03,
-12,Intermittent Stream,0.03,
-13,Irrigated SW,0.035,
-14,Moderate Riparian,0.065,
-15,Moderate Seasl Wetland,0.065,
-16,Moderate Woodland,0.065,
-17,Neighborhood,0.045,
-18,Open Waters,0.03,
-19,Orchards,0.055,
-20,Perennial Stream,0.03,
-21,River,0.03,
-22,Seasonal Wetland,0.035,
-23,Seasonal Wetland Ditch,0.035,
-24,Sparse Riparian,0.045,
-25,Sparse Seasonal Wetlnd,0.045,
-26,Sparse Woodland,0.045,
-27,Stream Bed - Abbey,0.03,
-28,Stream Bed - Ramsey,0.03,
-29,Stream Bed - Setback,0.03,
-30,Stream Bed - Upstream,0.03,
-31,Stream Bed - Wood,0.03,
-32,Streambed - China,0.03,
-33,Vernal Pool,0.035,
-34,Vernal Swale,0.035,
-35,Willow Scrub Wetlnd,0.08,
+ID,Name,ManningsN,Percent Impervious,CoverType,CoverHSI
+0,NoData,,,,
+1,Bare,0.03,,Barren,0
+2,Canal,0.03,,Waters,0
+3,China DS,0.055,,Waters,0
+4,Dense Riparian,0.08,,Woody Vegetation,1
+5,Dense Riparian Wetland,0.08,,Woody Vegetation,1
+6,Dense Seasonal Wetland,0.08,,Woody Vegetation,1
+7,Dense Woodland,0.08,,Woody Vegetation,1
+8,Developed,0.025,,Developed,0
+9,Freshwater Marsh,0.05,,Herbaceous Vegetation,1
+10,Grassland-Pasture,0.035,,Herbaceous Vegetation,1
+11,Herbaceous Farm,0.03,,Herbaceous Vegetation,1
+12,Intermittent Stream,0.03,,Waters,0
+13,Irrigated SW,0.035,,Herbaceous Vegetation,1
+14,Moderate Riparian,0.065,,Woody Vegetation,1
+15,Moderate Seasl Wetland,0.065,,Woody Vegetation,1
+16,Moderate Woodland,0.065,,Woody Vegetation,1
+17,Neighborhood,0.045,,Developed,0
+18,Open Waters,0.03,,Waters,0
+19,Orchards,0.055,,Woody Vegetation,1
+20,Perennial Stream,0.03,,Waters,0
+21,River,0.03,,Waters,0
+22,Seasonal Wetland,0.035,,Herbaceous Vegetation,1
+23,Seasonal Wetland Ditch,0.035,,Herbaceous Vegetation,1
+24,Sparse Riparian,0.045,,Woody Vegetation,1
+25,Sparse Seasonal Wetlnd,0.045,,Woody Vegetation,1
+26,Sparse Woodland,0.045,,Upland Vegetation,1
+27,Stream Bed - Abbey,0.03,,Waters,0
+28,Stream Bed - Ramsey,0.03,,Waters,0
+29,Stream Bed - Setback,0.03,,Waters,0
+30,Stream Bed - Upstream,0.03,,Waters,0
+31,Stream Bed - Wood,0.03,,Waters,0
+32,Streambed - China,0.03,,Waters,0
+33,Vernal Pool,0.035,,Herbaceous Vegetation,1
+34,Vernal Swale,0.035,,Herbaceous Vegetation,1
+35,Willow Scrub Wetlnd,0.08,,Woody Vegetation,1

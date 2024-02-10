@@ -42,9 +42,11 @@ linterp <- function(x, x1, x2, y1, y2){
 
 # vectorized function to calculate the depth*velocity suitability factor
 # if applicable, cover will also need to be applied.
+
 # method=0 uses simple 1/0 thresholds (CVPIA)
 # method=1 uses ranges defined in CBEC Lower Yuba River report, tables 8-9
 # method=2 uses ranges defined for USBR San Joaquin model (which also did not incorporate cover)
+
 dvhsi <- function(d, v, method=0) {
   
   if(method==0){
@@ -187,7 +189,7 @@ stan_result <-
   left_join(stan_elev, by=join_by(vid)) |> 
   left_join(stan_material, by=join_by(vid)) |>
   mutate(
-    cover_hs = 1, # cover habitat suitability, for now, actually need to get it from stan_material
+    cover_hs = 1, # cover habitat suitability should be added here
     hsi_simp = dvhsi(depth_ft, velocity_fps, method=0) * cover_hs,
     hsi_frac = dvhsi(depth_ft, velocity_fps, method=1) * cover_hs,
   ) |>
@@ -272,15 +274,27 @@ dir.create("temp/deer_land_cover", recursive = TRUE)
 drive_file_by_id("1OMJzuVoFdt1hygfMVPWrQBGr2BIuxSZj") |>
   archive::archive_extract(dir="temp/deer_land_cover")
 deer_lcc <- terra::rast("temp/deer_land_cover/existing_landcover_20181109.tif")
+terra::cats(deer_lcc)[[1]] |> glimpse()
+ggplot() + tidyterra::geom_spatraster(data=deer_lcc)
+
+# merge in other attributes
+deer_lcc_table <- 
+  read_csv("hydraulic_model_data/deercreek_hecras2d_2018/existing_landcover_classes.csv") |>
+  janitor::clean_names() |>
+  select(id, cover_type, cover_hsi) 
+deer_lcc <- deer_lcc |> 
+  terra::addCats(value=deer_lcc_table, merge=TRUE, layer=1)
+terra::activeCat(deer_lcc, layer=1) <- "cover_hsi"
 ggplot() + tidyterra::geom_spatraster(data=deer_lcc)
 ```
 
 ```{r deer-import-flow}
 dir.create("temp/deer_model_output", recursive = TRUE)
-drive_file_by_id("1SbjlGqA96mvlwdmYwq5FbLbb-OhPuF_R", dir="temp/deer_model_output") |>
-#"temp/deer_model_output/Existing_Habitat.7z" |> 
+# "temp/deer_model_output/Existing_Habitat.tar.gz"
+drive_file_by_id("1rmMw6PXJGS0-ui52eaotABCSlJsZOzvr", dir="temp/deer_model_output") |>
   archive::archive_extract(dir="temp/deer_model_output")
-  
+
+
 filenames <- tribble(~flow_cfs, ~timestep,
         100, "15NOV2018 06 00 00",
         250, "15NOV2018 16 00 00",
@@ -374,7 +388,37 @@ if(!file.exists("../data/fsa_deercreek.Rds")) {
 deer_hsi_result |> glimpse()
 ```
 
-```{r}
+```{r deer-plot-hsi, fig.width=6.5, fig.height=4, dpi=300}
 # examples
-deer_hsi_result |> ggplot() + geom_line(aes(x = flow_cfs, y = area_pct, color=factor(comid))) 
+deer_hsi_result |> ggplot() + geom_line(aes(x = flow_cfs, y = area_pct, color=factor(comid)))
+```
+
+## Combined flow-to-suitable-area training set
+
+Combining the results of the above two imports into a consistent dataset. `fsa_combined.Rds` should be joined by `comid` with the flowlines and the predictor variables to use for modeling. 
+
+For now, just bringing over the simple threshold-based HSI calculation that uses depth and velocity thresholds (`(d>0.5 & d<=5.2) & (v>0.1 & v<=4.0)`). To be improved. 
+
+```{r}
+fsa_combined <- 
+  bind_rows(
+    deer_hsi_result |> 
+      st_drop_geometry() |>
+      transmute(dataset = "Deer Creek",
+                comid, 
+                flow_cfs, 
+                area_tot_ft2 = area_tot, 
+                area_wua_ft2 = area_wua,
+                hsi_frac = area_pct),
+    fsa_stanislaus |> 
+      st_drop_geometry() |>
+      transmute(dataset = "Stanislaus River",
+                comid,
+                flow_cfs,
+                area_tot_ft2 = area_m2 / 3.281^2,
+                area_wua_ft2 = wua_simp / 3.281^2,
+                hsi_frac = pcthab_simp)
+          ) |> arrange(dataset, comid, flow_cfs)
+
+fsa_combined |> glimpse() |> saveRDS("../data/fsa_combined.Rds")
 ```

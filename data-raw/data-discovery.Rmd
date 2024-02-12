@@ -373,6 +373,7 @@ Data source: https://hydro.iis.u-tokyo.ac.jp/~yamadai/MERIT_Hydro/
 
 ```{r width-data}
 width_data <- readRDS('width_data/merit_width_dataset_comid_join.RDS') 
+width_data <- width_data |> group_by(comid) |> summarize(merit_width_m = mean(merit_width_m)) |> ungroup()
 ```
 
 #### Stream Classifications
@@ -401,6 +402,7 @@ hyd_cls <- drive_file_by_id("1qABq_Y-ZzuH_Am6pkqpno4K5nGYhYd1R", vsizip=T) |>
   janitor::clean_names() |>
   st_drop_geometry() |>
   left_join(hyd_cls_tbl, by=join_by(class)) |>
+  group_by(comid) |> mutate(idx=row_number()) |> filter(idx==1) |> ungroup() |>
   mutate(hyd_cls = factor(hyd_cls, levels=hyd_cls_tbl$hyd_cls, labels=hyd_cls_tbl$hyd_cls_descrip),
          hyd_cat = factor(hyd_cat, levels=c(1,2,3), labels=c("Snowmelt", "Mixed", "Rain"))) |>
   select(comid, hyd_cat, hyd_cls) |>

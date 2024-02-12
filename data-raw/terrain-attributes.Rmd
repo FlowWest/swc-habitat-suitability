@@ -154,7 +154,7 @@ calc_mtpi <- function(dem, cell_size, neighborhoods=c(90,270,810,2430)) {
 ```{r calc-mtpi-30m}
 cell_size <- 30
 
-if(!file.exists("../data/attr_mtpi.Rds"){
+if(!file.exists("../data/attr_mtpi.Rds")){
   flow_buffered <- terra::vect(flowlines) |> terra::buffer(width=cell_size/2)
   
   #aoi_buffer <- aoi |> st_buffer(2430/2) # big enough to not create edge effects

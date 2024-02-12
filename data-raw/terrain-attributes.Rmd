@@ -50,8 +50,9 @@ selected_huc_8 <- c("18020107", "18020125")
 
 flowlines <- readRDS("../data/flowline_geometries.Rds") |>
   left_join(readRDS("../data/flowline_attributes.Rds")) |>
-  filter(huc_8 %in% selected_huc_8) |>
-  st_transform(project_crs)
+#  filter(huc_8 %in% selected_huc_8) |>
+  st_transform(project_crs) |>
+  st_zm()
 
 catchments <- readRDS("../data/catchments.Rds")
 # for now, this is just the catchments exported for the selected hucs
@@ -66,7 +67,7 @@ This input has already been clipped to the AOI, converted from cm to m, and crs 
 
 Future improvement: script should pull straight from the source geotiff and apply these changes programatically
 
-```{r import-dem}
+```{r import-dem, eval=FALSE}
 dem <- read_stars("nhdplushr/dem_nhdplushr_yuba_meters_v2.tif") |>
   rename(elev = dem_nhdplushr_yuba_meters_v2.tif)
 
@@ -75,7 +76,7 @@ ggplot() + geom_stars(data=dem) + coord_fixed()
 
 Example calculating slope (can use `stars` or `terra`)
 
-```{r calc-slope}
+```{r calc-slope, eval=FALSE}
 slope <- dem |> starsExtra::slope()
 
 #slope <- dem |> terra::rast() |> terra::slope() |> st_as_stars()
@@ -103,7 +104,7 @@ mTPI as a measure of topographic confinement
 
 Souce: Theobald DM, Harrison-Atlas D, Monahan WB, Albano CM. 2015. Ecologically-relevant maps of landforms and physiographic diversity for climate adaptation planning. PLOS ONE. DOI: 10.1371/journal.pone.0143619
 
-```{r calc-mtpi}
+```{r calc-mtpi, eval=FALSE}
 dem_rast <- terra::rast(dem) 
 cell_size <- 10 # mean(terra::res(dem_rast))
 tpi_90 <- dem_rast - terra::focal(dem_rast, w=90/cell_size, fun="mean")
@@ -114,18 +115,18 @@ mtpi <- terra::app(c(tpi_90, tpi_270, tpi_810), mean)
 mtpi |> st_as_stars() |> plot()
 ```
 
-```{r intersect-mtpi}
-flow_buffered <- terra::vect(flowlines) |> terra::buffer(width=50)
+```{r intersect-mtpi, eval=FALSE}
+flow_buffered <- terra::vect(flowlines |> filter(huc_8 %in% selected_huc_8)) |> terra::buffer(width=50)
 vec_mtpi_min <- terra::zonal(mtpi, flow_buffered, "min") |> rename(mtpi_min = mean)
 
-mtpi_comid <- flowlines |>
+mtpi_comid <- flowlines |> filter(huc_8 %in% selected_huc_8) |>
   select(comid) |>
   mutate(vec_mtpi_min) |>
   st_drop_geometry() |> 
   select(comid, mtpi_min) |> 
   filter(!is.nan(mtpi_min))
 
-flowlines |>
+flowlines |> filter(huc_8 %in% selected_huc_8) |> 
   inner_join(mtpi_comid) |>
   st_zm() |>
   ggplot() + 
@@ -135,7 +136,7 @@ flowlines |>
 
 Version converting to function and using the basin-wide 30m DEM
 
-```{r calc-mtpi-30m}
+```{r calc-mtpi-func}
 calc_mtpi <- function(dem, cell_size, neighborhoods=c(90,270,810,2430)) {
   is_stars <- "stars" %in% class(dem)
   if(is_stars){
@@ -148,43 +149,34 @@ calc_mtpi <- function(dem, cell_size, neighborhoods=c(90,270,810,2430)) {
   }
   return(mtpi)
 }
+```
 
-# dem30_mtpi <- dem30 |> 
-#   mutate(elev_m = elev_cm/100) |>
-#   mutate(mtpi = calc_mtpi(elev_cm, 30, c(90,270,810)))
-# # this proxy uses lazy operations that are only evaluated when called
-# 
-# flow_buffered <- terra::vect(flowlines) |> terra::buffer(width=50)
-# mtpi30_aoi <- dem30_mtpi |> st_crop(aoi) |> select(mtpi) |> terra::rast()
-# vec_mtpi30_min <- terra::zonal(mtpi_aoi, flow_buffered, "min") |> rename(mtpi30_min = mean)
-# 
-# #dem30_mtpi |> saveRDS("../data/dem30.Rds")
-# 
-# dem30_mtpi |> st_crop(aoi) |> select(mtpi) |> plot()
-
-
-# alternate order not relying entirely on proxies
+```{r calc-mtpi-30m}
 cell_size <- 30
 
-flow_buffered <- terra::vect(flowlines) |> terra::buffer(width=cell_size/2)
+if(!file.exists("../data/attr_mtpi.Rds")){
+  flow_buffered <- terra::vect(flowlines) |> terra::buffer(width=cell_size/2)
+  
+  #aoi_buffer <- aoi |> st_buffer(2430/2) # big enough to not create edge effects
+  #dem30_rast <- dem30 |> st_crop(aoi_buffer) |> terra::rast()
+  dem30_rast <- dem30 |> terra::rast()
+  
+  dem30_rast_mtpi <- (calc_mtpi(dem30_rast, cell_size, c(90,270,810, 2430)) / 100) |> terra::app(round) |> terra::as.int() # convert to m, 16-bit integer
+  dem30_rast_mtpi |> terra::writeRaster("temp/rast_mtpi.tif")
+  #dem30_rast_mtpi |> st_as_stars() |> plot()
+  
+  vec_mtpi30_min <- terra::zonal(dem30_rast_mtpi, flow_buffered, "min") |> rename(mtpi30_min = lyr.1)
+  
+  flowlines_mtpi <- flowlines |> select(comid) |> mutate(vec_mtpi30_min) 
+  #flowlines_mtpi |> st_zm() |> select(mtpi30_min) |> plot()
+  flowlines_mtpi_attr <- flowlines_mtpi |> st_drop_geometry() |> filter(!is.nan(mtpi30_min))
+  flowlines_mtpi_attr |> saveRDS("../data/attr_mtpi.Rds")
+  
+} else {
+  flowlines_mtpi_attr <- readRDS("../data/attr_mtpi.Rds")
+  flowlines_mtpi <- flowlines |> left_join(flowlines_mtpi_attr)
+}
 
-aoi_buffer <- aoi |> st_buffer(2430/2) # big enough to not create edge effects
-dem30_rast <- dem30 |> st_crop(aoi_buffer) |> terra::rast()
-
-# uncomment to implement for entire watershed
-# dem30_rast <- dem30 |> terra::rast()
-
-dem30_rast_mtpi <- (calc_mtpi(dem30_rast, cell_size, c(90,270,810, 2430)) / 100) |> terra::app(round) |> terra::as.int() # convert to m, 16-bit integer
-
-vec_mtpi30_min <- terra::zonal(dem30_rast_mtpi, flow_buffered, "min") |> rename(mtpi30_min = lyr.1)
-
-dem30_rast_mtpi |> st_as_stars() |> plot()
-
-flowlines_mtpi <- flowlines |> select(comid) |> mutate(vec_mtpi30_min) 
-
-flowlines_mtpi |> st_zm() |> select(mtpi30_min) |> plot()
-
-flowlines_mtpi |> st_drop_geometry() |> saveRDS("../data/attr_mtpi.Rds")
 ```
 
 ### Valley Bottom Width via Slope Cutoff Method
@@ -322,7 +314,7 @@ vb1 <-
          vb_width_transect = if_else(!is.nan(vb_width_transect),vb_width_transect,0)) |> 
   select(comid, flowline, valley_bottom_geoms, vb_width_simple, vb_width_transect) 
 
-#vb1 |> saveRDS("../data/attr_vb1.Rds")
+vb1 |> saveRDS("../data/attr_vb1.Rds")
 ```
 
 ```{r vbw-batch-plot}
@@ -347,4 +339,243 @@ flowlines_for_vbet <- flowlines |>
   st_crop(st_bbox(dem)) |>
   smoothr::densify(5)
 ```
+
+===
+
+```{r}
+knitr::knit_exit()
+```
+
+## NDVI
+
+image server? https://gis.apfo.usda.gov/arcgis/rest/services/NAIP/USDA_CONUS_PRIME/ImageServer
+
+2020 seamlines: https://www.fpacbc.usda.gov/geo/customer-service/naip-quarter-quad-shapefiles/index.html
+
+2016 JP2s: https://www.sciencebase.gov/catalog/item/51355312e4b0e1603e4fed62
+
+* example URL: "https://prd-tnm.s3.amazonaws.com/StagedProducts/NAIP/ca_2016/38121/m_3812136_ne_10_h_20160620_20161004.jp2"
+
+* 2016 metadata: https://thor-f5.er.usgs.gov/ngtoc/metadata/waf/orthoimagery/naip/ca_2016/
+
+* footprints generated from earth explorer: ca_naip_2016.zip
+
+```{r ndvi-download-naip, message=FALSE, warning=FALSE}
+#naip_seam <- read_sf("/vsizip/temp/ca_naip20seam.zip") |>
+#  st_filter(st_transform(aoi, "EPSG:4326"))
+
+#naip_qq |>
+#  select(file_name) |>
+#  mutate(jp2_name = paste0("https://prd-tnm.s3.amazonaws.com/StagedProducts/NAIP/ca_2016/",
+#                           str_sub(apfoname, start=1, end=5),
+#                           str_sub()))
+
+#naip_2020_qq_footprints <- read_sf("/vsizip/naip/ca_naip20qq.zip") |>
+#  st_filter(st_transform(aoi, "EPSG:4326")) |>
+#  janitor::clean_names()
+
+# Get spatial index and filenames of NAIP tiles
+
+naip_2016_qq_filenames_raw <- 
+  RCurl::getURL("https://thor-f5.er.usgs.gov/ngtoc/metadata/waf/orthoimagery/naip/ca_2016/", ftp.use.epsv = FALSE, dirlistonly = TRUE) |>
+  rvest::read_html() |> 
+  xml2::xml_find_all("//a") |> 
+  xml2::xml_attrs("href") |>
+  as.vector()
+
+naip_2016_qq_filenames <- tibble(xml_filename = naip_2016_qq_filenames_raw[-(1:5)]) |> 
+  unnest(xml_filename) |>
+  mutate(xml_filename = str_replace(xml_filename, ".xml", "")) |>
+  separate_wider_delim(xml_filename, "_", names = c("prefix", "apfoname", "quadrant", "zone", "suffix", "src_img_date", "ver_date")) |>
+  mutate(naip_entit = str_to_upper(paste(prefix, apfoname, quadrant, zone, suffix, src_img_date, sep="_")),
+         filename = paste(paste(prefix, apfoname, quadrant, zone, suffix, src_img_date, ver_date, sep="_"), "jp2", sep="."),
+         download = paste("https://prd-tnm.s3.amazonaws.com/StagedProducts/NAIP/ca_2016", str_sub(apfoname, start=1, end=5), filename, sep="/"))
+
+naip_2016_qq_footprints <- 
+  read_sf("/vsizip/naip/ca_naip_2016.zip") |>
+  janitor::clean_names() |>
+  left_join(naip_2016_qq_filenames)
+
+# function to download NAIP tiles
+
+options(timeout = max(3600, getOption("timeout")))
+
+download_naip_tiles <- function(aoi, dir="temp/naip/tiles") {
+  dir.create(dir, recursive = TRUE)
+  tile_urls <- 
+    naip_2016_qq_footprints |>
+    st_filter(st_transform(aoi, "EPSG:4326")) |>
+    st_drop_geometry() |>
+    select(naip_entit, download) |>
+    deframe()
+  local_files <- map_vec(
+    names(tile_urls),
+    possibly(function(x) {
+      f = paste0(dir, "/", x , ".jp2")
+      if(!file.exists(f)) download.file(url = tile_urls[x], destfile = f, mode = "wb", quiet=T)
+      cat(x, " ")
+      return(f)}, otherwise=NA))
+  return(local_files)
+}
+
+# download NAIP tiles and mosaic
+naip_tiles <- download_naip_tiles(aoi)
+```
+
+```{r ndvi-calc-veg-pct, message=FALSE, warning=FALSE}
+buffers <-
+  flowlines |> 
+  st_zm() |>
+  #  mutate(channel_buffer = map2(geometry, bf_width_m, function(g, d) st_buffer(g, dist = d/2))) |>
+  filter(is.finite(bf_width_m)) |>
+  mutate(channel_buffer = st_buffer(geometry, dist = bf_width_m/2)) |>
+  st_drop_geometry() |>
+  select(comid, channel_buffer) |>
+  left_join(vb1 |> select(comid, valley_bottom_geoms)) |>
+  mutate(valley_bottom = map2(channel_buffer, valley_bottom_geoms, 
+                              function(cb, vb) st_union(cb, vb, by_feature = FALSE)) |> 
+                         st_sfc(crs=st_crs(flowlines)) |>
+                         st_cast("MULTIPOLYGON")) |>
+  select(-valley_bottom_geoms)
+
+### TERRA VERSION (try stars instead, too big to read into memory)
+# naip_mosaic <- naip_tiles |> terra::vrt(filename="temp/naip/naip.vrt", overwrite=TRUE)
+# naip_ndvi <- (naip_mosaic["naip_4"] - naip_mosaic["naip_1"]) / (naip_mosaic["naip_4"] + naip_mosaic["naip_1"])
+# ndvi_threshold <- 0.25
+# naip_ndvi_cls <- 
+#   naip_ndvi |> terra::classify(matrix(c(-1,ndvi_threshold,0,
+#                                          ndvi_threshold,1,1), ncol=3, byrow=T), 
+#                                include.lowest=T)
+# ndvi_pct <-
+#   buffers |>
+#   st_drop_geometry() |>
+#   select(comid) |>
+#   mutate(veg_pct_cb = terra::zonal(naip_ndvi_cls, buffers$channel_buffer, "mean") |> rename(veg_pct_cb = mean),
+#          veg_pct_vb = terra::zonal(naip_ndvi_cls, buffers$valley_bottom, "mean") |> rename(veg_pct_vb = mean))
+# ndvi_pct |> saveRDS("./data/attr_veg_pct.Rds")
+
+### STARS VERSION: better because of lazy evaluation
+ndvi_threshold <- 0.25 # above which a pixel is considered vegetation
+naip_mosaic <- 
+  st_mosaic(naip_tiles, file_ext=".vrt") |> 
+  read_stars(proxy=TRUE) #along="band"
+
+# define functions
+rf_ndvi = function(x1, x2, x3, x4) (x4 - x1)/(x4 + x1 + 1)
+rf_rveg = function(ndvi) ndvi >= ndvi_threshold
+get_veg_cls <- function(geom) {
+  rveg <- naip_mosaic |>
+    st_crop(st_bbox(geom)) |>
+    st_apply(c("x", "y"), rf_ndvi, keep=T) |>
+    st_apply(c("x", "y"), rf_rveg, keep=T) 
+}
+get_veg_pct <- function(geom) {
+  agg <- geom |> 
+    get_veg_cls() |> 
+    aggregate(geom, mean, na.rm=T)
+  #starsExtra::extract2(st_as_sfc(geom), mean, na.rm = TRUE)
+  return(agg[[1]])
+}
+
+# test function with a random flowline buffer
+test_geom <- flowlines |> st_zm() |> head(1) |> st_buffer(dist=100) |> st_transform(st_crs(naip_mosaic)) 
+geom |> get_veg_cls() |> plot()
+geom |> get_veg_pct()
+
+# # batch quick test
+# flowlines |> 
+#   st_zm() |> 
+#   head(3) |> 
+#   st_buffer(dist=100) |> 
+#   st_transform(st_crs(naip_mosaic)) |>
+#   mutate(veg_pct = map_dbl(geometry, function(x) get_veg_pct(st_sfc(x, crs=st_crs(naip_mosaic)))))
+
+# batch actual
+veg_pcts <- buffers |>
+  #head(3) |> # commment out to do all
+  mutate(channel_buffer = st_transform(channel_buffer, st_crs(naip_mosaic)),
+         valley_bottom = st_transform(valley_bottom, st_crs(naip_mosaic))) |>
+  mutate(veg_pct_cb = map_dbl(channel_buffer, function(x) get_veg_pct(st_sfc(x, crs=st_crs(naip_mosaic)))),
+         veg_pct_vb = map_dbl(valley_bottom, function(x) get_veg_pct(st_sfc(x, crs=st_crs(naip_mosaic))))) |>
+  select(comid, veg_pct_cb, veg_pct_vb)
+veg_pcts |> saveRDS("./data/attr_veg_pct.Rds")
+```
+
+## Channel Widths
+
+Potential approach:
+
+* Collect some random sample channel widths at transects
+* Fit a curve of measured channel width versus NHD+ bankfull width
+* Transform the NHD+ bankfull width into a "better" estimate using the model
+
+Stratified sample of flowlines with perpendicular transects for manually sampling channel width:
+
+```{r}
+# # approach with one point every 100 ft
+# sample_points_100ft <- 
+#   flowlines |> 
+#   filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+#   st_line_sample(density = 1 / 100) 
+# 
+# # approach with just the midpoint of each segment
+# sample_points_midpt <- 
+#   flowlines |>
+#   filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+#   #st_line_sample(sample = c(0, 0.25, 0.5, 0.75, 1))
+#   st_line_sample(sample = c(0.5))
+# 
+# sample_points_midpt |> ggplot() + geom_sf()
+
+# approach with perpendicular transects on every segment
+
+transects <- 
+  flowlines |> 
+  filter(huc_8 %in% selected_huc_8) |> 
+  st_zm() |>
+  mutate(geometry = map(geometry, function(x) st_union(perpendicular_transects(x, length=1000))[[1]]) |> st_sfc(crs=st_crs(flowlines))) 
+
+#transects <- 
+#  flowlines |> 
+#  filter(huc_8 %in% selected_huc_8) |> #head(100) |>
+#  st_zm() |>
+#  mutate(transect = map(geometry, function(x) perpendicular_transects(x, length=1000))) |>
+#  unnest(transect) |>
+#  st_drop_geometry() 
+# transects |> 
+#   st_set_geometry(transects$transect)
+
+set.seed(255) 
+
+sample_transects <- 
+  transects |> 
+  filter(ftype_desc=="Stream/River" & !is.na(stream_order)) |>
+  group_by(stream_order) |>
+  slice_sample(n = 20) |>
+  st_as_sf(crs=st_crs(flowlines)) |>
+  st_cast("MULTILINESTRING")
+
+sample_transects |>
+  ggplot() + 
+  geom_sf(data=st_zm(filter(flowlines, ftype_desc=="Stream/River" & !is.na(stream_order))),
+          aes(color=as_factor(stream_order)), alpha=0.3) + 
+  geom_sf(aes(color = as_factor(stream_order))) + 
+  theme(legend.position = "top")
+
+sample_transects |> 
+  select(comid, gnis_name, stream_order) |>
+  st_write("out/sample_transects.shp", append=FALSE)
+
+```
+
+
+
+
+
+
+
+
+
+
+
 

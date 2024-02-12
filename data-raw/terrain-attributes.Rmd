@@ -50,8 +50,9 @@ selected_huc_8 <- c("18020107", "18020125")
 
 flowlines <- readRDS("../data/flowline_geometries.Rds") |>
   left_join(readRDS("../data/flowline_attributes.Rds")) |>
-  filter(huc_8 %in% selected_huc_8) |>
-  st_transform(project_crs)
+#  filter(huc_8 %in% selected_huc_8) |>
+  st_transform(project_crs) |>
+  st_zm()
 
 catchments <- readRDS("../data/catchments.Rds")
 # for now, this is just the catchments exported for the selected hucs
@@ -66,7 +67,7 @@ This input has already been clipped to the AOI, converted from cm to m, and crs 
 
 Future improvement: script should pull straight from the source geotiff and apply these changes programatically
 
-```{r import-dem}
+```{r import-dem, eval=FALSE}
 dem <- read_stars("nhdplushr/dem_nhdplushr_yuba_meters_v2.tif") |>
   rename(elev = dem_nhdplushr_yuba_meters_v2.tif)
 
@@ -75,7 +76,7 @@ ggplot() + geom_stars(data=dem) + coord_fixed()
 
 Example calculating slope (can use `stars` or `terra`)
 
-```{r calc-slope}
+```{r calc-slope, eval=FALSE}
 slope <- dem |> starsExtra::slope()
 
 #slope <- dem |> terra::rast() |> terra::slope() |> st_as_stars()
@@ -103,7 +104,7 @@ mTPI as a measure of topographic confinement
 
 Souce: Theobald DM, Harrison-Atlas D, Monahan WB, Albano CM. 2015. Ecologically-relevant maps of landforms and physiographic diversity for climate adaptation planning. PLOS ONE. DOI: 10.1371/journal.pone.0143619
 
-```{r calc-mtpi}
+```{r calc-mtpi, eval=FALSE}
 dem_rast <- terra::rast(dem) 
 cell_size <- 10 # mean(terra::res(dem_rast))
 tpi_90 <- dem_rast - terra::focal(dem_rast, w=90/cell_size, fun="mean")
@@ -114,18 +115,18 @@ mtpi <- terra::app(c(tpi_90, tpi_270, tpi_810), mean)
 mtpi |> st_as_stars() |> plot()
 ```
 
-```{r intersect-mtpi}
-flow_buffered <- terra::vect(flowlines) |> terra::buffer(width=50)
+```{r intersect-mtpi, eval=FALSE}
+flow_buffered <- terra::vect(flowlines |> filter(huc_8 %in% selected_huc_8)) |> terra::buffer(width=50)
 vec_mtpi_min <- terra::zonal(mtpi, flow_buffered, "min") |> rename(mtpi_min = mean)
 
-mtpi_comid <- flowlines |>
+mtpi_comid <- flowlines |> filter(huc_8 %in% selected_huc_8) |>
   select(comid) |>
   mutate(vec_mtpi_min) |>
   st_drop_geometry() |> 
   select(comid, mtpi_min) |> 
   filter(!is.nan(mtpi_min))
 
-flowlines |>
+flowlines |> filter(huc_8 %in% selected_huc_8) |> 
   inner_join(mtpi_comid) |>
   st_zm() |>
   ggplot() + 
@@ -135,7 +136,7 @@ flowlines |>
 
 Version converting to function and using the basin-wide 30m DEM
 
-```{r calc-mtpi-30m}
+```{r calc-mtpi-func}
 calc_mtpi <- function(dem, cell_size, neighborhoods=c(90,270,810,2430)) {
   is_stars <- "stars" %in% class(dem)
   if(is_stars){
@@ -148,43 +149,34 @@ calc_mtpi <- function(dem, cell_size, neighborhoods=c(90,270,810,2430)) {
   }
   return(mtpi)
 }
+```
 
-# dem30_mtpi <- dem30 |> 
-#   mutate(elev_m = elev_cm/100) |>
-#   mutate(mtpi = calc_mtpi(elev_cm, 30, c(90,270,810)))
-# # this proxy uses lazy operations that are only evaluated when called
-# 
-# flow_buffered <- terra::vect(flowlines) |> terra::buffer(width=50)
-# mtpi30_aoi <- dem30_mtpi |> st_crop(aoi) |> select(mtpi) |> terra::rast()
-# vec_mtpi30_min <- terra::zonal(mtpi_aoi, flow_buffered, "min") |> rename(mtpi30_min = mean)
-# 
-# #dem30_mtpi |> saveRDS("../data/dem30.Rds")
-# 
-# dem30_mtpi |> st_crop(aoi) |> select(mtpi) |> plot()
-
-
-# alternate order not relying entirely on proxies
+```{r calc-mtpi-30m}
 cell_size <- 30
 
-flow_buffered <- terra::vect(flowlines) |> terra::buffer(width=cell_size/2)
+if(!file.exists("../data/attr_mtpi.Rds"){
+  flow_buffered <- terra::vect(flowlines) |> terra::buffer(width=cell_size/2)
+  
+  #aoi_buffer <- aoi |> st_buffer(2430/2) # big enough to not create edge effects
+  #dem30_rast <- dem30 |> st_crop(aoi_buffer) |> terra::rast()
+  dem30_rast <- dem30 |> terra::rast()
+  
+  dem30_rast_mtpi <- (calc_mtpi(dem30_rast, cell_size, c(90,270,810, 2430)) / 100) |> terra::app(round) |> terra::as.int() # convert to m, 16-bit integer
+  dem30_rast_mtpi |> terra::writeRaster("temp/rast_mtpi.tif")
+  #dem30_rast_mtpi |> st_as_stars() |> plot()
+  
+  vec_mtpi30_min <- terra::zonal(dem30_rast_mtpi, flow_buffered, "min") |> rename(mtpi30_min = lyr.1)
+  
+  flowlines_mtpi <- flowlines |> select(comid) |> mutate(vec_mtpi30_min) 
+  #flowlines_mtpi |> st_zm() |> select(mtpi30_min) |> plot()
+  flowlines_mtpi_attr <- flowlines_mtpi |> st_drop_geometry() |> filter(!is.nan(mtpi30_min))
+  flowlines_mtpi_attr |> saveRDS("../data/attr_mtpi.Rds")
+  
+} else {
+  flowlines_mtpi_attr <- readRDS("../data/attr_mtpi.Rds")
+  flowlines_mtpi <- flowlines |> left_join(flowlines_mtpi_attr)
+}
 
-aoi_buffer <- aoi |> st_buffer(2430/2) # big enough to not create edge effects
-dem30_rast <- dem30 |> st_crop(aoi_buffer) |> terra::rast()
-
-# uncomment to implement for entire watershed
-# dem30_rast <- dem30 |> terra::rast()
-
-dem30_rast_mtpi <- (calc_mtpi(dem30_rast, cell_size, c(90,270,810, 2430)) / 100) |> terra::app(round) |> terra::as.int() # convert to m, 16-bit integer
-
-vec_mtpi30_min <- terra::zonal(dem30_rast_mtpi, flow_buffered, "min") |> rename(mtpi30_min = lyr.1)
-
-dem30_rast_mtpi |> st_as_stars() |> plot()
-
-flowlines_mtpi <- flowlines |> select(comid) |> mutate(vec_mtpi30_min) 
-
-flowlines_mtpi |> st_zm() |> select(mtpi30_min) |> plot()
-
-flowlines_mtpi |> st_drop_geometry() |> saveRDS("../data/attr_mtpi.Rds")
 ```
 
 ### Valley Bottom Width via Slope Cutoff Method
@@ -346,6 +338,12 @@ flowlines_for_vbet <- flowlines |>
   st_zm() |> 
   st_crop(st_bbox(dem)) |>
   smoothr::densify(5)
+```
+
+===
+
+```{r}
+knitr::knit_exit()
 ```
 
 ## NDVI

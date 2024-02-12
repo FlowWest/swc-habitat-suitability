@@ -32,27 +32,38 @@ knitr::opts_chunk$set(eval=TRUE)
 
 ```{r import}
 flowlines <- readRDS("../data/flowline_geometries.Rds") |>
-  left_join(readRDS("../data/flowline_attributes.Rds")) |>
-  filter(huc_8 %in% c("18020107", "18020125")) |>
   st_transform("ESRI:102039")
+
+flowline_attributes <- readRDS("../data/flowline_attributes.Rds")
+
+train_data <- flowlines |> st_drop_geometry() |>
+  left_join(readRDS("../data/flowline_attributes.Rds"), by=join_by("comid"), relationship="one-to-one") |>
+  inner_join(readRDS("../data/fsa_combined.Rds"), by=join_by("comid"), relationship="one-to-many") |> 
+  glimpse()
 ```
 
+## Exploration and PCA of training data
+
 ```{r pca}
-df <- flowlines |> 
-  st_drop_geometry() |>
-  select(slope, stream_order, 
-         da_area_sq_km, da_elev_mean, da_ppt_mean_mm,
-         mtpi30_min, 
-         bf_width_m, bf_depth_m, bf_w_d_ratio, 
-         vb_width_transect, vb_bf_w_ratio, 
-         erom_q_ma_cfs, 
-         erom_v_ma_fps, 
-         loc_bfi, 
-         da_k_erodibility) |> 
+df <- flowline_attributes |>
+  select(
+         # predictors of flow (as would be found in a regional regression)
+         slope, da_area_sq_km, da_elev_mean, da_ppt_mean_mm, 
+         # baseflow and peakflow statistics
+         nf_bfl_dry_cfs, nf_bfl_wet_cfs, erom_q_ma_cfs, peak_q2_cfs, peak_q5_cfs, peak_q10_cfs,
+         # flow and channel characteristics, hydrologically predicted
+         bf_depth_m, bf_w_d_ratio, erom_v_ma_fps,
+         # misc characteristics of the catchment
+         da_avg_slope, da_k_erodibility, mean_ndvi,
+         # misc characteristics of the locality
+         loc_bfi, loc_pct_clay, loc_pct_sand, loc_permeability, loc_bedrock_depth, loc_ppt_mean_mm,
+         # channel confinement characteristics
+         mtpi30_min, vb_width_transect, vb_bf_w_ratio, 
+         # channel sinuosity
+         sinuosity,
+         ) |> 
   na.omit() |> 
   scale() 
-
- # consider eliminating direct correlates with flow: erom_q, da area, ppt mean
 
 df |> cor() |> corrr::rplot() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 # uniqueness: 
@@ -67,6 +78,104 @@ factoextra::fviz_pca_var(pca, axes=c(1,3), col.var = "cos2", repel = TRUE)
 factoextra::fviz_pca_var(pca, axes=c(2,3), col.var = "cos2", repel = TRUE)
 
 # flowlines |> GGally::ggpairs()
+```
+
+## Model test
+
+```{r}
+td <- train_data |>
+  mutate(flow_norm_cfs = flow_cfs / erom_q_ma_cfs) |> # flow as a percent of mean annual flow
+  mutate(wua_per_lf = area_wua_ft2 / (reach_length_km*3280.84)) |> # transect-wise habitat area per linear foot
+  select(comid, 
+         # suitable habitat area normalized by reach length
+         hsi_frac, wua_per_lf, 
+         # flow cfs normalized by mean annual flow
+         flow_cfs, flow_norm_cfs,
+         # predictors of flow (as would be found in a regional regression)
+         slope, da_area_sq_km, da_elev_mean, da_ppt_mean_mm, 
+         # baseflow and peakflow statistics
+         nf_bfl_dry_cfs, nf_bfl_wet_cfs, erom_q_ma_cfs, peak_q2_cfs, peak_q5_cfs, peak_q10_cfs,
+         # flow and channel characteristics, hydrologically predicted
+         bf_depth_m, bf_w_d_ratio, erom_v_ma_fps,
+         # misc characteristics of the catchment
+         da_avg_slope, da_k_erodibility, mean_ndvi,
+         # misc characteristics of the locality
+         loc_bfi, loc_pct_clay, loc_pct_sand, loc_permeability, loc_bedrock_depth, loc_ppt_mean_mm,
+         # channel confinement characteristics
+         mtpi30_min, #vb_width_transect, vb_bf_w_ratio, 
+         # channel sinuosity
+         sinuosity,
+         ) |> drop_na() |> glimpse()
+```
+```{r}
+set.seed(47)
+td_split <- initial_split(td)
+#install.packages("glmnet")
+```
+
+```{r}
+td |> 
+  mutate(across(slope:last_col(), function(x) factor(cut(x, breaks=5, labels=F)))) |>
+  pivot_longer(cols=slope:last_col(), names_to="varname", values_to="qtile") |>
+  group_by(flow_cfs, varname, qtile) |> summarize(wua_per_lf=mean(wua_per_lf)) |> ungroup() |>
+  ggplot() + geom_point(aes(x=flow_cfs, y=wua_per_lf, color=qtile)) + facet_wrap(~varname) + scale_color_viridis_d()
+
+```
+
+Scale-independent model version predicts the percent suitable habitat area using normalized flow, and without using any direct correlates of watershed size.
+
+```{r}
+# scale-independent version
+lm_si <-
+  linear_reg() |> 
+  fit(data=training(td_split), 
+      formula=log(hsi_frac) ~ 
+        # flow as percent of mean annual flow
+        log(flow_cfs/erom_q_ma_cfs) + 
+        # channel characteristics: gradient and sinuosity
+        log(slope) + log(sinuosity) + 
+        # flow and channel characteristics, hydrologically predicted
+        log(erom_v_ma_fps) + log(bf_depth_m) + log(bf_w_d_ratio) + 
+        # misc characteristics of the catchment
+        log(da_k_erodibility) + log(da_avg_slope) + log(mean_ndvi) +
+        # misc characteristics of the locality
+        log(loc_bfi) + log(loc_pct_clay) + log(loc_pct_sand) + log(loc_permeability) + log(loc_bedrock_depth) + log(loc_ppt_mean_mm) +
+        # channel confinement
+        mtpi30_min + 
+        # baseflow as percent of mean annual flow
+        log(nf_bfl_dry_cfs/erom_q_ma_cfs) + log(nf_bfl_wet_cfs/erom_q_ma_cfs)
+        ) 
+lm_si |> glance()
+lm_si |> tidy() 
+```
+
+Scale-independent model version predicts the WUA per linear foot, using absolute flow values as well as watershed scale parameters.
+
+```{r}
+# scale-dependent version
+lm_sd <- 
+  linear_reg() |> 
+  fit(data=training(td_split), 
+      formula=log(wua_per_lf) ~ 
+        # flow (cfs)
+        log(flow_cfs) + 
+        # predictors of flow (catchment area, elevation, and MAP) -- attributes for gradient and upstream drainage area are interrelated
+        log(slope)*log(da_area_sq_km) + log(da_elev_mean) + log(da_ppt_mean_mm) +
+        # baseflow/peak flow statistics
+        log(nf_bfl_dry_cfs) + log(nf_bfl_wet_cfs) + log(erom_q_ma_cfs) + #log(peak_q2_cfs)  + log(peak_q5_cfs) + log(peak_q10_cfs) +
+        # flow and channel characteristics, hydrologically predicted
+        log(erom_v_ma_fps) + log(bf_depth_m) + log(bf_w_d_ratio) + 
+        # misc characteristics of the catchment
+        log(da_k_erodibility) + log(da_avg_slope) + log(mean_ndvi) +
+        # misc characteristics of the locality
+        log(loc_bfi) + log(loc_pct_clay) + log(loc_pct_sand) + log(loc_permeability) + log(loc_bedrock_depth) + log(loc_ppt_mean_mm) +
+        # channel confinement characteristics
+        mtpi30_min + #log(vb_width_transect) + log(vb_bf_w_ratio) +
+        # channel sinuosity
+        log(sinuosity)
+        ) 
+lm_sd |> glance()
+lm_sd |> tidy()
 ```
 
 ======

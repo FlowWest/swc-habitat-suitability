@@ -1,7 +1,7 @@
 Exploratory Modeling
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-02-12
+2024-02-13
 
 - [Exploration and PCA of training
   data](#exploration-and-pca-of-training-data)
@@ -13,6 +13,11 @@ Exploratory Modeling
   - [Linear regression with regularized (lasso) feature
     selection](#linear-regression-with-regularized-lasso-feature-selection)
   - [Random Forest Regrssion](#random-forest-regrssion)
+- [TESTS](#tests)
+  - [Series interpolated (panel)
+    regression](#series-interpolated-panel-regression)
+  - [Use regression to predict FSA curve
+    shape](#use-regression-to-predict-fsa-curve-shape)
 
 ``` r
 library(tidyverse)
@@ -122,6 +127,7 @@ train_data <- flowlines |> st_drop_geometry() |>
     ## $ peak_q5_cfs               <dbl> 7430, 7430, 7430, 7430, 7430, 7430, 7430, 74…
     ## $ peak_q10_cfs              <dbl> 8720, 8720, 8720, 8720, 8720, 8720, 8720, 87…
     ## $ merit_width_m             <dbl> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, …
+    ## $ vb_width_transect         <dbl> 31.47, 31.47, 31.47, 31.47, 31.47, 31.47, 31…
     ## $ bf_xarea_m                <dbl> 54.1284, 54.1284, 54.1284, 54.1284, 54.1284,…
     ## $ chan_width_m              <dbl> 31.47, 31.47, 31.47, 31.47, 31.47, 31.47, 31…
     ## $ velocity_m_s              <dbl> 5.164862, 5.164862, 5.164862, 5.164862, 5.16…
@@ -134,8 +140,7 @@ train_data <- flowlines |> st_drop_geometry() |>
     ## $ grain_size_suspended_ndim <dbl> 1746.03995, 1746.03995, 1746.03995, 1746.039…
     ## $ grain_size_suspended_mm   <dbl> 0.148708751, 0.148708751, 0.148708751, 0.148…
     ## $ mtpi30_min                <dbl> -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, …
-    ## $ vb_width_transect         <dbl> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, …
-    ## $ vb_bf_w_ratio             <dbl> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, …
+    ## $ vb_bf_w_ratio             <dbl> 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,…
     ## $ dataset                   <chr> "Deer Creek", "Deer Creek", "Deer Creek", "D…
     ## $ flow_cfs                  <dbl> 100, 250, 300, 400, 500, 600, 1000, 3000, 50…
     ## $ area_tot_ft2              <dbl> 165174, 195682, 218107, 232765, 243522, 2551…
@@ -216,7 +221,7 @@ td <- train_data |>
   mutate(flow_norm_cfs = flow_cfs / erom_q_ma_cfs) |> # flow as a percent of mean annual flow
   mutate(wua_per_lf = area_wua_ft2 / (reach_length_km*3280.84),
          log_wua_per_lf = log(wua_per_lf)) |> # transect-wise habitat area per linear foot
-  select(comid, 
+  select(dataset, comid, 
          # suitable habitat area normalized by reach length
          hsi_frac, wua_per_lf, log_wua_per_lf,
          # flow cfs normalized by mean annual flow
@@ -242,7 +247,8 @@ td <- train_data |>
 ```
 
     ## Rows: 738
-    ## Columns: 32
+    ## Columns: 33
+    ## $ dataset             <chr> "Deer Creek", "Deer Creek", "Deer Creek", "Deer Cr…
     ## $ comid               <dbl> 12071480, 12071480, 12071480, 12071480, 12071480, …
     ## $ hsi_frac            <dbl> 0.7674937, 0.7966088, 0.7646568, 0.7388181, 0.7159…
     ## $ wua_per_lf          <dbl> 11.31795, 13.91706, 14.88976, 15.35347, 15.56507, …
@@ -281,7 +287,7 @@ td |>
   mutate(across(slope:last_col(), function(x) factor(cut(x, breaks=5, labels=F)))) |>
   pivot_longer(cols=slope:last_col(), names_to="varname", values_to="qtile") |>
   group_by(flow_cfs, varname, qtile) |> summarize(wua_per_lf=mean(wua_per_lf)) |> ungroup() |>
-  ggplot() + geom_point(aes(x=flow_cfs, y=wua_per_lf, color=qtile)) + facet_wrap(~varname) + scale_color_viridis_d()
+  ggplot() + geom_line(aes(x=flow_cfs, y=wua_per_lf, color=qtile)) + facet_wrap(~varname) + scale_color_viridis_d() + scale_y_log10() + scale_x_log10()
 ```
 
     ## `summarise()` has grouped output by 'flow_cfs', 'varname'. You can override
@@ -293,7 +299,7 @@ td |>
 
 ``` r
 set.seed(47)
-td_split <- initial_split(td)
+td_split <- initial_split(td, strata=dataset)
 ```
 
 ## Modeling
@@ -306,6 +312,8 @@ lm_spec <- linear_reg()
 
 First set up recipes (sets of predictor and response variables), then
 train and predict
+
+#### Scale-independent (%HSI versus dimensionless flow)
 
 Scale-independent model version predicts the percent suitable habitat
 area using normalized flow, and without using any direct correlates of
@@ -327,9 +335,13 @@ si_rec <- recipe(data=training(td_split),
         # channel confinement
         mtpi30_min + 
         # baseflow as percent of mean annual flow
-        nf_bfl_dry_cfs_norm + nf_bfl_wet_cfs_norm
+        nf_bfl_dry_cfs_norm + nf_bfl_wet_cfs_norm 
         ) |>
-  step_log(all_numeric_predictors(), -mtpi30_min)
+  step_log(all_numeric_predictors(), -mtpi30_min) |>
+  # let effect of flow vary with gradient
+  # step_interact(terms = ~ flow_norm_cfs:slope)
+  # try interacting with all numeric predictors
+  step_interact(terms = ~ flow_norm_cfs:all_numeric_predictors())
 
 lm_si <- workflow() |>
   add_recipe(si_rec) |>
@@ -340,42 +352,36 @@ lm_si |> glance()
 ```
 
     ## # A tibble: 1 × 12
-    ##   r.squared adj.r.squared sigma statistic  p.value    df logLik   AIC   BIC
-    ##       <dbl>         <dbl> <dbl>     <dbl>    <dbl> <dbl>  <dbl> <dbl> <dbl>
-    ## 1     0.615         0.602 0.130      47.4 2.81e-98    18   353. -666. -579.
+    ##   r.squared adj.r.squared sigma statistic   p.value    df logLik   AIC   BIC
+    ##       <dbl>         <dbl> <dbl>     <dbl>     <dbl> <dbl>  <dbl> <dbl> <dbl>
+    ## 1     0.727         0.709 0.113      39.4 1.13e-122    35   439. -804. -644.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
 lm_si |> tidy()
 ```
 
-    ## # A tibble: 19 × 5
-    ##    term                estimate std.error statistic   p.value
-    ##    <chr>                  <dbl>     <dbl>     <dbl>     <dbl>
-    ##  1 (Intercept)         -5.01      2.00       -2.51  1.25e-  2
-    ##  2 flow_norm_cfs       -0.140     0.00524   -26.6   4.08e-100
-    ##  3 slope                0.0573    0.0410      1.40  1.62e-  1
-    ##  4 sinuosity           -0.0931    0.0367     -2.54  1.14e-  2
-    ##  5 erom_v_ma_fps       -0.501     0.330      -1.52  1.30e-  1
-    ##  6 bf_depth_m          -0.349     0.263      -1.33  1.85e-  1
-    ##  7 bf_w_d_ratio        -0.283     0.190      -1.49  1.37e-  1
-    ##  8 da_k_erodibility     1.27      0.756       1.68  9.28e-  2
-    ##  9 da_avg_slope         3.02      0.762       3.97  8.29e-  5
-    ## 10 mean_ndvi            0.0679    0.0970      0.700 4.84e-  1
-    ## 11 loc_bfi             -0.242     0.125      -1.93  5.43e-  2
-    ## 12 loc_pct_clay         0.149     0.0667      2.23  2.62e-  2
-    ## 13 loc_pct_sand         0.127     0.161       0.788 4.31e-  1
-    ## 14 loc_permeability     0.0384    0.0261      1.47  1.42e-  1
-    ## 15 loc_bedrock_depth   -0.0930    0.114      -0.818 4.14e-  1
-    ## 16 loc_ppt_mean_mm      0.0846    0.253       0.335 7.38e-  1
-    ## 17 mtpi30_min           0.00494   0.00250     1.98  4.85e-  2
-    ## 18 nf_bfl_dry_cfs_norm  1.10      0.452       2.42  1.57e-  2
-    ## 19 nf_bfl_wet_cfs_norm -1.11      0.478      -2.33  2.00e-  2
+    ## # A tibble: 36 × 5
+    ##    term             estimate std.error statistic p.value
+    ##    <chr>               <dbl>     <dbl>     <dbl>   <dbl>
+    ##  1 (Intercept)       -1.95      2.78      -0.703 0.482  
+    ##  2 flow_norm_cfs     -0.383     2.22      -0.173 0.863  
+    ##  3 slope             -0.0314    0.0993    -0.316 0.752  
+    ##  4 sinuosity         -0.0830    0.0401    -2.07  0.0388 
+    ##  5 erom_v_ma_fps      0.351     0.834      0.421 0.674  
+    ##  6 bf_depth_m        -0.596     0.317     -1.88  0.0604 
+    ##  7 bf_w_d_ratio      -0.751     0.273     -2.76  0.00607
+    ##  8 da_k_erodibility  -0.737     1.31      -0.564 0.573  
+    ##  9 da_avg_slope       0.528     1.15       0.459 0.646  
+    ## 10 mean_ndvi          0.268     0.118      2.26  0.0240 
+    ## # ℹ 26 more rows
 
 ``` r
-testing(td_split) |>
+lm_si_res <- testing(td_split) |>
   mutate(hsi_frac_pred = predict(lm_si, testing(td_split))[[".pred"]]) |>
-  select(hsi_frac, hsi_frac_pred, flow_norm_cfs) |>
+  select(comid, hsi_frac, hsi_frac_pred, flow_norm_cfs) 
+
+lm_si_res |>
   ggplot() + geom_point(aes(x=hsi_frac, y=hsi_frac_pred, color=flow_norm_cfs)) + 
   coord_fixed() + geom_abline() + scale_color_viridis_c() + 
   ggtitle("Scale-independent model, linear regression")
@@ -383,8 +389,22 @@ testing(td_split) |>
 
 ![](model-expl_files/figure-gfm/lm-si-1.png)<!-- -->
 
+``` r
+lm_si_res |> filter(comid<=2821716) |> left_join(transmute(flowline_attributes, comid, erom_q_ma_cfs, chan_width_ft=chan_width_m/0.3048)) |>
+  ggplot(aes(x=flow_norm_cfs*erom_q_ma_cfs, group=1)) + facet_wrap(~comid) + 
+  geom_line(aes(y=hsi_frac_pred*chan_width_ft, color="predicted", group=1)) + geom_line(aes(y=hsi_frac*chan_width_ft, color="actual", group=1)) + 
+  scale_y_log10()
+```
+
+![](model-expl_files/figure-gfm/lm-si-2.png)<!-- -->
+
+#### Scale-dependent (WUA-per-linear-ft versus flow)
+
 Scale-dependent model version predicts the WUA per linear foot, using
 absolute flow values as well as watershed scale parameters.
+
+- interact flow and mean annual flow; flow and area/elev/ppt; to add
+  scale dependence to the flow effect
 
 ``` r
 sd_rec <- recipe(data=training(td_split), 
@@ -407,7 +427,11 @@ sd_rec <- recipe(data=training(td_split),
         sinuosity
         ) |>
   step_log(all_numeric_predictors(), -mtpi30_min) |>
-  step_interact(terms = ~ slope:da_area_sq_km) 
+  step_interact(terms = ~ flow_cfs:erom_q_ma_cfs) |>
+  step_interact(terms = ~ slope:da_area_sq_km) |>
+  step_interact(terms = ~ flow_cfs:da_area_sq_km) |>
+  step_interact(terms = ~ flow_cfs:da_elev_mean) |>
+  step_interact(terms = ~ flow_cfs:da_ppt_mean_mm)
 
 lm_sd <- workflow() |>
   add_recipe(sd_rec) |>
@@ -420,32 +444,35 @@ lm_sd |> glance()
     ## # A tibble: 1 × 12
     ##   r.squared adj.r.squared sigma statistic p.value    df logLik   AIC   BIC
     ##       <dbl>         <dbl> <dbl>     <dbl>   <dbl> <dbl>  <dbl> <dbl> <dbl>
-    ## 1     0.957         0.955 0.486      512.       0    23  -373.  796.  904.
+    ## 1     0.961         0.959 0.469      477.       0    27  -352.  762.  887.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
 lm_sd |> tidy()
 ```
 
-    ## # A tibble: 24 × 5
+    ## # A tibble: 28 × 5
     ##    term            estimate std.error statistic  p.value
     ##    <chr>              <dbl>     <dbl>     <dbl>    <dbl>
-    ##  1 (Intercept)    -1417.     512.        -2.77  5.87e- 3
-    ##  2 flow_cfs           0.177    0.0196     9.03  3.14e-18
-    ##  3 slope              1.16     0.316      3.68  2.55e- 4
-    ##  4 da_area_sq_km     -3.34     1.34      -2.50  1.26e- 2
-    ##  5 da_elev_mean     -21.8     83.4       -0.262 7.94e- 1
-    ##  6 da_ppt_mean_mm   224.      37.0        6.07  2.48e- 9
-    ##  7 nf_bfl_dry_cfs    42.2     10.2        4.13  4.17e- 5
-    ##  8 nf_bfl_wet_cfs    48.7      6.25       7.80  3.31e-14
-    ##  9 erom_q_ma_cfs     -1.19     0.556     -2.13  3.34e- 2
-    ## 10 erom_v_ma_fps      0.439    2.05       0.214 8.31e- 1
-    ## # ℹ 14 more rows
+    ##  1 (Intercept)    -1116.      519.     -2.15    3.19e- 2
+    ##  2 flow_cfs         -18.9       8.38   -2.25    2.47e- 2
+    ##  3 slope              0.821     0.307   2.68    7.67e- 3
+    ##  4 da_area_sq_km    -14.9       2.83   -5.25    2.18e- 7
+    ##  5 da_elev_mean       0.700    83.6     0.00837 9.93e- 1
+    ##  6 da_ppt_mean_mm   164.       37.6     4.37    1.52e- 5
+    ##  7 nf_bfl_dry_cfs    36.5      10.0     3.63    3.05e- 4
+    ##  8 nf_bfl_wet_cfs    43.1       6.07    7.09    4.27e-12
+    ##  9 erom_q_ma_cfs      8.45      2.06    4.11    4.57e- 5
+    ## 10 erom_v_ma_fps      1.72      1.99    0.862   3.89e- 1
+    ## # ℹ 18 more rows
 
 ``` r
+lm_sd_res <-
 testing(td_split) |>
   mutate(log_wua_per_lf_pred = predict(lm_sd, testing(td_split))[[".pred"]]) |>
-  transmute(wua_per_lf=exp(log_wua_per_lf), wua_per_lf_pred=exp(log_wua_per_lf_pred), flow_cfs) |>
+  transmute(comid, wua_per_lf=exp(log_wua_per_lf), wua_per_lf_pred=exp(log_wua_per_lf_pred), flow_cfs) 
+
+lm_sd_res |>
   ggplot() + geom_point(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs)) + 
   scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c() + 
   ggtitle("Scale-dependent model, linear regression")
@@ -453,12 +480,23 @@ testing(td_split) |>
 
 ![](model-expl_files/figure-gfm/lm-sd-1.png)<!-- -->
 
+``` r
+lm_sd_res |> filter(comid<=2821716) |>
+  ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
+  geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
+  scale_y_log10() 
+```
+
+![](model-expl_files/figure-gfm/lm-sd-2.png)<!-- -->
+
 ### Linear regression with regularized (lasso) feature selection
 
 ``` r
 #install.packages("glmnet")
 lasso_spec <- linear_reg(penalty = 0.01, mixture = 1) |> set_engine("glmnet")
 ```
+
+#### Scale-independent (%HSI versus dimensionless flow)
 
 ``` r
 drop_vars <- workflow() |>
@@ -473,18 +511,7 @@ drop_vars <- workflow() |>
 
     ## Warning: package 'glmnet' was built under R version 4.3.2
 
-    ## Loading required package: Matrix
-
     ## Warning: package 'Matrix' was built under R version 4.3.2
-
-    ## 
-    ## Attaching package: 'Matrix'
-
-    ## The following objects are masked from 'package:tidyr':
-    ## 
-    ##     expand, pack, unpack
-
-    ## Loaded glmnet 4.1-8
 
 ``` r
 lasso_si <- workflow() |>
@@ -498,35 +525,51 @@ lasso_si |> glance()
     ## # A tibble: 1 × 12
     ##   r.squared adj.r.squared sigma statistic   p.value    df logLik   AIC   BIC
     ##       <dbl>         <dbl> <dbl>     <dbl>     <dbl> <dbl>  <dbl> <dbl> <dbl>
-    ## 1     0.591         0.586 0.133      113. 1.42e-101     7   336. -654. -615.
+    ## 1     0.609         0.602 0.132      93.9 1.15e-104     9   339. -656. -609.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
 lasso_si |> tidy()
 ```
 
-    ## # A tibble: 8 × 5
-    ##   term            estimate std.error statistic  p.value
-    ##   <chr>              <dbl>     <dbl>     <dbl>    <dbl>
-    ## 1 (Intercept)     -4.00      0.834     -4.79   2.14e- 6
-    ## 2 flow_norm_cfs   -0.139     0.00529  -26.2    2.29e-98
-    ## 3 sinuosity       -0.137     0.0316    -4.33   1.78e- 5
-    ## 4 bf_depth_m      -0.430     0.0281   -15.3    4.40e-44
-    ## 5 bf_w_d_ratio    -0.543     0.0792    -6.85   1.98e-11
-    ## 6 da_avg_slope     1.99      0.299      6.66   6.54e-11
-    ## 7 loc_pct_clay     0.0112    0.0219     0.513  6.08e- 1
-    ## 8 loc_ppt_mean_mm  0.00233   0.0289     0.0806 9.36e- 1
+    ## # A tibble: 10 × 5
+    ##    term                              estimate std.error statistic  p.value
+    ##    <chr>                                <dbl>     <dbl>     <dbl>    <dbl>
+    ##  1 (Intercept)                      -0.0567    0.374       -0.152 8.80e- 1
+    ##  2 sinuosity                        -0.0895    0.0331      -2.71  7.00e- 3
+    ##  3 erom_v_ma_fps                    -0.105     0.0364      -2.87  4.20e- 3
+    ##  4 bf_depth_m                       -0.211     0.0387      -5.44  7.92e- 8
+    ##  5 bf_w_d_ratio                     -0.132     0.0974      -1.35  1.76e- 1
+    ##  6 loc_ppt_mean_mm                   0.210     0.0346       6.06  2.51e- 9
+    ##  7 flow_norm_cfs_x_slope             0.0175    0.000891    19.7   1.69e-65
+    ##  8 flow_norm_cfs_x_sinuosity        -0.0953    0.0244      -3.90  1.08e- 4
+    ##  9 flow_norm_cfs_x_erom_v_ma_fps    -0.0275    0.00768     -3.58  3.73e- 4
+    ## 10 flow_norm_cfs_x_loc_permeability -0.000394  0.00266     -0.148 8.83e- 1
 
 ``` r
+lasso_si_res <- 
 testing(td_split) |>
   mutate(hsi_frac_pred = predict(lasso_si, testing(td_split))[[".pred"]]) |>
-  select(hsi_frac, hsi_frac_pred, flow_norm_cfs) |>
+  select(comid, hsi_frac, hsi_frac_pred, flow_norm_cfs)
+
+lasso_si_res |>
   ggplot() + geom_point(aes(x=hsi_frac, y=hsi_frac_pred, color=flow_norm_cfs)) + 
   coord_fixed() + geom_abline() + scale_color_viridis_c()  + 
   ggtitle("Scale-independent model, linear regression w/ lasso feature selection")
 ```
 
 ![](model-expl_files/figure-gfm/lasso-si-1.png)<!-- -->
+
+``` r
+lasso_si_res |> filter(comid<=2821716) |> left_join(transmute(flowline_attributes, comid, erom_q_ma_cfs, chan_width_ft=chan_width_m/0.3048)) |>
+  ggplot(aes(x=flow_norm_cfs*erom_q_ma_cfs, group=1)) + facet_wrap(~comid) + 
+  geom_line(aes(y=hsi_frac_pred*chan_width_ft, color="predicted", group=1)) + geom_line(aes(y=hsi_frac*chan_width_ft, color="actual", group=1)) + 
+  scale_y_log10()
+```
+
+![](model-expl_files/figure-gfm/lasso-si-2.png)<!-- -->
+
+#### Scale-dependent (WUA-per-linear-ft versus flow)
 
 ``` r
 drop_vars <- workflow() |>
@@ -550,33 +593,37 @@ lasso_sd |> glance()
     ## # A tibble: 1 × 12
     ##   r.squared adj.r.squared sigma statistic   p.value    df logLik   AIC   BIC
     ##       <dbl>         <dbl> <dbl>     <dbl>     <dbl> <dbl>  <dbl> <dbl> <dbl>
-    ## 1     0.941         0.940 0.563      784. 9.88e-324    11  -461.  947. 1003.
+    ## 1     0.939         0.937 0.580      688. 6.50e-318    12  -477.  981. 1042.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
 lasso_sd |> tidy()
 ```
 
-    ## # A tibble: 12 × 5
-    ##    term              estimate std.error statistic  p.value
-    ##    <chr>                <dbl>     <dbl>     <dbl>    <dbl>
-    ##  1 (Intercept)       -73.4     14.8        -4.96  9.51e- 7
-    ##  2 flow_cfs            0.172    0.0226      7.63  1.08e-13
-    ##  3 da_elev_mean       -0.851    1.22       -0.698 4.86e- 1
-    ##  4 da_ppt_mean_mm     12.4      1.01       12.3   1.12e-30
-    ##  5 bf_depth_m          0.368    0.106       3.46  5.92e- 4
-    ##  6 bf_w_d_ratio       -2.06     0.368      -5.61  3.29e- 8
-    ##  7 loc_bfi             0.363    0.415       0.876 3.82e- 1
-    ##  8 loc_pct_sand        0.486    0.439       1.11  2.69e- 1
-    ##  9 loc_permeability   -0.126    0.0853     -1.47  1.42e- 1
-    ## 10 loc_bedrock_depth  -1.08     0.336      -3.21  1.39e- 3
-    ## 11 mtpi30_min          0.0522   0.00898     5.81  1.09e- 8
-    ## 12 sinuosity          -0.681    0.144      -4.75  2.65e- 6
+    ## # A tibble: 13 × 5
+    ##    term                      estimate std.error statistic  p.value
+    ##    <chr>                        <dbl>     <dbl>     <dbl>    <dbl>
+    ##  1 (Intercept)               -60.3     16.7        -3.61  3.41e- 4
+    ##  2 da_elev_mean               -1.13     1.43       -0.788 4.31e- 1
+    ##  3 da_ppt_mean_mm             11.3      1.10       10.2   1.33e-22
+    ##  4 erom_v_ma_fps               0.536    0.182       2.94  3.41e- 3
+    ##  5 bf_depth_m                  0.516    0.116       4.43  1.13e- 5
+    ##  6 bf_w_d_ratio               -3.52     0.623      -5.65  2.55e- 8
+    ##  7 loc_bfi                     0.455    0.428       1.06  2.88e- 1
+    ##  8 loc_pct_sand                0.665    0.470       1.41  1.58e- 1
+    ##  9 loc_permeability           -0.180    0.0925     -1.94  5.23e- 2
+    ## 10 loc_bedrock_depth          -1.19     0.346      -3.44  6.20e- 4
+    ## 11 mtpi30_min                  0.0479   0.00897     5.34  1.40e- 7
+    ## 12 sinuosity                  -0.661    0.143      -4.63  4.56e- 6
+    ## 13 flow_cfs_x_da_ppt_mean_mm   0.0264   0.00312     8.47  2.39e-16
 
 ``` r
+lasso_sd_res <- 
 testing(td_split) |>
   mutate(log_wua_per_lf_pred = predict(lasso_sd, testing(td_split))[[".pred"]]) |>
-  transmute(wua_per_lf=exp(log_wua_per_lf), wua_per_lf_pred=exp(log_wua_per_lf_pred), flow_cfs) |>
+  transmute(comid, wua_per_lf=exp(log_wua_per_lf), wua_per_lf_pred=exp(log_wua_per_lf_pred), flow_cfs) 
+
+lasso_sd_res |>
   ggplot() + geom_point(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs)) + 
   scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c()   + 
   ggtitle("Scale-dependent model, linear regression w/ lasso feature selection")
@@ -584,12 +631,23 @@ testing(td_split) |>
 
 ![](model-expl_files/figure-gfm/lasso-sd-1.png)<!-- -->
 
+``` r
+lasso_sd_res |> filter(comid<=2821716) |>
+  ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
+  geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
+  scale_y_log10() 
+```
+
+![](model-expl_files/figure-gfm/lasso-sd-2.png)<!-- -->
+
 ### Random Forest Regrssion
 
 ``` r
 #install.packages("ranger")
 rfr_spec <- rand_forest(mode = "regression", trees = 2^12)
 ```
+
+#### Scale-independent (%HSI versus dimensionless flow)
 
 ``` r
 rfr_si <- workflow() |>
@@ -610,24 +668,38 @@ rfr_si$fit$fit |> print()
     ## Type:                             Regression 
     ## Number of trees:                  4096 
     ## Sample size:                      553 
-    ## Number of independent variables:  18 
-    ## Mtry:                             4 
+    ## Number of independent variables:  35 
+    ## Mtry:                             5 
     ## Target node size:                 5 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.00792259 
-    ## R squared (OOB):                  0.8137704
+    ## OOB prediction error (MSE):       0.005088926 
+    ## R squared (OOB):                  0.8842441
 
 ``` r
+rfr_si_res <- 
 testing(td_split) |>
   mutate(hsi_frac_pred = predict(rfr_si, testing(td_split))[[".pred"]]) |>
-  select(hsi_frac, hsi_frac_pred, flow_norm_cfs) |>
+  select(comid, hsi_frac, hsi_frac_pred, flow_norm_cfs) 
+
+rfr_si_res |> 
   ggplot() + geom_point(aes(x=hsi_frac, y=hsi_frac_pred, color=flow_norm_cfs)) + 
   coord_fixed() + geom_abline() + scale_color_viridis_c() + 
   ggtitle("Scale-independent model, random forest regression")
 ```
 
 ![](model-expl_files/figure-gfm/rfr-si-1.png)<!-- -->
+
+``` r
+rfr_si_res |> filter(comid<=2821716) |> left_join(transmute(flowline_attributes, comid, erom_q_ma_cfs, chan_width_ft=chan_width_m/0.3048)) |>
+  ggplot(aes(x=flow_norm_cfs*erom_q_ma_cfs, group=1)) + facet_wrap(~comid) + 
+  geom_line(aes(y=hsi_frac_pred*chan_width_ft, color="predicted", group=1)) + geom_line(aes(y=hsi_frac*chan_width_ft, color="actual", group=1)) + 
+  scale_y_log10()
+```
+
+![](model-expl_files/figure-gfm/rfr-si-2.png)<!-- -->
+
+#### Scale-dependent (WUA-per-linear-ft versus flow)
 
 ``` r
 rfr_sd <- workflow() |>
@@ -648,21 +720,156 @@ rfr_sd$fit$fit |> print()
     ## Type:                             Regression 
     ## Number of trees:                  4096 
     ## Sample size:                      553 
-    ## Number of independent variables:  23 
-    ## Mtry:                             4 
+    ## Number of independent variables:  27 
+    ## Mtry:                             5 
     ## Target node size:                 5 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.1131795 
-    ## R squared (OOB):                  0.9784653
+    ## OOB prediction error (MSE):       0.0597608 
+    ## R squared (OOB):                  0.9888406
 
 ``` r
+rfr_sd_res <-
 testing(td_split) |>
   mutate(log_wua_per_lf_pred = predict(rfr_sd, testing(td_split))[[".pred"]]) |>
-  transmute(wua_per_lf=exp(log_wua_per_lf), wua_per_lf_pred=exp(log_wua_per_lf_pred), flow_cfs) |>
+  transmute(comid, wua_per_lf=exp(log_wua_per_lf), wua_per_lf_pred=exp(log_wua_per_lf_pred), flow_cfs) 
+
+rfr_sd_res |>
   ggplot() + geom_point(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs)) + 
   scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c()   + 
   ggtitle("Scale-dependent model, random forest regression")
 ```
 
 ![](model-expl_files/figure-gfm/rfr-sd-1.png)<!-- -->
+
+``` r
+rfr_sd_res |> filter(comid<=2821716) |>
+  ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
+  geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
+  scale_y_log10() 
+```
+
+![](model-expl_files/figure-gfm/rfr-sd-2.png)<!-- -->
+
+## TESTS
+
+### Series interpolated (panel) regression
+
+``` r
+# interpolate series so there is a value fo every 100 flows
+td_series <- td |>
+  group_by(comid) |>
+  arrange(comid, flow_cfs) |>
+  complete(flow_cfs = seq(from = min(flow_cfs), to = max(flow_cfs), by = 100)) |>
+  mutate(across(hsi_frac:last_col(), function(var) zoo::na.approx(var, x = flow_cfs))) |>
+  filter(flow_cfs%%100==0) |> ungroup()
+
+sd_series_rec <- recipe(data=td_series, 
+      formula = log_wua_per_lf ~ 
+        # flow (cfs)
+        flow_cfs + 
+        # predictors of flow (catchment area, elevation, and MAP) -- attributes for gradient and upstream drainage area are interrelated
+        slope + da_area_sq_km + da_elev_mean + da_ppt_mean_mm +
+        # baseflow/peak flow statistics
+        nf_bfl_dry_cfs + nf_bfl_wet_cfs + erom_q_ma_cfs + #log(peak_q2_cfs)  + log(peak_q5_cfs) + log(peak_q10_cfs) +
+        # flow and channel characteristics, hydrologically predicted
+        erom_v_ma_fps + bf_depth_m + bf_w_d_ratio + 
+        # misc characteristics of the catchment
+        da_k_erodibility + da_avg_slope + mean_ndvi +
+        # misc characteristics of the locality
+        loc_bfi + loc_pct_clay + loc_pct_sand + loc_permeability + loc_bedrock_depth + loc_ppt_mean_mm +
+        # channel confinement characteristics
+        mtpi30_min + #log(vb_width_transect) + log(vb_bf_w_ratio) +
+        # channel sinuosity
+        sinuosity
+        ) |>
+  step_log(all_numeric_predictors(), -mtpi30_min) |>
+  step_interact(terms = ~ flow_cfs:erom_q_ma_cfs) |>
+  step_interact(terms = ~ slope:da_area_sq_km) |>
+  step_interact(terms = ~ flow_cfs:da_area_sq_km) |>
+  step_interact(terms = ~ flow_cfs:da_elev_mean) |>
+  step_interact(terms = ~ flow_cfs:da_ppt_mean_mm) |>
+  step_lag(flow_cfs) |>
+  step_interact(terms = ~ flow_cfs:lag_1_flow_cfs) 
+  #step_interact(terms = ~ lag_1_flow_cfs:all_numeric_predictors())
+
+lm_sd_series <- workflow() |>
+  add_recipe(sd_series_rec) |>
+  add_model(lm_spec) |>
+  fit(data=td_series)
+
+lm_sd_series |> glance()
+```
+
+    ## # A tibble: 1 × 12
+    ##   r.squared adj.r.squared sigma statistic p.value    df logLik   AIC   BIC
+    ##       <dbl>         <dbl> <dbl>     <dbl>   <dbl> <dbl>  <dbl> <dbl> <dbl>
+    ## 1     0.973         0.972 0.422     5557.       0    29 -2530. 5122. 5322.
+    ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
+
+``` r
+lm_sd_series |> tidy()
+```
+
+    ## # A tibble: 30 × 5
+    ##    term            estimate std.error statistic   p.value
+    ##    <chr>              <dbl>     <dbl>     <dbl>     <dbl>
+    ##  1 (Intercept)    -1707.     152.        -11.2  7.20e- 29
+    ##  2 flow_cfs         -19.9      3.34       -5.96 2.65e-  9
+    ##  3 slope              0.794    0.0931      8.53 2.01e- 17
+    ##  4 da_area_sq_km    -23.0      1.29      -17.9  5.92e- 69
+    ##  5 da_elev_mean      83.4     25.0         3.33 8.80e-  4
+    ##  6 da_ppt_mean_mm   207.      11.1        18.6  2.38e- 74
+    ##  7 nf_bfl_dry_cfs    41.8      3.19       13.1  1.09e- 38
+    ##  8 nf_bfl_wet_cfs    50.5      1.83       27.7  6.58e-156
+    ##  9 erom_q_ma_cfs     14.2      0.977      14.5  9.59e- 47
+    ## 10 erom_v_ma_fps      3.80     0.635       5.98 2.33e-  9
+    ## # ℹ 20 more rows
+
+``` r
+td_series |>
+  mutate(log_wua_per_lf_pred = predict(lm_sd_series, td_series)[[".pred"]]) |>
+  transmute(wua_per_lf=exp(log_wua_per_lf), wua_per_lf_pred=exp(log_wua_per_lf_pred), flow_cfs) |>
+  ggplot() + geom_point(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs)) + 
+  scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c() + 
+  ggtitle("Series interpolated scale-dependent model, linear regression")
+```
+
+    ## Warning: Removed 1 rows containing missing values (`geom_point()`).
+
+![](model-expl_files/figure-gfm/unnamed-chunk-1-1.png)<!-- -->
+
+### Use regression to predict FSA curve shape
+
+- model flow-to-suitable area curve shape with exponential function
+- use spatial predictors to predict the value of this exponent
+
+``` r
+exponents <- 
+  td |> 
+  group_by(comid) |>
+  group_modify(~ broom::tidy(lm(log(wua_per_lf) ~ 0 + log(flow_cfs), data = .x))) 
+                                    
+td_exp <- 
+  flowlines |> st_drop_geometry() |>
+  left_join(readRDS("../data/flowline_attributes.Rds"), by=join_by("comid"), relationship="one-to-one") |>
+  inner_join(exponents |> select(comid, fsa_exponent=estimate)) |>
+  select(comid, fsa_exponent,
+       # predictors of flow (as would be found in a regional regression)
+       slope, da_area_sq_km, da_elev_mean, da_ppt_mean_mm, 
+       # baseflow and peakflow statistics
+       nf_bfl_dry_cfs, nf_bfl_wet_cfs, erom_q_ma_cfs, peak_q2_cfs, peak_q5_cfs, peak_q10_cfs,
+       # flow and channel characteristics, hydrologically predicted
+       bf_depth_m, bf_w_d_ratio, erom_v_ma_fps,
+       # misc characteristics of the catchment
+       da_avg_slope, da_k_erodibility, mean_ndvi,
+       # misc characteristics of the locality
+       loc_bfi, loc_pct_clay, loc_pct_sand, loc_permeability, loc_bedrock_depth, loc_ppt_mean_mm,
+       # channel confinement characteristics
+       mtpi30_min, #vb_width_transect, vb_bf_w_ratio, 
+       # channel sinuosity
+       sinuosity,
+       )
+```
+
+    ## Joining with `by = join_by(comid)`

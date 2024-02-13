@@ -80,15 +80,16 @@ factoextra::fviz_pca_var(pca, axes=c(2,3), col.var = "cos2", repel = TRUE)
 # flowlines |> GGally::ggpairs()
 ```
 
-## Model test
+## Set up training data
 
-```{r}
+```{r td}
 td <- train_data |>
   mutate(flow_norm_cfs = flow_cfs / erom_q_ma_cfs) |> # flow as a percent of mean annual flow
-  mutate(wua_per_lf = area_wua_ft2 / (reach_length_km*3280.84)) |> # transect-wise habitat area per linear foot
+  mutate(wua_per_lf = area_wua_ft2 / (reach_length_km*3280.84),
+         log_wua_per_lf = log(wua_per_lf)) |> # transect-wise habitat area per linear foot
   select(comid, 
          # suitable habitat area normalized by reach length
-         hsi_frac, wua_per_lf, 
+         hsi_frac, wua_per_lf, log_wua_per_lf,
          # flow cfs normalized by mean annual flow
          flow_cfs, flow_norm_cfs,
          # predictors of flow (as would be found in a regional regression)
@@ -105,15 +106,14 @@ td <- train_data |>
          mtpi30_min, #vb_width_transect, vb_bf_w_ratio, 
          # channel sinuosity
          sinuosity,
-         ) |> drop_na() |> glimpse()
-```
-```{r}
-set.seed(47)
-td_split <- initial_split(td)
-#install.packages("glmnet")
+         ) |> 
+  mutate(nf_bfl_dry_cfs_norm = nf_bfl_dry_cfs/erom_q_ma_cfs, 
+         nf_bfl_wet_cfs_norm = nf_bfl_wet_cfs/erom_q_ma_cfs) |>
+  drop_na() |> glimpse()
 ```
 
-```{r}
+
+```{r td-gridplot}
 td |> 
   mutate(across(slope:last_col(), function(x) factor(cut(x, breaks=5, labels=F)))) |>
   pivot_longer(cols=slope:last_col(), names_to="varname", values_to="qtile") |>
@@ -122,122 +122,201 @@ td |>
 
 ```
 
+## Split into training and testing datasets
+```{r td-split}
+set.seed(47)
+td_split <- initial_split(td)
+```
+
+## Modeling
+
+### Linear regression
+
+```{r lm-spec}
+lm_spec <- linear_reg() 
+```
+
+First set up recipes (sets of predictor and response variables), then train and predict
+
 Scale-independent model version predicts the percent suitable habitat area using normalized flow, and without using any direct correlates of watershed size.
 
-```{r}
-# scale-independent version
-lm_si <-
-  linear_reg() |> 
-  fit(data=training(td_split), 
-      formula=log(hsi_frac) ~ 
+```{r lm-si}
+si_rec <- recipe(data=training(td_split), 
+      formula=hsi_frac ~ 
         # flow as percent of mean annual flow
-        log(flow_cfs/erom_q_ma_cfs) + 
+        flow_norm_cfs + 
         # channel characteristics: gradient and sinuosity
-        log(slope) + log(sinuosity) + 
+        slope + sinuosity + 
         # flow and channel characteristics, hydrologically predicted
-        log(erom_v_ma_fps) + log(bf_depth_m) + log(bf_w_d_ratio) + 
+        erom_v_ma_fps + bf_depth_m + bf_w_d_ratio + 
         # misc characteristics of the catchment
-        log(da_k_erodibility) + log(da_avg_slope) + log(mean_ndvi) +
+        da_k_erodibility + da_avg_slope + mean_ndvi +
         # misc characteristics of the locality
-        log(loc_bfi) + log(loc_pct_clay) + log(loc_pct_sand) + log(loc_permeability) + log(loc_bedrock_depth) + log(loc_ppt_mean_mm) +
+        loc_bfi + loc_pct_clay + loc_pct_sand + loc_permeability + loc_bedrock_depth + loc_ppt_mean_mm +
         # channel confinement
         mtpi30_min + 
         # baseflow as percent of mean annual flow
-        log(nf_bfl_dry_cfs/erom_q_ma_cfs) + log(nf_bfl_wet_cfs/erom_q_ma_cfs)
-        ) 
+        nf_bfl_dry_cfs_norm + nf_bfl_wet_cfs_norm
+        ) |>
+  step_log(all_numeric_predictors(), -mtpi30_min)
+
+lm_si <- workflow() |>
+  add_recipe(si_rec) |>
+  add_model(lm_spec) |>
+  fit(data=training(td_split))
+
 lm_si |> glance()
-lm_si |> tidy() 
+lm_si |> tidy()
+
+testing(td_split) |>
+  mutate(hsi_frac_pred = predict(lm_si, testing(td_split))[[".pred"]]) |>
+  select(hsi_frac, hsi_frac_pred, flow_norm_cfs) |>
+  ggplot() + geom_point(aes(x=hsi_frac, y=hsi_frac_pred, color=flow_norm_cfs)) + 
+  coord_fixed() + geom_abline() + scale_color_viridis_c() + 
+  ggtitle("Scale-independent model, linear regression")
 ```
 
-Scale-independent model version predicts the WUA per linear foot, using absolute flow values as well as watershed scale parameters.
+Scale-dependent model version predicts the WUA per linear foot, using absolute flow values as well as watershed scale parameters.
 
-```{r}
-# scale-dependent version
-lm_sd <- 
-  linear_reg() |> 
-  fit(data=training(td_split), 
-      formula=log(wua_per_lf) ~ 
+```{r lm-sd}
+sd_rec <- recipe(data=training(td_split), 
+      formula = log_wua_per_lf ~ 
         # flow (cfs)
-        log(flow_cfs) + 
+        flow_cfs + 
         # predictors of flow (catchment area, elevation, and MAP) -- attributes for gradient and upstream drainage area are interrelated
-        log(slope)*log(da_area_sq_km) + log(da_elev_mean) + log(da_ppt_mean_mm) +
+        slope + da_area_sq_km + da_elev_mean + da_ppt_mean_mm +
         # baseflow/peak flow statistics
-        log(nf_bfl_dry_cfs) + log(nf_bfl_wet_cfs) + log(erom_q_ma_cfs) + #log(peak_q2_cfs)  + log(peak_q5_cfs) + log(peak_q10_cfs) +
+        nf_bfl_dry_cfs + nf_bfl_wet_cfs + erom_q_ma_cfs + #log(peak_q2_cfs)  + log(peak_q5_cfs) + log(peak_q10_cfs) +
         # flow and channel characteristics, hydrologically predicted
-        log(erom_v_ma_fps) + log(bf_depth_m) + log(bf_w_d_ratio) + 
+        erom_v_ma_fps + bf_depth_m + bf_w_d_ratio + 
         # misc characteristics of the catchment
-        log(da_k_erodibility) + log(da_avg_slope) + log(mean_ndvi) +
+        da_k_erodibility + da_avg_slope + mean_ndvi +
         # misc characteristics of the locality
-        log(loc_bfi) + log(loc_pct_clay) + log(loc_pct_sand) + log(loc_permeability) + log(loc_bedrock_depth) + log(loc_ppt_mean_mm) +
+        loc_bfi + loc_pct_clay + loc_pct_sand + loc_permeability + loc_bedrock_depth + loc_ppt_mean_mm +
         # channel confinement characteristics
         mtpi30_min + #log(vb_width_transect) + log(vb_bf_w_ratio) +
         # channel sinuosity
-        log(sinuosity)
-        ) 
+        sinuosity
+        ) |>
+  step_log(all_numeric_predictors(), -mtpi30_min) |>
+  step_interact(terms = ~ slope:da_area_sq_km) 
+
+lm_sd <- workflow() |>
+  add_recipe(sd_rec) |>
+  add_model(lm_spec) |>
+  fit(data=training(td_split))
+
 lm_sd |> glance()
 lm_sd |> tidy()
+
+testing(td_split) |>
+  mutate(log_wua_per_lf_pred = predict(lm_sd, testing(td_split))[[".pred"]]) |>
+  transmute(wua_per_lf=exp(log_wua_per_lf), wua_per_lf_pred=exp(log_wua_per_lf_pred), flow_cfs) |>
+  ggplot() + geom_point(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs)) + 
+  scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c() + 
+  ggtitle("Scale-dependent model, linear regression")
 ```
 
-======
+### Linear regression with regularized (lasso) feature selection 
 
-pseudo code below this point, do not evaluate
-
-```{r}
-knitr::opts_chunk$set(eval=FALSE)
+```{r lasso-spec}
+#install.packages("glmnet")
+lasso_spec <- linear_reg(penalty = 0.01, mixture = 1) |> set_engine("glmnet")
 ```
 
-```{r}
-training_data <- 
-  hydraulic_model_outputs_by_flow_and_reach |>
-  left_join(flowline_attributes, by = join_by(comid == comid)) |>
-  mutate(flow_norm_cfs = flow_cfs / maf_cfs) |>
-  mutate(suitable_habitat_area_pct = suitable_habitat_area / (reach_length * hydraulic_model_output_channel_width)) |>
-  mutate(channel_width_relative = spatial_channel_width / valley_width) |>
-  select(comid, suitable_habitat_area_pct,
-         slope, stream_order, 
-         da_area_sq_km, da_elev_mean, da_ppt_mean_mm,
-         mtpi30_min, channel_width_relative,
-         bf_depth_m, bf_w_d_ratio, erom_v_ma_fps,
-         vb_width_transect, vb_bf_w_ratio, 
-         loc_bfi, 
-         da_k_erodibility,
-         ) |>
-  pivot_longer(cols = c(-comid, -suitable_habitat_area_pct), names_to = "x_name", values_to = "x_value") |>
-  group_by(x_name) |>
-  summarize(x_value_quantile = quantile(x_value, probs=seq(0,1,0.1))) |>
-  unnest(x_value_quantile) |>
-  ggplot() + 
-  facet_wrap(~x_name) +
-  geom_point(aes(x = flow_cfs, y = hab_pct, color = x_value_quantile))
+```{r lasso-si}
+drop_vars <- workflow() |>
+  add_recipe(si_rec |> 
+               step_normalize(all_numeric_predictors())) |>
+  add_model(lasso_spec) |>
+  fit(data=training(td_split)) |>
+  tidy() |> 
+  filter(estimate==0) |> 
+  pull(term)
 
+lasso_si <- workflow() |>
+  add_recipe(si_rec |> step_rm(all_of(drop_vars))) |>
+  add_model(lm_spec) |>
+  fit(data=training(td_split))
+
+lasso_si |> glance()
+lasso_si |> tidy()
+
+testing(td_split) |>
+  mutate(hsi_frac_pred = predict(lasso_si, testing(td_split))[[".pred"]]) |>
+  select(hsi_frac, hsi_frac_pred, flow_norm_cfs) |>
+  ggplot() + geom_point(aes(x=hsi_frac, y=hsi_frac_pred, color=flow_norm_cfs)) + 
+  coord_fixed() + geom_abline() + scale_color_viridis_c()  + 
+  ggtitle("Scale-independent model, linear regression w/ lasso feature selection")
 ```
 
-## Linear
+```{r lasso-sd}
+drop_vars <- workflow() |>
+  add_recipe(sd_rec |> 
+               step_normalize(all_numeric_predictors())) |>
+  add_model(lasso_spec) |>
+  fit(data=training(td_split)) |>
+  tidy() |> 
+  filter(estimate==0) |> 
+  pull(term)
 
-```{r}
-linear_reg() |> fit(formula = 
-                      # suitable habitat area normalized by length and width
-                      log(suitable_habitat_area/(reach_length*channel_width)) ~ 
-                      # flow normalized by mean annual flow (may consider not normalizing)
-                      log(flow_cfs/maf_cfs) + 
-                      # channel gradient and stream order, to capture location within the watershed
-                      log(slope)*log(stream_order) + 
-                      # predictors of peak flow (this will be correlated with maf_cfs)
-                      log(da_area_sq_km)*log(da_elev_mean)*log(da_ppt_mean_mm) + 
-                      # channel confinement
-                      log(mtpi30_min) + log(channel_width/valley_width) +
-                      # theoretical bankfull hydraulics
-                      log(bf_depth_m) + log(bf_w_d_ratio) + log(erom_v_ma_fps) + 
-                      # theoretical hydrologic params
-                      log(loc_bfi) +
-                      # catchment sediment transport parameters
-                      log(da_k_erodibility) +...
-                      )
+lasso_sd <- workflow() |>
+  add_recipe(sd_rec |>
+               step_rm(all_of(drop_vars))) |>
+  add_model(lm_spec) |>
+  fit(data=training(td_split))
+
+lasso_sd |> glance()
+lasso_sd |> tidy()
+
+testing(td_split) |>
+  mutate(log_wua_per_lf_pred = predict(lasso_sd, testing(td_split))[[".pred"]]) |>
+  transmute(wua_per_lf=exp(log_wua_per_lf), wua_per_lf_pred=exp(log_wua_per_lf_pred), flow_cfs) |>
+  ggplot() + geom_point(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs)) + 
+  scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c()   + 
+  ggtitle("Scale-dependent model, linear regression w/ lasso feature selection")
+```
+
+### Random Forest Regrssion
+
+```{r rfr-spec}
+#install.packages("ranger")
+rfr_spec <- rand_forest(mode = "regression", trees = 2^12)
+```
+
+```{r rfr-si}
+rfr_si <- workflow() |>
+  add_recipe(si_rec) |>
+  add_model(rfr_spec) |>
+  fit(data=training(td_split))
+
+rfr_si$fit$fit |> print()
+
+testing(td_split) |>
+  mutate(hsi_frac_pred = predict(rfr_si, testing(td_split))[[".pred"]]) |>
+  select(hsi_frac, hsi_frac_pred, flow_norm_cfs) |>
+  ggplot() + geom_point(aes(x=hsi_frac, y=hsi_frac_pred, color=flow_norm_cfs)) + 
+  coord_fixed() + geom_abline() + scale_color_viridis_c() + 
+  ggtitle("Scale-independent model, random forest regression")
+```
+```{r rfr-sd}
+rfr_sd <- workflow() |>
+  add_recipe(sd_rec) |>
+  add_model(rfr_spec) |>
+  fit(data=training(td_split))
+
+rfr_sd$fit$fit |> print()
+
+testing(td_split) |>
+  mutate(log_wua_per_lf_pred = predict(rfr_sd, testing(td_split))[[".pred"]]) |>
+  transmute(wua_per_lf=exp(log_wua_per_lf), wua_per_lf_pred=exp(log_wua_per_lf_pred), flow_cfs) |>
+  ggplot() + geom_point(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs)) + 
+  scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c()   + 
+  ggtitle("Scale-dependent model, random forest regression")
 ```
 
 
-## Lasso Feature Selection
 
-https://juliasilge.com/blog/lasso-the-office/ or Relaxed Lasso
 
-## Random Forest
+
+

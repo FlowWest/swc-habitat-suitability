@@ -153,13 +153,13 @@ calc_mtpi <- function(dem, cell_size, neighborhoods=c(90,270,810,2430)) {
 
 ```{r calc-mtpi-30m}
 cell_size <- 30
+dem30_rast <- dem30 |> terra::rast()
 
 if(!file.exists("../data/attr_mtpi.Rds")){
   flow_buffered <- terra::vect(flowlines) |> terra::buffer(width=cell_size/2)
   
   #aoi_buffer <- aoi |> st_buffer(2430/2) # big enough to not create edge effects
   #dem30_rast <- dem30 |> st_crop(aoi_buffer) |> terra::rast()
-  dem30_rast <- dem30 |> terra::rast()
   
   dem30_rast_mtpi <- (calc_mtpi(dem30_rast, cell_size, c(90,270,810, 2430)) / 100) |> terra::app(round) |> terra::as.int() # convert to m, 16-bit integer
   dem30_rast_mtpi |> terra::writeRaster("temp/rast_mtpi.tif")
@@ -267,7 +267,9 @@ ggplot() +
 ```
 
 ```{r vbw-example2}
-dem30_m <- st_as_stars(dem30_rast/100) 
+cell_size <- 30
+dem30_rast <- dem30 |> terra::rast()
+dem30_m <- st_as_stars(dem30_rast/100, proxy=F) 
 
 flowline <- flowlines |> filter(comid==8062593) |> st_zm()
 catchment <- catchments |> filter(comid==8062593) |> st_transform(st_crs(flowline))
@@ -285,36 +287,25 @@ ggplot() +
   geom_sf(data=perpendicular_transects(flowline, length=1000) |> st_intersection(valley_polygon), color="red") 
 ```
 
-```{r vbw-batch-old}
-#vb1 <- flowlines |> 
-#  filter(huc_8 %in% selected_huc_8) |> 
-#  #filter(comid==8062593) |> # comment out the filter to process all
-#  mutate(flowline = st_set_crs(st_zm(geometry),project_crs)) |>
-#  st_drop_geometry() |>
-#  mutate(valley_bottom_geoms = st_as_sfc(bind_rows(map(comid, possibly(function(x) valley_bottom_by_comid(x, dem), otherwise=NA))), crs=project_crs)) |>
-#  mutate(vb_width_simple = map_dbl(valley_bottom_geoms, possibly(function(x) valley_width_naive(x), otherwise=NA))) |> 
-#  mutate(vb_width_transect = map2_dbl(valley_bottom_geoms, flowline, function(x, y) valley_width_via_transects(x, y, 1000)),
-#         vb_width_transect = if_else(!is.nan(vb_width_transect),vb_width_transect,NA)) |> 
-#  select(comid, flowline, valley_bottom_geoms, vb_width_simple, vb_width_transect) 
-#
-#vb1 |> saveRDS("../data/attr_vb1.Rds")
-```
-
 ```{r vbw-batch}
-vb1 <- 
-  flowlines |> 
-  filter(huc_8 %in% selected_huc_8) |> #|> head(10) |>
-  #filter(comid==8062593 | (comid>8062580 & comid<8062599)) |> # comment out the filter to process all
-  mutate(flowline = st_set_crs(st_zm(geometry),project_crs)) |>
-  st_drop_geometry() |>
-  #mutate(valley_bottom_geoms = st_as_sfc(bind_rows(map(comid, possibly(function(x) valley_bottom_by_comid(x, dem30_m), otherwise=NA))), crs=project_crs))# |>
-  mutate(valley_bottom_geoms = st_sfc(map(comid, possibly(function(x) st_union(valley_bottom_by_comid(x, dem30_m)$geometry)[[1]], otherwise=st_polygon())), crs=dem_crs)) |>
-  mutate(vb_width_simple = map_dbl(valley_bottom_geoms, possibly(function(x) valley_width_naive(x), otherwise=NA))) |> 
-  mutate(vb_width_transect = map2_dbl(valley_bottom_geoms, flowline, function(x, y) valley_width_via_transects(x, y, 1000)),
-         vb_width_transect = if_else(!is.nan(vb_width_transect),vb_width_transect,0)) |> 
-  select(comid, flowline, valley_bottom_geoms, vb_width_simple, vb_width_transect) 
+if(!file.exists("../data/attr_vb1.Rds")){
+  vb1 <- 
+    flowlines |> 
+    #filter(huc_8 %in% selected_huc_8) |> #|> head(10) |>
+    #filter(comid==8062593 | (comid>8062580 & comid<8062599)) |> # comment out the filter to process all
+    mutate(flowline = st_set_crs(st_zm(geometry),project_crs)) |>
+    st_drop_geometry() |>
+    #mutate(valley_bottom_geoms = st_as_sfc(bind_rows(map(comid, possibly(function(x) valley_bottom_by_comid(x, dem30_m), otherwise=NA))), crs=project_crs))# |>
+    mutate(valley_bottom_geoms = st_sfc(map(comid, possibly(function(x) st_union(valley_bottom_by_comid(x, dem30_m)$geometry)[[1]], otherwise=st_polygon())), crs=dem_crs)) |>
+    mutate(vb_width_simple = map_dbl(valley_bottom_geoms, possibly(function(x) valley_width_naive(x), otherwise=NA))) |> 
+    mutate(vb_width_transect = map2_dbl(valley_bottom_geoms, flowline, function(x, y) valley_width_via_transects(x, y, 1000)),
+           vb_width_transect = if_else(!is.nan(vb_width_transect),vb_width_transect,0)) |> 
+    select(comid, flowline, valley_bottom_geoms, vb_width_simple, vb_width_transect) 
 
-vb1 |> saveRDS("../data/attr_vb1.Rds")
+  vb1 |> saveRDS("../data/attr_vb1.Rds") 
+} else {
+  vb1 <- readRDS("../data/attr_vb1.Rds") 
+}
 ```
 
 ```{r vbw-batch-plot}

@@ -341,7 +341,7 @@ si_rec <- recipe(data=training(td_split),
   #step_interact(terms = ~ flow_norm_cfs:all_numeric_predictors()) 
 
 lm_si <- workflow() |>
-  add_recipe(si_rec) |>
+  add_recipe(si_rec |> step_normalize(all_numeric_predictors())) |>
   add_model(lm_spec) |>
   fit(data=training(td_split))
 
@@ -359,28 +359,34 @@ lm_si |> tidy()
 ```
 
     ## # A tibble: 20 × 5
-    ##    term                  estimate std.error statistic       p.value
-    ##    <chr>                    <dbl>     <dbl>     <dbl>         <dbl>
-    ##  1 (Intercept)           -2.29      2.11       -1.09  0.277        
-    ##  2 flow_norm_cfs         -0.0558    0.0147     -3.79  0.000170     
-    ##  3 slope                  0.00990   0.0401      0.247 0.805        
-    ##  4 sinuosity             -0.0822    0.0352     -2.34  0.0198       
-    ##  5 erom_v_ma_fps         -0.163     0.318      -0.511 0.609        
-    ##  6 bf_depth_m            -0.123     0.261      -0.470 0.638        
-    ##  7 bf_w_d_ratio          -0.0240    0.188      -0.127 0.899        
-    ##  8 da_k_erodibility       1.42      0.753       1.88  0.0609       
-    ##  9 da_avg_slope           1.61      0.806       2.00  0.0465       
-    ## 10 mean_ndvi              0.0812    0.0972      0.835 0.404        
-    ## 11 loc_bfi               -0.348     0.123      -2.82  0.00501      
-    ## 12 loc_pct_clay           0.100     0.0648      1.55  0.123        
-    ## 13 loc_pct_sand           0.103     0.164       0.626 0.532        
-    ## 14 loc_permeability       0.0312    0.0259      1.21  0.228        
-    ## 15 loc_bedrock_depth     -0.121     0.110      -1.09  0.275        
-    ## 16 loc_ppt_mean_mm        0.296     0.251       1.18  0.238        
-    ## 17 mtpi30_min             0.00582   0.00244     2.38  0.0177       
-    ## 18 nf_bfl_dry_cfs_norm    0.821     0.456       1.80  0.0721       
-    ## 19 nf_bfl_wet_cfs_norm   -0.750     0.481      -1.56  0.120        
-    ## 20 flow_norm_cfs_x_slope  0.0126    0.00216     5.83  0.00000000981
+    ##    term                  estimate std.error statistic   p.value
+    ##    <chr>                    <dbl>     <dbl>     <dbl>     <dbl>
+    ##  1 (Intercept)            0.439     0.00550    79.8   1.95e-298
+    ##  2 flow_norm_cfs         -0.166     0.0438     -3.79  1.70e-  4
+    ##  3 slope                  0.0251    0.102       0.247 8.05e-  1
+    ##  4 sinuosity             -0.0173    0.00741    -2.34  1.98e-  2
+    ##  5 erom_v_ma_fps         -0.0553    0.108      -0.511 6.09e-  1
+    ##  6 bf_depth_m            -0.0894    0.190      -0.470 6.38e-  1
+    ##  7 bf_w_d_ratio          -0.00438   0.0343     -0.127 8.99e-  1
+    ##  8 da_k_erodibility       0.205     0.109       1.88  6.09e-  2
+    ##  9 da_avg_slope           0.0389    0.0195      2.00  4.65e-  2
+    ## 10 mean_ndvi              0.00944   0.0113      0.835 4.04e-  1
+    ## 11 loc_bfi               -0.0528    0.0187     -2.82  5.01e-  3
+    ## 12 loc_pct_clay           0.0373    0.0242      1.55  1.23e-  1
+    ## 13 loc_pct_sand           0.0288    0.0460      0.626 5.32e-  1
+    ## 14 loc_permeability       0.0456    0.0378      1.21  2.28e-  1
+    ## 15 loc_bedrock_depth     -0.0242    0.0221     -1.09  2.75e-  1
+    ## 16 loc_ppt_mean_mm        0.0953    0.0808      1.18  2.38e-  1
+    ## 17 mtpi30_min             0.0378    0.0159      2.38  1.77e-  2
+    ## 18 nf_bfl_dry_cfs_norm    1.93      1.07        1.80  7.21e-  2
+    ## 19 nf_bfl_wet_cfs_norm   -1.80      1.16       -1.56  1.20e-  1
+    ## 20 flow_norm_cfs_x_slope  0.189     0.0324      5.83  9.81e-  9
+
+``` r
+lm_si$fit$fit |> dotwhisker::dwplot()
+```
+
+![](model-expl_files/figure-gfm/lm-si-1.png)<!-- -->
 
 ``` r
 lm_si_res <- testing(td_split) |>
@@ -393,7 +399,7 @@ lm_si_res |>
   ggtitle("Scale-independent model, linear regression")
 ```
 
-![](model-expl_files/figure-gfm/lm-si-1.png)<!-- -->
+![](model-expl_files/figure-gfm/lm-si-2.png)<!-- -->
 
 ``` r
 lm_si_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
@@ -403,7 +409,7 @@ lm_si_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (% of Total Area)")
 ```
 
-![](model-expl_files/figure-gfm/lm-si-2.png)<!-- -->
+![](model-expl_files/figure-gfm/lm-si-3.png)<!-- -->
 
 #### Scale-dependent (WUA-per-linear-ft versus flow)
 
@@ -438,10 +444,10 @@ sd_rec <- recipe(data=training(td_split),
   step_interact(terms = ~ slope:da_area_sq_km) |>
   step_interact(terms = ~ flow_cfs:da_area_sq_km) |>
   step_interact(terms = ~ flow_cfs:da_elev_mean) |>
-  step_interact(terms = ~ flow_cfs:da_ppt_mean_mm)
+  step_interact(terms = ~ flow_cfs:da_ppt_mean_mm) 
 
 lm_sd <- workflow() |>
-  add_recipe(sd_rec) |>
+  add_recipe(sd_rec |> step_normalize(all_numeric_predictors())) |>
   add_model(lm_spec) |>
   fit(data=training(td_split))
 
@@ -459,19 +465,25 @@ lm_sd |> tidy()
 ```
 
     ## # A tibble: 28 × 5
-    ##    term            estimate std.error statistic  p.value
-    ##    <chr>              <dbl>     <dbl>     <dbl>    <dbl>
-    ##  1 (Intercept)    -1116.      519.     -2.15    3.19e- 2
-    ##  2 flow_cfs         -18.9       8.38   -2.25    2.47e- 2
-    ##  3 slope              0.821     0.307   2.68    7.67e- 3
-    ##  4 da_area_sq_km    -14.9       2.83   -5.25    2.18e- 7
-    ##  5 da_elev_mean       0.700    83.6     0.00837 9.93e- 1
-    ##  6 da_ppt_mean_mm   164.       37.6     4.37    1.52e- 5
-    ##  7 nf_bfl_dry_cfs    36.5      10.0     3.63    3.05e- 4
-    ##  8 nf_bfl_wet_cfs    43.1       6.07    7.09    4.27e-12
-    ##  9 erom_q_ma_cfs      8.45      2.06    4.11    4.57e- 5
-    ## 10 erom_v_ma_fps      1.72      1.99    0.862   3.89e- 1
+    ##    term           estimate std.error statistic   p.value
+    ##    <chr>             <dbl>     <dbl>     <dbl>     <dbl>
+    ##  1 (Intercept)      0.833     0.0200  41.7     6.58e-169
+    ##  2 flow_cfs       -21.2       9.41    -2.25    2.47e-  2
+    ##  3 slope            2.08      0.778    2.68    7.67e-  3
+    ##  4 da_area_sq_km  -35.3       6.72    -5.25    2.18e-  7
+    ##  5 da_elev_mean     0.0624    7.45     0.00837 9.93e-  1
+    ##  6 da_ppt_mean_mm  25.0       5.72     4.37    1.52e-  5
+    ##  7 nf_bfl_dry_cfs  29.4       8.08     3.63    3.05e-  4
+    ##  8 nf_bfl_wet_cfs  27.8       3.91     7.09    4.27e- 12
+    ##  9 erom_q_ma_cfs   22.7       5.52     4.11    4.57e-  5
+    ## 10 erom_v_ma_fps    0.582     0.676    0.862   3.89e-  1
     ## # ℹ 18 more rows
+
+``` r
+lm_sd$fit$fit |> dotwhisker::dwplot()
+```
+
+![](model-expl_files/figure-gfm/lm-sd-1.png)<!-- -->
 
 ``` r
 lm_sd_res <-
@@ -485,7 +497,7 @@ lm_sd_res |>
   ggtitle("Scale-dependent model, linear regression")
 ```
 
-![](model-expl_files/figure-gfm/lm-sd-1.png)<!-- -->
+![](model-expl_files/figure-gfm/lm-sd-2.png)<!-- -->
 
 ``` r
 lm_sd_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
@@ -494,7 +506,7 @@ lm_sd_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
   scale_y_log10() + xlab("Flow (cfs)") + ylab("Suitable Habitat Area per LF Channel (ft)")
 ```
 
-![](model-expl_files/figure-gfm/lm-sd-2.png)<!-- -->
+![](model-expl_files/figure-gfm/lm-sd-3.png)<!-- -->
 
 ### Linear regression with regularized (lasso) feature selection
 
@@ -507,8 +519,7 @@ lasso_spec <- linear_reg(penalty = 0.01, mixture = 1) |> set_engine("glmnet")
 
 ``` r
 drop_vars <- workflow() |>
-  add_recipe(si_rec |> 
-               step_normalize(all_numeric_predictors())) |>
+  add_recipe(si_rec |> step_normalize(all_numeric_predictors())) |>
   add_model(lasso_spec) |>
   fit(data=training(td_split)) |>
   tidy() |> 
@@ -552,6 +563,12 @@ lasso_si |> tidy()
     ## 8 flow_norm_cfs_x_slope   0.0197  0.000759    26.0   2.13e-97
 
 ``` r
+lasso_si$fit$fit |> dotwhisker::dwplot()
+```
+
+![](model-expl_files/figure-gfm/lasso-si-1.png)<!-- -->
+
+``` r
 lasso_si_res <- 
 testing(td_split) |>
   mutate(hsi_frac_pred = predict(lasso_si, testing(td_split))[[".pred"]]) |>
@@ -563,7 +580,7 @@ lasso_si_res |>
   ggtitle("Scale-independent model, linear regression w/ lasso feature selection")
 ```
 
-![](model-expl_files/figure-gfm/lasso-si-1.png)<!-- -->
+![](model-expl_files/figure-gfm/lasso-si-2.png)<!-- -->
 
 ``` r
 lasso_si_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
@@ -573,14 +590,13 @@ lasso_si_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (% of Total Area)")
 ```
 
-![](model-expl_files/figure-gfm/lasso-si-2.png)<!-- -->
+![](model-expl_files/figure-gfm/lasso-si-3.png)<!-- -->
 
 #### Scale-dependent (WUA-per-linear-ft versus flow)
 
 ``` r
 drop_vars <- workflow() |>
-  add_recipe(sd_rec |> 
-               step_normalize(all_numeric_predictors())) |>
+  add_recipe(sd_rec |> step_normalize(all_numeric_predictors())) |>
   add_model(lasso_spec) |>
   fit(data=training(td_split)) |>
   tidy() |> 
@@ -624,6 +640,12 @@ lasso_sd |> tidy()
     ## 13 flow_cfs_x_da_ppt_mean_mm   0.0264   0.00312     8.47  2.39e-16
 
 ``` r
+lasso_sd$fit$fit |> dotwhisker::dwplot()
+```
+
+![](model-expl_files/figure-gfm/lasso-sd-1.png)<!-- -->
+
+``` r
 lasso_sd_res <- 
 testing(td_split) |>
   mutate(log_wua_per_lf_pred = predict(lasso_sd, testing(td_split))[[".pred"]]) |>
@@ -635,7 +657,7 @@ lasso_sd_res |>
   ggtitle("Scale-dependent model, linear regression w/ lasso feature selection")
 ```
 
-![](model-expl_files/figure-gfm/lasso-sd-1.png)<!-- -->
+![](model-expl_files/figure-gfm/lasso-sd-2.png)<!-- -->
 
 ``` r
 lasso_sd_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
@@ -644,18 +666,54 @@ lasso_sd_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
   scale_y_log10() + xlab("Flow (cfs)") + ylab("Suitable Habitat Area per LF Channel (ft)")
 ```
 
-![](model-expl_files/figure-gfm/lasso-sd-2.png)<!-- -->
+![](model-expl_files/figure-gfm/lasso-sd-3.png)<!-- -->
 
 ### Random Forest Regrssion
 
 ``` r
 #install.packages("ranger")
-rfr_spec <- rand_forest(mode = "regression", trees = 2^12)
+#rfr_spec <- rand_forest(mode = "regression", trees = 2^12)
 ```
 
 #### Scale-independent (%HSI versus dimensionless flow)
 
 ``` r
+# set up cross validation
+folds <- vfold_cv(training(td_split), v = 10, strata = dataset)
+val_metrics <- metric_set(rmse, rsq, ccc)
+
+# tuned random forest: how many trees to use?
+rfr_spec <- rand_forest(mode = "regression", trees = tune())
+rfr_grid <- tibble(trees = 2^seq(0, 12, 1))
+
+rfr_si_tune <- 
+  workflow() |>
+  add_recipe(si_rec) |>
+  add_model(rfr_spec) |>
+  tune_grid(resamples = folds,
+            grid = rfr_grid,
+            metrics = val_metrics)
+```
+
+    ## Warning: package 'ranger' was built under R version 4.3.2
+
+``` r
+rfr_si_tune |>
+  collect_metrics() |>
+  ggplot(aes(x = trees, y = mean, color = .metric)) +
+  geom_errorbar(aes(ymin = mean - std_err,
+                    ymax = mean + std_err),
+                width = 0.05) +
+  geom_line() +
+  facet_wrap(. ~ .metric, ncol = 1, scales="free") +
+  theme(legend.position = "none") + scale_x_log10()
+```
+
+![](model-expl_files/figure-gfm/rfr-tune-1.png)<!-- -->
+
+``` r
+rfr_spec <- rand_forest(mode = "regression", trees = 2^8)
+
 rfr_si <- workflow() |>
   add_recipe(si_rec) |>
   add_model(rfr_spec) |>
@@ -669,18 +727,18 @@ rfr_si$fit$fit |> print()
     ## Ranger result
     ## 
     ## Call:
-    ##  ranger::ranger(x = maybe_data_frame(x), y = y, num.trees = ~2^12,      num.threads = 1, verbose = FALSE, seed = sample.int(10^5,          1)) 
+    ##  ranger::ranger(x = maybe_data_frame(x), y = y, num.trees = ~2^8,      num.threads = 1, verbose = FALSE, seed = sample.int(10^5,          1)) 
     ## 
     ## Type:                             Regression 
-    ## Number of trees:                  4096 
+    ## Number of trees:                  256 
     ## Sample size:                      553 
     ## Number of independent variables:  19 
     ## Mtry:                             4 
     ## Target node size:                 5 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.006147312 
-    ## R squared (OOB):                  0.8601694
+    ## OOB prediction error (MSE):       0.006373245 
+    ## R squared (OOB):                  0.8550302
 
 ``` r
 rfr_si_res <- 
@@ -709,6 +767,32 @@ rfr_si_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
 #### Scale-dependent (WUA-per-linear-ft versus flow)
 
 ``` r
+rfr_spec <- rand_forest(mode = "regression", trees = tune())
+rfr_grid <- tibble(trees = 2^seq(0, 12, 1))
+
+rfr_sd_tune <- 
+  workflow() |>
+  add_recipe(sd_rec) |>
+  add_model(rfr_spec) |>
+  tune_grid(resamples = folds,
+            grid = rfr_grid,
+            metrics = val_metrics)
+rfr_sd_tune |>
+  collect_metrics() |>
+  ggplot(aes(x = trees, y = mean, color = .metric)) +
+  geom_errorbar(aes(ymin = mean - std_err,
+                    ymax = mean + std_err),
+                width = 0.05) +
+  geom_line() +
+  facet_wrap(. ~ .metric, ncol = 1, scales="free") +
+  theme(legend.position = "none") + scale_x_log10()
+```
+
+![](model-expl_files/figure-gfm/rfr-sd-tune-1.png)<!-- -->
+
+``` r
+rfr_spec <- rand_forest(mode = "regression", trees = 2^8)
+
 rfr_sd <- workflow() |>
   add_recipe(sd_rec) |>
   add_model(rfr_spec) |>
@@ -722,18 +806,18 @@ rfr_sd$fit$fit |> print()
     ## Ranger result
     ## 
     ## Call:
-    ##  ranger::ranger(x = maybe_data_frame(x), y = y, num.trees = ~2^12,      num.threads = 1, verbose = FALSE, seed = sample.int(10^5,          1)) 
+    ##  ranger::ranger(x = maybe_data_frame(x), y = y, num.trees = ~2^8,      num.threads = 1, verbose = FALSE, seed = sample.int(10^5,          1)) 
     ## 
     ## Type:                             Regression 
-    ## Number of trees:                  4096 
+    ## Number of trees:                  256 
     ## Sample size:                      553 
     ## Number of independent variables:  27 
     ## Mtry:                             5 
     ## Target node size:                 5 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.0597608 
-    ## R squared (OOB):                  0.9888406
+    ## OOB prediction error (MSE):       0.05932951 
+    ## R squared (OOB):                  0.9889212
 
 ``` r
 rfr_sd_res <-
@@ -822,9 +906,9 @@ pd_rf |> select(comid,
     ## Columns: 5
     ## $ comid           <dbl> 342439, 342439, 342439, 342439, 342439, 342439, 342439…
     ## $ flow_cfs        <dbl> 4.109, 25.000, 35.000, 50.000, 71.000, 100.000, 140.00…
-    ## $ wua_per_lf_pred <dbl> 6.088317, 6.194938, 6.198909, 6.200995, 6.260987, 6.26…
+    ## $ wua_per_lf_pred <dbl> 5.243312, 5.362924, 5.369256, 5.369256, 5.409205, 5.40…
     ## $ flow_norm_cfs   <dbl> 1.000000, 6.084205, 8.517888, 12.168411, 17.279143, 24…
-    ## $ hsi_frac_pred   <dbl> 0.6267032, 0.4500373, 0.4398660, 0.4371331, 0.4343720,…
+    ## $ hsi_frac_pred   <dbl> 0.6166970, 0.4402185, 0.4277472, 0.4250650, 0.4231579,…
 
 ``` r
 pd_rf |> saveRDS("../data/rf_predictions.Rds")

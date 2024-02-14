@@ -167,12 +167,13 @@ si_rec <- recipe(data=training(td_split),
   #step_interact(terms = ~ flow_norm_cfs:all_numeric_predictors()) 
 
 lm_si <- workflow() |>
-  add_recipe(si_rec) |>
+  add_recipe(si_rec |> step_normalize(all_numeric_predictors())) |>
   add_model(lm_spec) |>
   fit(data=training(td_split))
 
 lm_si |> glance()
 lm_si |> tidy()
+lm_si$fit$fit |> dotwhisker::dwplot()
 
 lm_si_res <- testing(td_split) |>
   mutate(hsi_frac_pred = predict(lm_si, testing(td_split))[[".pred"]]) |>
@@ -221,15 +222,16 @@ sd_rec <- recipe(data=training(td_split),
   step_interact(terms = ~ slope:da_area_sq_km) |>
   step_interact(terms = ~ flow_cfs:da_area_sq_km) |>
   step_interact(terms = ~ flow_cfs:da_elev_mean) |>
-  step_interact(terms = ~ flow_cfs:da_ppt_mean_mm)
+  step_interact(terms = ~ flow_cfs:da_ppt_mean_mm) 
 
 lm_sd <- workflow() |>
-  add_recipe(sd_rec) |>
+  add_recipe(sd_rec |> step_normalize(all_numeric_predictors())) |>
   add_model(lm_spec) |>
   fit(data=training(td_split))
 
 lm_sd |> glance()
 lm_sd |> tidy()
+lm_sd$fit$fit |> dotwhisker::dwplot()
 
 lm_sd_res <-
 testing(td_split) |>
@@ -258,8 +260,7 @@ lasso_spec <- linear_reg(penalty = 0.01, mixture = 1) |> set_engine("glmnet")
 
 ```{r lasso-si, message=FALSE}
 drop_vars <- workflow() |>
-  add_recipe(si_rec |> 
-               step_normalize(all_numeric_predictors())) |>
+  add_recipe(si_rec |> step_normalize(all_numeric_predictors())) |>
   add_model(lasso_spec) |>
   fit(data=training(td_split)) |>
   tidy() |> 
@@ -273,6 +274,7 @@ lasso_si <- workflow() |>
 
 lasso_si |> glance()
 lasso_si |> tidy()
+lasso_si$fit$fit |> dotwhisker::dwplot()
 
 lasso_si_res <- 
 testing(td_split) |>
@@ -295,8 +297,7 @@ lasso_si_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
 
 ```{r lasso-sd, message=FALSE}
 drop_vars <- workflow() |>
-  add_recipe(sd_rec |> 
-               step_normalize(all_numeric_predictors())) |>
+  add_recipe(sd_rec |> step_normalize(all_numeric_predictors())) |>
   add_model(lasso_spec) |>
   fit(data=training(td_split)) |>
   tidy() |> 
@@ -311,6 +312,7 @@ lasso_sd <- workflow() |>
 
 lasso_sd |> glance()
 lasso_sd |> tidy()
+lasso_sd$fit$fit |> dotwhisker::dwplot()
 
 lasso_sd_res <- 
 testing(td_split) |>
@@ -332,12 +334,41 @@ lasso_sd_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
 
 ```{r rfr-spec}
 #install.packages("ranger")
-rfr_spec <- rand_forest(mode = "regression", trees = 2^12)
+#rfr_spec <- rand_forest(mode = "regression", trees = 2^12)
 ```
 
 #### Scale-independent (%HSI versus dimensionless flow)
 
+```{r rfr-tune} 
+# set up cross validation
+folds <- vfold_cv(training(td_split), v = 10, strata = dataset)
+val_metrics <- metric_set(rmse, rsq, ccc)
+
+# tuned random forest: how many trees to use?
+rfr_spec <- rand_forest(mode = "regression", trees = tune())
+rfr_grid <- tibble(trees = 2^seq(0, 12, 1))
+
+rfr_si_tune <- 
+  workflow() |>
+  add_recipe(si_rec) |>
+  add_model(rfr_spec) |>
+  tune_grid(resamples = folds,
+            grid = rfr_grid,
+            metrics = val_metrics)
+rfr_si_tune |>
+  collect_metrics() |>
+  ggplot(aes(x = trees, y = mean, color = .metric)) +
+  geom_errorbar(aes(ymin = mean - std_err,
+                    ymax = mean + std_err),
+                width = 0.05) +
+  geom_line() +
+  facet_wrap(. ~ .metric, ncol = 1, scales="free") +
+  theme(legend.position = "none") + scale_x_log10()
+```
+
 ```{r rfr-si, message=FALSE}
+rfr_spec <- rand_forest(mode = "regression", trees = 2^8)
+
 rfr_si <- workflow() |>
   add_recipe(si_rec) |>
   add_model(rfr_spec) |>
@@ -364,7 +395,31 @@ rfr_si_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
 
 #### Scale-dependent (WUA-per-linear-ft versus flow)
 
+```{r rfr-sd-tune}
+rfr_spec <- rand_forest(mode = "regression", trees = tune())
+rfr_grid <- tibble(trees = 2^seq(0, 12, 1))
+
+rfr_sd_tune <- 
+  workflow() |>
+  add_recipe(sd_rec) |>
+  add_model(rfr_spec) |>
+  tune_grid(resamples = folds,
+            grid = rfr_grid,
+            metrics = val_metrics)
+rfr_sd_tune |>
+  collect_metrics() |>
+  ggplot(aes(x = trees, y = mean, color = .metric)) +
+  geom_errorbar(aes(ymin = mean - std_err,
+                    ymax = mean + std_err),
+                width = 0.05) +
+  geom_line() +
+  facet_wrap(. ~ .metric, ncol = 1, scales="free") +
+  theme(legend.position = "none") + scale_x_log10()
+```
+
 ```{r rfr-sd, message=FALSE}
+rfr_spec <- rand_forest(mode = "regression", trees = 2^8)
+
 rfr_sd <- workflow() |>
   add_recipe(sd_rec) |>
   add_model(rfr_spec) |>
@@ -407,6 +462,17 @@ pd <- flowline_attributes |>
   arrange(comid, flow_cfs) |>
   glimpse()
 
+# # get min/max ranges from the training data
+# ranges <- td |> select(all_of(names(pd))) |> 
+#   reframe(across(everything(), function(x) (range(x)))) 
+# # filter the prediction data for just those falling within the training data
+# pd_idx <- pd |> 
+#   select(comid, all_of(names(ranges))) |>
+#   mutate(across(-comid, function(x) x>ranges[[cur_column()]][[1]] & x<=ranges[[cur_column()]][[2]])) |>
+#   filter(if_all(-comid)) |>
+#   pull(comid)
+# # update pd to exclude the out-of-range data
+# pd <- pd |> filter(comid %in% pd_idx) |> glimpse()
 ```
 
 ```{r prediction-output}
@@ -447,6 +513,44 @@ knitr::knit_exit()
 ```
 
 ## TESTS
+
+### Cross Validation
+
+```{r}
+# test cross validation on the linear model
+lm_sd |> fit_resamples(resamples=folds, metrics=val_metrics) |> collect_metrics()
+
+# run the same cross validation against all models
+enframe(list("lm"=lm_sd, "lasso"=lasso_sd, "rfr"=rfr_sd), value="model") |> 
+  mutate(result = map(model, function(x) {x |> 
+      fit_resamples(resamples=folds, metrics=metric_set(rsq)) |> 
+      collect_metrics()
+    })) |> unnest(result)
+
+```
+
+### Check for overfit
+
+```{r}
+# check to make sure not overfitting
+
+# rfr_sd |> predict(training(td_split)) |> bind_cols(training(td_split)) |> val_metrics(truth = wua_per_lf, estimate=.pred)
+# rfr_sd |> predict(testing(td_split)) |> bind_cols(testing(td_split)) |> val_metrics(truth = wua_per_lf, estimate=.pred)
+bind_rows(list(training=bind_cols(predict(rfr_sd, training(td_split)), training(td_split)), 
+               testing=bind_cols(predict(rfr_sd, testing(td_split)), testing(td_split)))
+          , .id="id") |>
+  group_by(id)  |> 
+  val_metrics(truth = wua_per_lf, estimate=.pred)
+
+bind_rows(list(training=bind_cols(predict(rfr_si, training(td_split)), training(td_split)), 
+               testing=bind_cols(predict(rfr_si, testing(td_split)), testing(td_split)))
+          , .id="id") |>
+  group_by(id)  |> 
+  val_metrics(truth = hsi_frac, estimate=.pred)
+```
+
+```{r}
+```
 
 ### Series interpolated (panel) regression
 

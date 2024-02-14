@@ -1,7 +1,7 @@
 Exploratory Modeling
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-02-13
+2024-02-14
 
 - [Exploration and PCA of training
   data](#exploration-and-pca-of-training-data)
@@ -15,6 +15,8 @@ Exploratory Modeling
   - [Random Forest Regrssion](#random-forest-regrssion)
 - [Random Forest model prediction
   output](#random-forest-model-prediction-output)
+- [Predictions summarized by DSMHabitat
+  reach](#predictions-summarized-by-dsmhabitat-reach)
 
 ``` r
 library(tidyverse)
@@ -334,7 +336,7 @@ si_rec <- recipe(data=training(td_split),
         # baseflow as percent of mean annual flow
         nf_bfl_dry_cfs_norm + nf_bfl_wet_cfs_norm 
         ) |>
-  step_log(all_numeric_predictors(), -mtpi30_min) |>
+  step_log(all_numeric_predictors(), -mtpi30_min, -mean_ndvi) |>
   # let effect of flow vary with gradient
   step_interact(terms = ~ flow_norm_cfs:slope)
   # try interacting with all numeric predictors
@@ -351,7 +353,7 @@ lm_si |> glance()
     ## # A tibble: 1 × 12
     ##   r.squared adj.r.squared sigma statistic   p.value    df logLik   AIC   BIC
     ##       <dbl>         <dbl> <dbl>     <dbl>     <dbl> <dbl>  <dbl> <dbl> <dbl>
-    ## 1     0.632         0.619 0.129      48.2 1.41e-102    19   356. -671. -580.
+    ## 1     0.632         0.619 0.129      48.3 1.26e-102    19   356. -671. -580.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
@@ -361,26 +363,26 @@ lm_si |> tidy()
     ## # A tibble: 20 × 5
     ##    term                  estimate std.error statistic   p.value
     ##    <chr>                    <dbl>     <dbl>     <dbl>     <dbl>
-    ##  1 (Intercept)            0.439     0.00550    79.8   1.95e-298
-    ##  2 flow_norm_cfs         -0.166     0.0438     -3.79  1.70e-  4
-    ##  3 slope                  0.0251    0.102       0.247 8.05e-  1
-    ##  4 sinuosity             -0.0173    0.00741    -2.34  1.98e-  2
-    ##  5 erom_v_ma_fps         -0.0553    0.108      -0.511 6.09e-  1
-    ##  6 bf_depth_m            -0.0894    0.190      -0.470 6.38e-  1
-    ##  7 bf_w_d_ratio          -0.00438   0.0343     -0.127 8.99e-  1
-    ##  8 da_k_erodibility       0.205     0.109       1.88  6.09e-  2
-    ##  9 da_avg_slope           0.0389    0.0195      2.00  4.65e-  2
-    ## 10 mean_ndvi              0.00944   0.0113      0.835 4.04e-  1
-    ## 11 loc_bfi               -0.0528    0.0187     -2.82  5.01e-  3
-    ## 12 loc_pct_clay           0.0373    0.0242      1.55  1.23e-  1
-    ## 13 loc_pct_sand           0.0288    0.0460      0.626 5.32e-  1
-    ## 14 loc_permeability       0.0456    0.0378      1.21  2.28e-  1
-    ## 15 loc_bedrock_depth     -0.0242    0.0221     -1.09  2.75e-  1
-    ## 16 loc_ppt_mean_mm        0.0953    0.0808      1.18  2.38e-  1
-    ## 17 mtpi30_min             0.0378    0.0159      2.38  1.77e-  2
-    ## 18 nf_bfl_dry_cfs_norm    1.93      1.07        1.80  7.21e-  2
-    ## 19 nf_bfl_wet_cfs_norm   -1.80      1.16       -1.56  1.20e-  1
-    ## 20 flow_norm_cfs_x_slope  0.189     0.0324      5.83  9.81e-  9
+    ##  1 (Intercept)            0.439     0.00550    79.8   1.76e-298
+    ##  2 flow_norm_cfs         -0.166     0.0438     -3.79  1.71e-  4
+    ##  3 slope                  0.0286    0.101       0.284 7.77e-  1
+    ##  4 sinuosity             -0.0169    0.00746    -2.26  2.41e-  2
+    ##  5 erom_v_ma_fps         -0.0580    0.107      -0.544 5.87e-  1
+    ##  6 bf_depth_m            -0.0765    0.192      -0.399 6.90e-  1
+    ##  7 bf_w_d_ratio          -0.00360   0.0344     -0.105 9.17e-  1
+    ##  8 da_k_erodibility       0.204     0.108       1.89  5.90e-  2
+    ##  9 da_avg_slope           0.0375    0.0194      1.94  5.34e-  2
+    ## 10 mean_ndvi              0.0108    0.0112      0.965 3.35e-  1
+    ## 11 loc_bfi               -0.0531    0.0187     -2.83  4.79e-  3
+    ## 12 loc_pct_clay           0.0370    0.0242      1.53  1.26e-  1
+    ## 13 loc_pct_sand           0.0308    0.0460      0.669 5.04e-  1
+    ## 14 loc_permeability       0.0437    0.0379      1.15  2.49e-  1
+    ## 15 loc_bedrock_depth     -0.0242    0.0220     -1.10  2.73e-  1
+    ## 16 loc_ppt_mean_mm        0.0990    0.0809      1.22  2.22e-  1
+    ## 17 mtpi30_min             0.0375    0.0159      2.36  1.86e-  2
+    ## 18 nf_bfl_dry_cfs_norm    1.91      1.07        1.79  7.38e-  2
+    ## 19 nf_bfl_wet_cfs_norm   -1.78      1.15       -1.54  1.25e-  1
+    ## 20 flow_norm_cfs_x_slope  0.189     0.0324      5.83  9.57e-  9
 
 ``` r
 lm_si$fit$fit |> dotwhisker::dwplot()
@@ -439,7 +441,7 @@ sd_rec <- recipe(data=training(td_split),
         # channel sinuosity
         sinuosity
         ) |>
-  step_log(all_numeric_predictors(), -mtpi30_min) |>
+  step_log(all_numeric_predictors(), -mtpi30_min, -mean_ndvi) |>
   step_interact(terms = ~ flow_cfs:erom_q_ma_cfs) |>
   step_interact(terms = ~ slope:da_area_sq_km) |>
   step_interact(terms = ~ flow_cfs:da_area_sq_km) |>
@@ -467,16 +469,16 @@ lm_sd |> tidy()
     ## # A tibble: 28 × 5
     ##    term           estimate std.error statistic   p.value
     ##    <chr>             <dbl>     <dbl>     <dbl>     <dbl>
-    ##  1 (Intercept)      0.833     0.0200  41.7     6.58e-169
-    ##  2 flow_cfs       -21.2       9.41    -2.25    2.47e-  2
-    ##  3 slope            2.08      0.778    2.68    7.67e-  3
-    ##  4 da_area_sq_km  -35.3       6.72    -5.25    2.18e-  7
-    ##  5 da_elev_mean     0.0624    7.45     0.00837 9.93e-  1
-    ##  6 da_ppt_mean_mm  25.0       5.72     4.37    1.52e-  5
-    ##  7 nf_bfl_dry_cfs  29.4       8.08     3.63    3.05e-  4
-    ##  8 nf_bfl_wet_cfs  27.8       3.91     7.09    4.27e- 12
-    ##  9 erom_q_ma_cfs   22.7       5.52     4.11    4.57e-  5
-    ## 10 erom_v_ma_fps    0.582     0.676    0.862   3.89e-  1
+    ##  1 (Intercept)       0.833    0.0200   41.7    6.48e-169
+    ##  2 flow_cfs        -21.2      9.41     -2.25   2.46e-  2
+    ##  3 slope             2.07     0.774     2.67   7.73e-  3
+    ##  4 da_area_sq_km   -35.4      6.73     -5.26   2.09e-  7
+    ##  5 da_elev_mean      0.204    7.41      0.0275 9.78e-  1
+    ##  6 da_ppt_mean_mm   25.1      5.71      4.39   1.38e-  5
+    ##  7 nf_bfl_dry_cfs   29.4      8.08      3.64   2.99e-  4
+    ##  8 nf_bfl_wet_cfs   27.8      3.91      7.10   4.19e- 12
+    ##  9 erom_q_ma_cfs    22.7      5.52      4.11   4.56e-  5
+    ## 10 erom_v_ma_fps     0.599    0.670     0.895  3.71e-  1
     ## # ℹ 18 more rows
 
 ``` r
@@ -709,7 +711,7 @@ rfr_si_tune |>
   theme(legend.position = "none") + scale_x_log10()
 ```
 
-![](model-expl_files/figure-gfm/rfr-tune-1.png)<!-- -->
+![](model-expl_files/figure-gfm/rfr-si-tune-1.png)<!-- -->
 
 ``` r
 rfr_spec <- rand_forest(mode = "regression", trees = 2^8)
@@ -737,8 +739,8 @@ rfr_si$fit$fit |> print()
     ## Target node size:                 5 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.006373245 
-    ## R squared (OOB):                  0.8550302
+    ## OOB prediction error (MSE):       0.006373427 
+    ## R squared (OOB):                  0.8550261
 
 ``` r
 rfr_si_res <- 
@@ -816,8 +818,8 @@ rfr_sd$fit$fit |> print()
     ## Target node size:                 5 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.05932951 
-    ## R squared (OOB):                  0.9889212
+    ## OOB prediction error (MSE):       0.05933008 
+    ## R squared (OOB):                  0.9889211
 
 ``` r
 rfr_sd_res <-
@@ -892,6 +894,20 @@ pd <- flowline_attributes |>
     ## $ flow_norm_cfs       <dbl> 1.000000, 6.084205, 8.517888, 12.168411, 17.279143…
 
 ``` r
+# # get min/max ranges from the training data
+# ranges <- td |> select(all_of(names(pd))) |> 
+#   reframe(across(everything(), function(x) (range(x)))) 
+# # filter the prediction data for just those falling within the training data
+# pd_idx <- pd |> 
+#   select(comid, all_of(names(ranges))) |>
+#   mutate(across(-comid, function(x) x>ranges[[cur_column()]][[1]] & x<=ranges[[cur_column()]][[2]])) |>
+#   filter(if_all(-comid)) |>
+#   pull(comid)
+# # update pd to exclude the out-of-range data
+# pd <- pd |> filter(comid %in% pd_idx) |> glimpse()
+```
+
+``` r
 pd_rf <- pd |> #head(100) |>
   mutate(log_wua_per_lf_pred = predict(rfr_sd, pd)[[".pred"]],
          wua_per_lf_pred=exp(log_wua_per_lf_pred), flow_cfs,
@@ -937,6 +953,107 @@ flowlines |> st_zm() |>
 ```
 
 ![](model-expl_files/figure-gfm/map-output-si-1.png)<!-- -->
+
+## Predictions summarized by DSMHabitat reach
+
+``` r
+# this is a rough join method, just taking any COMIDs within 50 ft buffer of flowline
+mainstems <- 
+  st_read("/vsizip/rearing_spatial_data/habitat_extents_combined_gradients_v3.shp.zip", as_tibble=T) |>
+  janitor::clean_names() |>
+  group_by(habitat, species, river) |>
+  summarize() |>
+  st_buffer(dist=50) |>
+  st_union(by_feature=T) |>
+  st_transform(st_crs(flowlines)) |>
+  filter(habitat=="rearing" & species=="Fall Run Chinook")
+```
+
+    ## Reading layer `habitat_extents_combined_gradients_v3' from data source 
+    ##   `/vsizip/rearing_spatial_data/habitat_extents_combined_gradients_v3.shp.zip' 
+    ##   using driver `ESRI Shapefile'
+    ## Simple feature collection with 323 features and 12 fields
+    ## Geometry type: MULTILINESTRING
+    ## Dimension:     XY
+    ## Bounding box:  xmin: -251634.9 ymin: -139292.4 xmax: 61284.41 ymax: 364940.4
+    ## Projected CRS: NAD83 / California Albers
+
+    ## `summarise()` has grouped output by 'habitat', 'species'. You can override
+    ## using the `.groups` argument.
+
+``` r
+mainstems_comid <- 
+  flowlines |> st_zm() |>
+  st_join(mainstems, join=st_intersects, left=F) |>
+  mutate(length_ft = st_length(geometry) |> units::set_units("ft") |> units::drop_units())
+
+mainstems_comid |> ggplot() + geom_sf(aes(color=river))
+```
+
+![](model-expl_files/figure-gfm/dsmhabitat-prep-1.png)<!-- -->
+
+``` r
+pd_dsmhabitat <- flowline_attributes |> 
+  # select the variables that are used in the model and drop NAs
+  select(comid, any_of(sd_rec$var_info$variable)) |> 
+  # create series of flow prediction points
+  expand_grid(flow_cfs = c(100,250,300,400,500,600,1000,3000,5000,6000,7000,9000,10000,11000,12000,13000,14000,15000)) |>
+  arrange(comid, flow_cfs) |>
+  filter(comid %in% mainstems_comid$comid) |>
+  drop_na() 
+
+pd_dsmhabitat_pred <-
+  pd_dsmhabitat|>
+  mutate(log_wua_per_lf_pred = predict(rfr_sd, pd_dsmhabitat)[[".pred"]],
+         wua_per_lf_pred=exp(log_wua_per_lf_pred), flow_cfs) |>
+  select(comid, 
+         flow_cfs, wua_per_lf_pred) |> glimpse()
+```
+
+    ## Rows: 32,544
+    ## Columns: 3
+    ## $ comid           <dbl> 348543, 348543, 348543, 348543, 348543, 348543, 348543…
+    ## $ flow_cfs        <dbl> 100, 250, 300, 400, 500, 600, 1000, 3000, 5000, 6000, …
+    ## $ wua_per_lf_pred <dbl> 6.1067584, 6.1800163, 6.1800163, 6.2391662, 6.2825252,…
+
+``` r
+pd_rf_by_mainstem <-
+  mainstems_comid |> 
+  st_drop_geometry() |>
+  inner_join(pd_dsmhabitat_pred, by=join_by(comid), relationship="many-to-many") |>
+  group_by(habitat, species, river, flow_cfs) |>
+  summarize(tot_wua_per_lf_pred = sum(coalesce(wua_per_lf_pred,0)),
+            tot_length_ft = sum(coalesce(length_ft,0))) |>
+  mutate(tot_wua_ft2 = tot_wua_per_lf_pred * tot_length_ft,
+         tot_wua_ac = tot_wua_ft2 / 43560) |>
+  glimpse()
+```
+
+    ## `summarise()` has grouped output by 'habitat', 'species', 'river'. You can
+    ## override using the `.groups` argument.
+
+    ## Rows: 540
+    ## Columns: 8
+    ## Groups: habitat, species, river [30]
+    ## $ habitat             <chr> "rearing", "rearing", "rearing", "rearing", "reari…
+    ## $ species             <chr> "Fall Run Chinook", "Fall Run Chinook", "Fall Run …
+    ## $ river               <chr> "American River", "American River", "American Rive…
+    ## $ flow_cfs            <dbl> 100, 250, 300, 400, 500, 600, 1000, 3000, 5000, 60…
+    ## $ tot_wua_per_lf_pred <dbl> 219.7560, 222.9373, 222.9335, 223.7458, 224.1112, …
+    ## $ tot_length_ft       <dbl> 142202.8, 142202.8, 142202.8, 142202.8, 142202.8, …
+    ## $ tot_wua_ft2         <dbl> 31249910, 31702305, 31701763, 31817272, 31869235, …
+    ## $ tot_wua_ac          <dbl> 717.3992, 727.7848, 727.7723, 730.4241, 731.6170, …
+
+``` r
+pd_rf_by_mainstem |>
+  ggplot() + 
+  geom_line(aes(x = flow_cfs, y = tot_wua_ac, color=species, linetype=habitat)) + 
+  facet_wrap(~river, scales="free_y") + 
+  scale_x_log10(breaks=c(100,300,1000,3000,10000)) + 
+  scale_y_log10() + theme(legend.position="top", panel.grid.minor = element_blank()) 
+```
+
+![](model-expl_files/figure-gfm/dsmhabitat-val-1.png)<!-- -->
 
 ===
 

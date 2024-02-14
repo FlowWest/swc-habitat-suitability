@@ -119,7 +119,6 @@ td |>
   pivot_longer(cols=slope:last_col(), names_to="varname", values_to="qtile") |>
   group_by(flow_cfs, varname, qtile) |> summarize(wua_per_lf=mean(wua_per_lf)) |> ungroup() |>
   ggplot() + geom_line(aes(x=flow_cfs, y=wua_per_lf, color=qtile)) + facet_wrap(~varname) + scale_color_viridis_d() + scale_y_log10() + scale_x_log10()
-
 ```
 
 ## Split into training and testing datasets
@@ -160,7 +159,7 @@ si_rec <- recipe(data=training(td_split),
         # baseflow as percent of mean annual flow
         nf_bfl_dry_cfs_norm + nf_bfl_wet_cfs_norm 
         ) |>
-  step_log(all_numeric_predictors(), -mtpi30_min) |>
+  step_log(all_numeric_predictors(), -mtpi30_min, -mean_ndvi) |>
   # let effect of flow vary with gradient
   step_interact(terms = ~ flow_norm_cfs:slope)
   # try interacting with all numeric predictors
@@ -217,7 +216,7 @@ sd_rec <- recipe(data=training(td_split),
         # channel sinuosity
         sinuosity
         ) |>
-  step_log(all_numeric_predictors(), -mtpi30_min) |>
+  step_log(all_numeric_predictors(), -mtpi30_min, -mean_ndvi) |>
   step_interact(terms = ~ flow_cfs:erom_q_ma_cfs) |>
   step_interact(terms = ~ slope:da_area_sq_km) |>
   step_interact(terms = ~ flow_cfs:da_area_sq_km) |>
@@ -339,7 +338,7 @@ lasso_sd_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
 
 #### Scale-independent (%HSI versus dimensionless flow)
 
-```{r rfr-tune} 
+```{r rfr-si-tune} 
 # set up cross validation
 folds <- vfold_cv(training(td_split), v = 10, strata = dataset)
 val_metrics <- metric_set(rmse, rsq, ccc)
@@ -504,6 +503,65 @@ flowlines |> st_zm() |>
   inner_join(pd_rf |> filter(flow_norm_cfs==1), by=join_by(comid)) |>
   ggplot() + geom_sf(aes(color = hsi_frac_pred)) + 
   scale_color_viridis_c(trans="log")
+```
+
+## Predictions summarized by DSMHabitat reach
+
+```{r dsmhabitat-prep}
+# this is a rough join method, just taking any COMIDs within 50 ft buffer of flowline
+mainstems <- 
+  st_read("/vsizip/rearing_spatial_data/habitat_extents_combined_gradients_v3.shp.zip", as_tibble=T) |>
+  janitor::clean_names() |>
+  group_by(habitat, species, river) |>
+  summarize() |>
+  st_buffer(dist=50) |>
+  st_union(by_feature=T) |>
+  st_transform(st_crs(flowlines)) |>
+  filter(habitat=="rearing" & species=="Fall Run Chinook")
+  
+mainstems_comid <- 
+  flowlines |> st_zm() |>
+  st_join(mainstems, join=st_intersects, left=F) |>
+  mutate(length_ft = st_length(geometry) |> units::set_units("ft") |> units::drop_units())
+
+mainstems_comid |> ggplot() + geom_sf(aes(color=river))
+```
+
+```{r dsmhabitat-val, fig.width=15, fig.height=10, dpi=300}
+pd_dsmhabitat <- flowline_attributes |> 
+  # select the variables that are used in the model and drop NAs
+  select(comid, any_of(sd_rec$var_info$variable)) |> 
+  # create series of flow prediction points
+  expand_grid(flow_cfs = c(100,250,300,400,500,600,1000,3000,5000,6000,7000,9000,10000,11000,12000,13000,14000,15000)) |>
+  arrange(comid, flow_cfs) |>
+  filter(comid %in% mainstems_comid$comid) |>
+  drop_na() 
+
+pd_dsmhabitat_pred <-
+  pd_dsmhabitat|>
+  mutate(log_wua_per_lf_pred = predict(rfr_sd, pd_dsmhabitat)[[".pred"]],
+         wua_per_lf_pred=exp(log_wua_per_lf_pred), flow_cfs) |>
+  select(comid, 
+         flow_cfs, wua_per_lf_pred) |> glimpse()
+
+pd_rf_by_mainstem <-
+  mainstems_comid |> 
+  st_drop_geometry() |>
+  inner_join(pd_dsmhabitat_pred, by=join_by(comid), relationship="many-to-many") |>
+  group_by(habitat, species, river, flow_cfs) |>
+  summarize(tot_wua_per_lf_pred = sum(coalesce(wua_per_lf_pred,0)),
+            tot_length_ft = sum(coalesce(length_ft,0))) |>
+  mutate(tot_wua_ft2 = tot_wua_per_lf_pred * tot_length_ft,
+         tot_wua_ac = tot_wua_ft2 / 43560) |>
+  glimpse()
+
+pd_rf_by_mainstem |>
+  ggplot() + 
+  geom_line(aes(x = flow_cfs, y = tot_wua_ac, color=species, linetype=habitat)) + 
+  facet_wrap(~river, scales="free_y") + 
+  scale_x_log10(breaks=c(100,300,1000,3000,10000)) + 
+  scale_y_log10() + theme(legend.position="top", panel.grid.minor = element_blank()) 
+
 ```
 
 ===

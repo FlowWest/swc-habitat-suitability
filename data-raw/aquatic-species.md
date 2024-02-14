@@ -1,28 +1,19 @@
 Aquatic Species
 ================
 Maddee Rubenson (FlowWest)
-2024-01-31
+2024-02-14
 
 ``` r
 project_crs <- "ESRI:102039" # NAD83 CONUS Albers USGS Version
 
-selected_huc_8 <- c("18020107", "18020125")
-
 flowlines <- readRDS("../data/flowline_geometries.Rds") |>
-  left_join(readRDS("../data/flowline_attributes.Rds")) |>
-  filter(huc_8 %in% selected_huc_8) |>
-  st_transform(project_crs)
-```
+  st_transform(project_crs) |> 
+  st_zm()
 
-    ## Joining with `by = join_by(comid)`
-
-``` r
 catchments <- readRDS("../data/catchments.Rds")
 ```
 
 ## Aquatic Richness Data
-
-**Currently just for Yuba River**
 
 ### Aquatic Biodiveristy Summary
 
@@ -38,53 +29,37 @@ irreplaceability, which is a weighted measure of rarity and endemism.
 ``` r
 # CDFW:
 drive_file_by_id("13S1YWYP_t7pb2SUmEWEprJA-tJ-8FM-V") 
-
-aquatic_sf <- read_sf('temp/Aquatic_Species_List_-_ACE_[ds2740].geojson') |> 
-  janitor::clean_names() |> 
-  rename(huc_12_aq = huc12) |> 
-  select(huc_12_aq, bio_aq_rank_sw) |> 
-  mutate(huc_8 = str_sub(huc_12_aq, start=1, end=8)) |> 
-  glimpse()
 ```
 
-    ## Rows: 4,473
-    ## Columns: 4
-    ## $ huc_12_aq      <chr> "180201590400", "180600080503", "180400010703", "180703…
-    ## $ bio_aq_rank_sw <int> 5, 5, 4, 2, 1, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5…
-    ## $ geometry       <MULTIPOLYGON [°]> MULTIPOLYGON (((-121.6377 3..., MULTIPOLYG…
-    ## $ huc_8          <chr> "18020159", "18060008", "18040001", "18070304", "180902…
+    ## [1] "temp/Aquatic_Species_List_-_ACE_[ds2740].geojson"
 
 ``` r
-aquatic_selected <- aquatic_sf |> 
-  filter(huc_8 %in% selected_huc_8) |> 
-  st_transform(project_crs)
-flowlines_selected <- flowlines |> 
-  filter(huc_8 %in% selected_huc_8) |> 
-  st_zm()
+aquatic_cdfw_sf <- read_sf('temp/Aquatic_Species_List_-_ACE_[ds2740].geojson') |> 
+  janitor::clean_names() |> 
+  st_transform(project_crs) 
+  
+aquatic_flowlines_cdfw <- flowlines |> 
+  st_join(aquatic_cdfw_sf) |> 
+  select(comid, bio_aq_rank_sw) |> glimpse()
+```
 
-crosswalk <- 
-  flowlines_selected |> 
-  st_point_on_surface() |> 
-  st_join(aquatic_selected, join=st_within) |>
-  select(comid, huc_12_aq) |>
-  st_drop_geometry()
+    ## Rows: 188,694
+    ## Columns: 3
+    ## $ comid          <int> 20245062, 24085230, 22226684, 22226720, 22226732, 22226…
+    ## $ bio_aq_rank_sw <int> NA, NA, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,…
+    ## $ geometry       <LINESTRING [m]> LINESTRING (-1758581 168425..., LINESTRING (…
 
-flowlines_joined <-
-  flowlines_selected |>
-  left_join(crosswalk) |>
-  left_join(st_drop_geometry(aquatic_selected))
-
+``` r
 ggplot() + 
-  geom_sf(data=flowlines_joined, aes(color=as.factor(bio_aq_rank_sw))) 
+  geom_sf(data = aquatic_flowlines_cdfw, aes(color=as.factor(bio_aq_rank_sw))) 
 ```
 
 ![](aquatic-species_files/figure-gfm/aqu-spec-1.png)<!-- -->
 
 ``` r
-flowlines_joined |> 
-  select(comid, bio_aq_rank_sw) |> 
+aquatic_flowlines_cdfw |> 
   st_drop_geometry() |> 
-  saveRDS('aquatic/cdfw_aquatic_species_rank.RDS')
+  saveRDS('../data/attr_cdfw_aquatic_species_rank.RDS')
 ```
 
 ### California Freshwater Species Database V2
@@ -98,22 +73,11 @@ California’s freshwater resources to survive.
 <https://www.scienceforconservation.org/products/california-freshwater-species-database>
 
 ``` r
-## TNC: 
-
 richness <- read_csv('ca_freshwater_species/RichnessSummary.csv') |> 
   janitor::clean_names() |> 
   rename(huc_12 = au_id) |> 
   mutate(huc_12_aq = as.character(huc_12)) |> glimpse()
 ```
-
-    ## Rows: 4450 Columns: 33
-    ## ── Column specification ────────────────────────────────────────────────────────
-    ## Delimiter: ","
-    ## dbl (32): AU_ID, species, species_fish, species_crust, species_herps, specie...
-    ## num  (1): OBJECTID
-    ## 
-    ## ℹ Use `spec()` to retrieve the full column specification for this data.
-    ## ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
 
     ## Rows: 4,450
     ## Columns: 34
@@ -158,19 +122,17 @@ analysis_units <- read_sf('ca_freshwater_species/AnalysisUnits.shp') |>
   rename(huc_12_aq = au_id) |> 
   mutate(huc_12_aq = as.character(huc_12_aq)) |> 
   left_join(richness) |> 
-  mutate(huc_8 = str_sub(huc_12_aq, start=1, end=8)) |> 
-  select(-huc_12) |> 
+  st_transform(project_crs) |> 
   glimpse()
 ```
-
-    ## Joining with `by = join_by(huc_12_aq)`
 
     ## Rows: 4,450
     ## Columns: 36
     ## $ huc_12_aq                  <chr> "150301010305", "150301010307", "1503010104…
     ## $ au_name                    <chr> "Montana Wash-Colorado River", "Red Spring-…
-    ## $ geometry                   <MULTIPOLYGON [m]> MULTIPOLYGON (((486938.1 -3...…
+    ## $ geometry                   <MULTIPOLYGON [m]> MULTIPOLYGON (((-1677510 14...…
     ## $ objectid                   <dbl> 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, …
+    ## $ huc_12                     <dbl> 1.50301e+11, 1.50301e+11, 1.50301e+11, 1.50…
     ## $ species                    <dbl> 8, 27, 8, 9, 56, 9, 13, 43, 38, 2, 2, 2, 3,…
     ## $ species_fish               <dbl> 2, 3, 1, 3, 3, 1, 2, 3, 3, 0, 0, 0, 0, 0, 0…
     ## $ species_crust              <dbl> 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0…
@@ -202,33 +164,11 @@ analysis_units <- read_sf('ca_freshwater_species/AnalysisUnits.shp') |>
     ## $ species_current            <dbl> 2, 20, 3, 3, 41, 5, 8, 31, 32, 0, 0, 0, 0, …
     ## $ species_historical         <dbl> 2, 8, 1, 3, 15, 1, 2, 9, 3, 0, 0, 0, 0, 0, …
     ## $ species_other              <dbl> 5, 5, 4, 5, 7, 4, 5, 6, 7, 2, 2, 2, 3, 2, 3…
-    ## $ huc_8                      <chr> "15030101", "15030101", "15030101", "150301…
 
 ``` r
-analysis_units_selected <- analysis_units |> filter(huc_8 %in% selected_huc_8) |> st_transform(project_crs)
-flowlines_selected <- flowlines |> filter(huc_8 %in% selected_huc_8) |> st_zm()
+flowlines_joined_tnc <- flowlines |> 
+  st_join(analysis_units)
 
-crosswalk_tnc <- 
-  flowlines_selected |> 
-  st_point_on_surface() |> 
-  st_join(analysis_units_selected, join=st_within) |>
-  select(comid, huc_12_aq) |>
-  st_drop_geometry()
-```
-
-    ## Warning: st_point_on_surface assumes attributes are constant over geometries
-
-``` r
-flowlines_joined_tnc <-
-  flowlines_selected |>
-  left_join(crosswalk_tnc) |>
-  left_join(st_drop_geometry(analysis_units_selected))
-```
-
-    ## Joining with `by = join_by(comid)`
-    ## Joining with `by = join_by(huc_8, huc_12_aq)`
-
-``` r
 ggplot() + 
   geom_sf(data=flowlines_joined_tnc, aes(color=species)) 
 ```
@@ -237,7 +177,7 @@ ggplot() +
 
 ``` r
 flowlines_joined_tnc |> 
-  select(comid, species, species_fish:species_endemic) |> 
+  select(comid, species:species_other) |> 
   st_drop_geometry() |> 
-  saveRDS('aquatic/tnc_aquatic_species_rank.RDS')
+  saveRDS('../data/attr_tnc_aquatic_species_rank.RDS')
 ```

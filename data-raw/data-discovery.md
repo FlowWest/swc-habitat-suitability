@@ -1,7 +1,7 @@
 SWC Habitat Model Data Discovery
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-01-31
+2024-02-14
 
 - [Case study geographic scope](#case-study-geographic-scope)
 - [Data Import](#data-import)
@@ -11,6 +11,7 @@ SWC Habitat Model Data Discovery
   - [Import Flowline Geometry](#import-flowline-geometry)
 - [Maps of attribute data
   (exploratory)](#maps-of-attribute-data-exploratory)
+- [Import catchments](#import-catchments)
 
 ## Case study geographic scope
 
@@ -388,42 +389,178 @@ catchment_ndvi
 
 #### Aquatic Species
 
-**Currently clipped to Yuba**
-
 CDFW data:
 <https://data-cdfw.opendata.arcgis.com/datasets/CDFW>::aquatic-species-list-ace-ds2740-2/explore
 TNC data:
 <https://www.scienceforconservation.org/products/california-freshwater-species-database>
 
 ``` r
-aquatic_species_cdfw <- readRDS('aquatic/cdfw_aquatic_species_rank.RDS') |> 
+aquatic_species_cdfw <- readRDS('../data/attr_cdfw_aquatic_species_rank.RDS') |> 
   glimpse()
 ```
 
-    ## Rows: 2,264
+    ## Rows: 188,694
     ## Columns: 2
-    ## $ comid          <dbl> 8061233, 8062583, 8062581, 8061239, 8062585, 8061235, 8…
-    ## $ bio_aq_rank_sw <int> 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4…
+    ## $ comid          <int> 20245062, 24085230, 22226684, 22226720, 22226732, 22226…
+    ## $ bio_aq_rank_sw <int> NA, NA, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,…
 
 ``` r
-aquatic_species_tnc <- readRDS('aquatic/tnc_aquatic_species_rank.RDS') |> 
+aquatic_species_tnc <- readRDS('../data/attr_tnc_aquatic_species_rank.RDS') |> 
   glimpse()
 ```
 
-    ## Rows: 2,264
-    ## Columns: 12
-    ## $ comid                  <dbl> 8061233, 8062583, 8062581, 8061239, 8062585, 80…
-    ## $ species                <dbl> 45, 45, 45, 60, 45, 60, 60, 60, 60, 60, 60, 60,…
-    ## $ species_fish           <dbl> 9, 9, 9, 8, 9, 8, 8, 8, 8, 8, 8, 8, 8, 5, 5, 5,…
-    ## $ species_crust          <dbl> 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,…
-    ## $ species_herps          <dbl> 9, 9, 9, 8, 9, 8, 8, 8, 8, 8, 8, 8, 8, 7, 7, 7,…
-    ## $ species_inverts        <dbl> 3, 3, 3, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3,…
-    ## $ species_mollusks       <dbl> 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,…
-    ## $ species_plants         <dbl> 4, 4, 4, 8, 4, 8, 8, 8, 8, 8, 8, 8, 8, 7, 7, 7,…
-    ## $ species_birds          <dbl> 15, 15, 15, 30, 15, 30, 30, 30, 30, 30, 30, 30,…
-    ## $ species_mammals        <dbl> 4, 4, 4, 5, 4, 5, 5, 5, 5, 5, 5, 5, 5, 3, 3, 3,…
-    ## $ species_mollusks_crust <dbl> 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,…
-    ## $ species_endemic        <dbl> 11, 11, 11, 10, 11, 10, 10, 10, 10, 10, 10, 10,…
+    ## Rows: 188,662
+    ## Columns: 32
+    ## $ comid                      <int> 20245062, 24085230, 22226684, 22226720, 222…
+    ## $ species                    <dbl> NA, NA, 281, 281, 281, 281, 281, 281, 139, …
+    ## $ species_fish               <dbl> NA, NA, 16, 16, 16, 16, 16, 16, 11, 16, 11,…
+    ## $ species_crust              <dbl> NA, NA, 3, 3, 3, 3, 3, 3, 0, 3, 0, 0, 0, 0,…
+    ## $ species_herps              <dbl> NA, NA, 16, 16, 16, 16, 16, 16, 14, 16, 14,…
+    ## $ species_inverts            <dbl> NA, NA, 136, 136, 136, 136, 136, 136, 70, 1…
+    ## $ species_mollusks           <dbl> NA, NA, 6, 6, 6, 6, 6, 6, 2, 6, 2, 2, 2, 2,…
+    ## $ species_plants             <dbl> NA, NA, 37, 37, 37, 37, 37, 37, 24, 37, 24,…
+    ## $ species_birds              <dbl> NA, NA, 62, 62, 62, 62, 62, 62, 13, 62, 13,…
+    ## $ species_mammals            <dbl> NA, NA, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,…
+    ## $ species_mollusks_crust     <dbl> NA, NA, 9, 9, 9, 9, 9, 9, 2, 9, 2, 2, 2, 2,…
+    ## $ species_endemic            <dbl> NA, NA, 32, 32, 32, 32, 32, 32, 16, 32, 16,…
+    ## $ species_endemic_fish       <dbl> NA, NA, 3, 3, 3, 3, 3, 3, 1, 3, 1, 1, 1, 1,…
+    ## $ species_endemic_crust      <dbl> NA, NA, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0,…
+    ## $ species_endemic_herps      <dbl> NA, NA, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,…
+    ## $ species_endemic_inverts    <dbl> NA, NA, 26, 26, 26, 26, 26, 26, 13, 26, 13,…
+    ## $ species_endemic_mollusks   <dbl> NA, NA, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,…
+    ## $ species_endemic_plants     <dbl> NA, NA, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,…
+    ## $ species_endemic_birds      <dbl> NA, NA, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,…
+    ## $ species_endemic_mammals    <dbl> NA, NA, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,…
+    ## $ species_vulnerable         <dbl> NA, NA, 66, 66, 66, 66, 66, 66, 36, 66, 36,…
+    ## $ species_listed             <dbl> NA, NA, 6, 6, 6, 6, 6, 6, 2, 6, 2, 2, 2, 2,…
+    ## $ species_endemic_vulnerable <dbl> NA, NA, 11, 11, 11, 11, 11, 11, 4, 11, 4, 4…
+    ## $ species_endemic_listed     <dbl> NA, NA, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0,…
+    ## $ genus                      <dbl> NA, NA, 224, 224, 224, 224, 224, 224, 120, …
+    ## $ family                     <dbl> NA, NA, 111, 111, 111, 111, 111, 111, 76, 1…
+    ## $ tax_order                  <dbl> NA, NA, 56, 56, 56, 56, 56, 56, 39, 56, 39,…
+    ## $ tax_class                  <dbl> NA, NA, 15, 15, 15, 15, 15, 15, 13, 15, 13,…
+    ## $ phylum                     <dbl> NA, NA, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,…
+    ## $ species_current            <dbl> NA, NA, 227, 227, 227, 227, 227, 227, 110, …
+    ## $ species_historical         <dbl> NA, NA, 64, 64, 64, 64, 64, 64, 30, 64, 30,…
+    ## $ species_other              <dbl> NA, NA, 36, 36, 36, 36, 36, 36, 29, 36, 29,…
+
+#### Width Data
+
+Data source: <https://hydro.iis.u-tokyo.ac.jp/~yamadai/MERIT_Hydro/>
+
+``` r
+width_data <- readRDS('width_data/merit_width_dataset_comid_join.RDS') 
+```
+
+#### Stream Classifications
+
+Hydrologic stream classifications from
+<https://doi.org/10.1111/1752-1688.12504>
+
+These classifications were developed using a [series of catchment
+characteristics](https://californiawaterblog.com/2017/07/16/a-simplified-method-to-classify-streams-and-improve-californias-water-management/):
+
+\-[Classification
+scheme](https://californiawaterblog.com/wp-content/uploads/2017/07/lane_1.png)
+-[Final
+result](https://github.com/ceff-tech/eflow-readme/raw/master/FinalCAClassification.jpg)
+
+``` r
+hyd_cls_tbl <- tribble(~class, ~hyd_cls, ~hyd_cat, ~hyd_cls_descrip,
+                       1, "SM", 1, "Snowmelt",
+                       2, "HSR", 2, "High-volume snowmelt and rain",
+                       3, "LSR", 2, "Low-volume snowmelt and rain",
+                       8, "RGW", 3, "Rain and seasonal groundwater",
+                       4, "WS", 3, "Winter storms",
+                       5, "GW", 2, "Groundwater", 
+                       6, "PGR", 3, "Perennial groundwater and rain",
+                       7, "FER", 3, "Flashy, ephemeral rain",
+                       9, "HLP", 1, "High elevation, low precipitation"
+                       )
+hyd_cls <- drive_file_by_id("1qABq_Y-ZzuH_Am6pkqpno4K5nGYhYd1R", vsizip=T) |>
+  st_read(as_tibble=T) |>
+  janitor::clean_names() |>
+  st_drop_geometry() |>
+  left_join(hyd_cls_tbl, by=join_by(class)) |>
+  mutate(hyd_cls = factor(hyd_cls, levels=hyd_cls_tbl$hyd_cls, labels=hyd_cls_tbl$hyd_cls_descrip),
+         hyd_cat = factor(hyd_cat, levels=c(1,2,3), labels=c("Snowmelt", "Mixed", "Rain"))) |>
+  select(comid, hyd_cat, hyd_cls) |>
+  glimpse()
+```
+
+    ## temp/Final_Classification_9CLASS.zip already exists and will be used...
+
+    ## Reading layer `Final_Classification_9CLASS' from data source 
+    ##   `/vsizip/temp/Final_Classification_9CLASS.zip' using driver `ESRI Shapefile'
+    ## Simple feature collection with 70720 features and 5 fields
+    ## Geometry type: MULTILINESTRING
+    ## Dimension:     XY, XYZM
+    ## Bounding box:  xmin: -124.4025 ymin: 32.54011 xmax: -114.6555 ymax: 42.00744
+    ## z_range:       zmin: 0 zmax: 0
+    ## m_range:       mmin: 0 mmax: 100
+    ## Geodetic CRS:  NAD83
+    ## Rows: 70,720
+    ## Columns: 3
+    ## $ comid   <dbl> 8200535, 8200545, 8200931, 8201087, 8201891, 8202565, 8202567,…
+    ## $ hyd_cat <fct> Rain, Rain, Rain, Rain, Rain, Rain, Rain, Rain, Rain, Rain, Ra…
+    ## $ hyd_cls <fct> "Flashy, ephemeral rain", "Flashy, ephemeral rain", "Flashy, e…
+
+``` r
+nf <- 
+  drive_file_by_id("1P9vH9VXbPV9jYuFq35yF3elBRatYKQmU", vsizip=F) |>
+  archive::archive_read() |>
+  read_csv() |>
+  filter(comid %in% flowline_table$comid)
+```
+
+    ## temp/ffm-final-v1.2.1.zip already exists and will be used...
+
+    ## Rows: 8151537 Columns: 15
+    ## ── Column specification ────────────────────────────────────────────────────────
+    ## Delimiter: ","
+    ## chr  (5): ffm, wyt, unit, source, alteration
+    ## dbl (10): comid, p10, p25, p50, p75, p90, gage_id, observed_years, observed_...
+    ## 
+    ## ℹ Use `spec()` to retrieve the full column specification for this data.
+    ## ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+
+``` r
+# A selection of potentially useful flow frequency metrics. There are many other potential options
+nf_ffm <- reduce(list(
+  # dry season baseflow in moderate water year
+  nf |> 
+    filter(ffm=="ds_mag_50" & source=="model" & wyt=="moderate") |> 
+    select(comid, nf_bfl_dry_cfs = p50),
+  # wet season baseflow in moderate water year
+  nf |> 
+    filter(ffm=="wet_bfl_mag_10" & source=="model" & wyt=="moderate") |> 
+    select(comid, nf_bfl_wet_cfs = p50),
+  # start date of wet season in moderate water year
+  nf |> 
+    filter(ffm=="wet_tim" & source=="model" & wyt=="moderate") |> 
+    select(comid, nf_wet_start = p50),
+  # start date of wet season in moderate water year
+  nf |> 
+    filter(ffm=="wet_bfl_dur" & source=="model" & wyt=="moderate") |> 
+    select(comid, nf_wet_dur = p50)
+  ), left_join, by=join_by(comid))
+
+# Peak flows Q2, Q5, Q10 (cfs) 
+peak_flows <- reduce(list(
+  # start date of wet season in moderate water year
+  nf |> 
+    filter(ffm=="peak_2" & source=="model") |> 
+    select(comid, peak_q2_cfs = p50),
+  # start date of wet season in moderate water year
+  nf |> 
+    filter(ffm=="peak_5" & source=="model") |> 
+    select(comid, peak_q5_cfs = p50),
+  # start date of wet season in moderate water year
+  nf |> 
+    filter(ffm=="peak_10" & source=="model") |> 
+    select(comid, peak_q10_cfs = p50)
+  ), left_join, by=join_by(comid))
+```
 
 ### Combine all attributes
 
@@ -461,13 +598,20 @@ flowline_attributes <-
   left_join(da_suppl_attrs) |> 
   left_join(streamcat_data) |>
   left_join(catchment_ndvi) |> 
-  left_join(aquatic_species_cdfw) |> # JUST YUBA 
-  left_join(aquatic_species_tnc) |> # JUST YUBA 
+  left_join(aquatic_species_cdfw) |> 
+  left_join(aquatic_species_tnc) |>  
+  left_join(catchment_ndvi) |>
+  left_join(hyd_cls) |>
+  left_join(nf_ffm) |>
+  left_join(peak_flows) |>
+  left_join(width_data) |> 
   # fill in gaps in the RF bankfull estimates with the simple Bieger model
   mutate(bf_width_m = coalesce(bf_width_m, 2.76*da_area_sq_km^0.399),
          bf_depth_m = coalesce(bf_depth_m, 0.23*da_area_sq_km^0.294),
          bf_xarea_m = coalesce(bf_width_m*bf_depth_m, 0.87*da_area_sq_km^0.652),
          bf_w_d_ratio = bf_width_m / bf_depth_m) |>
+  # fill in gaps in merit_width_m using bankfull estimates. Prefer merit where available
+  mutate(chan_width_m = coalesce(merit_width_m, bf_width_m)) |>
   # add some back of the envelope sediment transport calculations
   mutate(velocity_m_s = erom_v_ma_fps / 0.3048,
          wetted_perimeter_m = 2*bf_depth_m + bf_width_m,
@@ -483,8 +627,8 @@ flowline_attributes <-
                          ((rho_s_cgs - rho_cgs) * g_cgs)^(1/3)) |>
   left_join(attr_mtpi) |>
   left_join(attr_vb1 |> select(comid, vb_width_transect)) |>
-  mutate(vb_width_transect = coalesce(pmax(vb_width_transect, bf_width_m), vb_width_transect),
-         vb_bf_w_ratio = vb_width_transect / bf_width_m)
+  mutate(vb_width_transect = coalesce(pmax(vb_width_transect, chan_width_m), vb_width_transect),
+         vb_bf_w_ratio = vb_width_transect / chan_width_m)
 
 flowline_attributes |> saveRDS("../data/flowline_attributes.Rds")
   
@@ -831,7 +975,79 @@ flowlines |>
 ```
 
 ![](data-discovery_files/figure-gfm/plot-vb_bf_w_ratio-1.png)<!-- -->
-\## Import catchments
+
+``` r
+# plot showing hydrologic classification
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = hyd_cls)) +
+  geom_sf(aes(color = hyd_cls), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") 
+```
+
+![](data-discovery_files/figure-gfm/plot-hyd-cls-1.png)<!-- -->
+
+``` r
+# plot showing merit width data
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = merit_width_m)) +
+  geom_sf(aes(color = merit_width_m), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(trans = "log")
+```
+
+![](data-discovery_files/figure-gfm/plot-width-1.png)<!-- -->
+
+``` r
+# plot showing merit width data combined with bankfull where merit is not available
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = chan_width_m)) +
+  geom_sf(aes(color = chan_width_m), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(trans = "log")
+```
+
+    ## Warning: Transformation introduced infinite values in discrete y-axis
+
+![](data-discovery_files/figure-gfm/plot-width-combined-1.png)<!-- -->
+
+``` r
+# plot showing number of species - TNC data
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = species)) +
+  geom_sf(aes(color = species), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(trans = "log")
+```
+
+![](data-discovery_files/figure-gfm/plot-species-1.png)<!-- -->
+
+``` r
+# plot showing number of CDFW aquatic biodiversity rank
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = bio_aq_rank_sw)) +
+  geom_sf(aes(color = bio_aq_rank_sw), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(trans = "log")
+```
+
+![](data-discovery_files/figure-gfm/plot-aqu-rank-1.png)<!-- -->
+
+## Import catchments
 
 ``` r
 # local catchment associated with each flowline reach (COMID)

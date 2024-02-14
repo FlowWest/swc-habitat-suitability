@@ -23,19 +23,14 @@ source('data-functions.R')
 ```{r watersheds}
 project_crs <- "ESRI:102039" # NAD83 CONUS Albers USGS Version
 
-selected_huc_8 <- c("18020107", "18020125")
-
 flowlines <- readRDS("../data/flowline_geometries.Rds") |>
-  left_join(readRDS("../data/flowline_attributes.Rds")) |>
-  filter(huc_8 %in% selected_huc_8) |>
-  st_transform(project_crs)
+  st_transform(project_crs) |> 
+  st_zm()
 
 catchments <- readRDS("../data/catchments.Rds")
 ```
 
 ## Aquatic Richness Data
-
-**Currently just for Yuba River**
 
 ### Aquatic Biodiveristy Summary
 
@@ -48,39 +43,20 @@ The aquatic biodiversity summary combines the three measures of biodiversity dev
 # CDFW:
 drive_file_by_id("13S1YWYP_t7pb2SUmEWEprJA-tJ-8FM-V") 
 
-aquatic_sf <- read_sf('temp/Aquatic_Species_List_-_ACE_[ds2740].geojson') |> 
+aquatic_cdfw_sf <- read_sf('temp/Aquatic_Species_List_-_ACE_[ds2740].geojson') |> 
   janitor::clean_names() |> 
-  rename(huc_12_aq = huc12) |> 
-  select(huc_12_aq, bio_aq_rank_sw) |> 
-  mutate(huc_8 = str_sub(huc_12_aq, start=1, end=8)) |> 
-  glimpse()
-
-aquatic_selected <- aquatic_sf |> 
-  filter(huc_8 %in% selected_huc_8) |> 
-  st_transform(project_crs)
-flowlines_selected <- flowlines |> 
-  filter(huc_8 %in% selected_huc_8) |> 
-  st_zm()
-
-crosswalk <- 
-  flowlines_selected |> 
-  st_point_on_surface() |> 
-  st_join(aquatic_selected, join=st_within) |>
-  select(comid, huc_12_aq) |>
-  st_drop_geometry()
-
-flowlines_joined <-
-  flowlines_selected |>
-  left_join(crosswalk) |>
-  left_join(st_drop_geometry(aquatic_selected))
+  st_transform(project_crs) 
+  
+aquatic_flowlines_cdfw <- flowlines |> 
+  st_join(aquatic_cdfw_sf) |> 
+  select(comid, bio_aq_rank_sw) |> glimpse()
 
 ggplot() + 
-  geom_sf(data=flowlines_joined, aes(color=as.factor(bio_aq_rank_sw))) 
+  geom_sf(data = aquatic_flowlines_cdfw, aes(color=as.factor(bio_aq_rank_sw))) 
 
-flowlines_joined |> 
-  select(comid, bio_aq_rank_sw) |> 
+aquatic_flowlines_cdfw |> 
   st_drop_geometry() |> 
-  saveRDS('aquatic/cdfw_aquatic_species_rank.RDS')
+  saveRDS('../data/attr_cdfw_aquatic_species_rank.RDS')
   
 ```
 
@@ -90,9 +66,7 @@ The California Freshwater Species Database is the first comprehensive geospatial
 
 <https://www.scienceforconservation.org/products/california-freshwater-species-database>
 
-```{r}
-## TNC: 
-
+```{r message=FALSE, warning=FALSE}
 richness <- read_csv('ca_freshwater_species/RichnessSummary.csv') |> 
   janitor::clean_names() |> 
   rename(huc_12 = au_id) |> 
@@ -103,31 +77,18 @@ analysis_units <- read_sf('ca_freshwater_species/AnalysisUnits.shp') |>
   rename(huc_12_aq = au_id) |> 
   mutate(huc_12_aq = as.character(huc_12_aq)) |> 
   left_join(richness) |> 
-  mutate(huc_8 = str_sub(huc_12_aq, start=1, end=8)) |> 
-  select(-huc_12) |> 
+  st_transform(project_crs) |> 
   glimpse()
 
-analysis_units_selected <- analysis_units |> filter(huc_8 %in% selected_huc_8) |> st_transform(project_crs)
-flowlines_selected <- flowlines |> filter(huc_8 %in% selected_huc_8) |> st_zm()
-
-crosswalk_tnc <- 
-  flowlines_selected |> 
-  st_point_on_surface() |> 
-  st_join(analysis_units_selected, join=st_within) |>
-  select(comid, huc_12_aq) |>
-  st_drop_geometry()
-
-flowlines_joined_tnc <-
-  flowlines_selected |>
-  left_join(crosswalk_tnc) |>
-  left_join(st_drop_geometry(analysis_units_selected))
+flowlines_joined_tnc <- flowlines |> 
+  st_join(analysis_units)
 
 ggplot() + 
   geom_sf(data=flowlines_joined_tnc, aes(color=species)) 
 
 flowlines_joined_tnc |> 
-  select(comid, species, species_fish:species_endemic) |> 
+  select(comid, species:species_other) |> 
   st_drop_geometry() |> 
-  saveRDS('aquatic/tnc_aquatic_species_rank.RDS')
+  saveRDS('../data/attr_tnc_aquatic_species_rank.RDS')
 
 ```

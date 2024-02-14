@@ -162,9 +162,9 @@ si_rec <- recipe(data=training(td_split),
         ) |>
   step_log(all_numeric_predictors(), -mtpi30_min) |>
   # let effect of flow vary with gradient
-  # step_interact(terms = ~ flow_norm_cfs:slope)
+  step_interact(terms = ~ flow_norm_cfs:slope)
   # try interacting with all numeric predictors
-  step_interact(terms = ~ flow_norm_cfs:all_numeric_predictors())
+  #step_interact(terms = ~ flow_norm_cfs:all_numeric_predictors()) 
 
 lm_si <- workflow() |>
   add_recipe(si_rec) |>
@@ -183,10 +183,11 @@ lm_si_res |>
   coord_fixed() + geom_abline() + scale_color_viridis_c() + 
   ggtitle("Scale-independent model, linear regression")
 
-lm_si_res |> filter(comid<=2821716) |> left_join(transmute(flowline_attributes, comid, erom_q_ma_cfs, chan_width_ft=chan_width_m/0.3048)) |>
+lm_si_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
+  left_join(transmute(flowline_attributes, comid, erom_q_ma_cfs)) |> #, chan_width_ft=chan_width_m/0.3048)) |>
   ggplot(aes(x=flow_norm_cfs*erom_q_ma_cfs, group=1)) + facet_wrap(~comid) + 
-  geom_line(aes(y=hsi_frac_pred*chan_width_ft, color="predicted", group=1)) + geom_line(aes(y=hsi_frac*chan_width_ft, color="actual", group=1)) + 
-  scale_y_log10()
+  geom_line(aes(y=hsi_frac_pred*100, color="predicted", group=1)) + geom_line(aes(y=hsi_frac*100, color="actual", group=1)) + 
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (% of Total Area)")
 ```
 
 #### Scale-dependent (WUA-per-linear-ft versus flow)
@@ -240,10 +241,10 @@ lm_sd_res |>
   scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c() + 
   ggtitle("Scale-dependent model, linear regression")
 
-lm_sd_res |> filter(comid<=2821716) |>
+lm_sd_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
   ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
-  scale_y_log10() 
+  scale_y_log10() + xlab("Flow (cfs)") + ylab("Suitable Habitat Area per LF Channel (ft)")
 ```
 
 ### Linear regression with regularized (lasso) feature selection 
@@ -283,10 +284,11 @@ lasso_si_res |>
   coord_fixed() + geom_abline() + scale_color_viridis_c()  + 
   ggtitle("Scale-independent model, linear regression w/ lasso feature selection")
 
-lasso_si_res |> filter(comid<=2821716) |> left_join(transmute(flowline_attributes, comid, erom_q_ma_cfs, chan_width_ft=chan_width_m/0.3048)) |>
+lasso_si_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
+  left_join(transmute(flowline_attributes, comid, erom_q_ma_cfs)) |> #, chan_width_ft=chan_width_m/0.3048)) |>
   ggplot(aes(x=flow_norm_cfs*erom_q_ma_cfs, group=1)) + facet_wrap(~comid) + 
-  geom_line(aes(y=hsi_frac_pred*chan_width_ft, color="predicted", group=1)) + geom_line(aes(y=hsi_frac*chan_width_ft, color="actual", group=1)) + 
-  scale_y_log10()
+  geom_line(aes(y=hsi_frac_pred*100, color="predicted", group=1)) + geom_line(aes(y=hsi_frac*100, color="actual", group=1)) + 
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (% of Total Area)")
 ```
 
 #### Scale-dependent (WUA-per-linear-ft versus flow)
@@ -320,10 +322,10 @@ lasso_sd_res |>
   scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c()   + 
   ggtitle("Scale-dependent model, linear regression w/ lasso feature selection")
 
-lasso_sd_res |> filter(comid<=2821716) |>
+lasso_sd_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
   ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
-  scale_y_log10() 
+  scale_y_log10() + xlab("Flow (cfs)") + ylab("Suitable Habitat Area per LF Channel (ft)")
 ```
 
 ### Random Forest Regrssion
@@ -353,10 +355,11 @@ rfr_si_res |>
   coord_fixed() + geom_abline() + scale_color_viridis_c() + 
   ggtitle("Scale-independent model, random forest regression")
 
-rfr_si_res |> filter(comid<=2821716) |> left_join(transmute(flowline_attributes, comid, erom_q_ma_cfs, chan_width_ft=chan_width_m/0.3048)) |>
+rfr_si_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
+  left_join(transmute(flowline_attributes, comid, erom_q_ma_cfs)) |> #, chan_width_ft=chan_width_m/0.3048)) |>
   ggplot(aes(x=flow_norm_cfs*erom_q_ma_cfs, group=1)) + facet_wrap(~comid) + 
-  geom_line(aes(y=hsi_frac_pred*chan_width_ft, color="predicted", group=1)) + geom_line(aes(y=hsi_frac*chan_width_ft, color="actual", group=1)) + 
-  scale_y_log10()
+  geom_line(aes(y=hsi_frac_pred*100, color="predicted", group=1)) + geom_line(aes(y=hsi_frac*100, color="actual", group=1)) + 
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (% of Total Area)")
 ```
 
 #### Scale-dependent (WUA-per-linear-ft versus flow)
@@ -379,10 +382,68 @@ rfr_sd_res |>
   scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c()   + 
   ggtitle("Scale-dependent model, random forest regression")
 
-rfr_sd_res |> filter(comid<=2821716) |>
+rfr_sd_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
   ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
-  scale_y_log10() 
+  scale_y_log10() + xlab("Flow (cfs)") + ylab("Suitable Habitat Area per LF Channel (ft)") 
+```
+
+## Random Forest model prediction output
+
+```{r prediction-data}
+# assemble prediction dataset
+pd <- flowline_attributes |> 
+  # filter for just the areas that are hydrologically similar to the training data
+  filter(hyd_cls %in% c("High-volume snowmelt and rain",
+                        "Low-volume snowmelt and rain")) |>
+  # select the variables that are used in the model and drop NAs
+  mutate(nf_bfl_dry_cfs_norm = coalesce(nf_bfl_dry_cfs/erom_q_ma_cfs,0), # normalized baseflow values
+         nf_bfl_wet_cfs_norm = coalesce(nf_bfl_wet_cfs/erom_q_ma_cfs,0)) |>
+  select(comid, any_of(c(sd_rec$var_info$variable, si_rec$var_info$variable))) |> drop_na() |>
+  # create series of flow prediction points
+  expand_grid(flow_cfs = c(0,signif(100*2^seq(-2,7,0.5),2))) |>
+  mutate(flow_cfs = if_else(flow_cfs>0, flow_cfs, erom_q_ma_cfs)) |> # also evaluate at mean annual flow
+  mutate(flow_norm_cfs = coalesce(flow_cfs/erom_q_ma_cfs,0)) |> # flow as a percent of mean annual flow
+  arrange(comid, flow_cfs) |>
+  glimpse()
+
+```
+
+```{r prediction-output}
+pd_rf <- pd |> #head(100) |>
+  mutate(log_wua_per_lf_pred = predict(rfr_sd, pd)[[".pred"]],
+         wua_per_lf_pred=exp(log_wua_per_lf_pred), flow_cfs,
+         hsi_frac_pred = predict(rfr_si, pd)[[".pred"]]) 
+
+pd_rf |> select(comid, 
+                flow_cfs, wua_per_lf_pred, 
+                flow_norm_cfs, hsi_frac_pred) |> glimpse()
+
+pd_rf |> saveRDS("../data/rf_predictions.Rds")
+```
+
+Example plot of habitat area per linear foot at 800 cfs (scale-dependent model)
+
+```{r map-output-sd}
+flowlines |> st_zm() |>
+  inner_join(pd_rf |> filter(flow_cfs==800), by=join_by(comid)) |>
+  ggplot() + geom_sf(aes(color = wua_per_lf_pred)) + 
+  scale_color_viridis_c(trans="log")
+```
+
+Example plot of percent habitat area at mean annual flow (scale-independent model)
+
+```{r map-output-si}
+flowlines |> st_zm() |>
+  inner_join(pd_rf |> filter(flow_norm_cfs==1), by=join_by(comid)) |>
+  ggplot() + geom_sf(aes(color = hsi_frac_pred)) + 
+  scale_color_viridis_c(trans="log")
+```
+
+===
+
+```{r}
+knitr::knit_exit()
 ```
 
 ## TESTS

@@ -13,11 +13,8 @@ Exploratory Modeling
   - [Linear regression with regularized (lasso) feature
     selection](#linear-regression-with-regularized-lasso-feature-selection)
   - [Random Forest Regrssion](#random-forest-regrssion)
-- [TESTS](#tests)
-  - [Series interpolated (panel)
-    regression](#series-interpolated-panel-regression)
-  - [Use regression to predict FSA curve
-    shape](#use-regression-to-predict-fsa-curve-shape)
+- [Random Forest model prediction
+  output](#random-forest-model-prediction-output)
 
 ``` r
 library(tidyverse)
@@ -339,9 +336,9 @@ si_rec <- recipe(data=training(td_split),
         ) |>
   step_log(all_numeric_predictors(), -mtpi30_min) |>
   # let effect of flow vary with gradient
-  # step_interact(terms = ~ flow_norm_cfs:slope)
+  step_interact(terms = ~ flow_norm_cfs:slope)
   # try interacting with all numeric predictors
-  step_interact(terms = ~ flow_norm_cfs:all_numeric_predictors())
+  #step_interact(terms = ~ flow_norm_cfs:all_numeric_predictors()) 
 
 lm_si <- workflow() |>
   add_recipe(si_rec) |>
@@ -354,27 +351,36 @@ lm_si |> glance()
     ## # A tibble: 1 × 12
     ##   r.squared adj.r.squared sigma statistic   p.value    df logLik   AIC   BIC
     ##       <dbl>         <dbl> <dbl>     <dbl>     <dbl> <dbl>  <dbl> <dbl> <dbl>
-    ## 1     0.727         0.709 0.113      39.4 1.13e-122    35   439. -804. -644.
+    ## 1     0.632         0.619 0.129      48.2 1.41e-102    19   356. -671. -580.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
 lm_si |> tidy()
 ```
 
-    ## # A tibble: 36 × 5
-    ##    term             estimate std.error statistic p.value
-    ##    <chr>               <dbl>     <dbl>     <dbl>   <dbl>
-    ##  1 (Intercept)       -1.95      2.78      -0.703 0.482  
-    ##  2 flow_norm_cfs     -0.383     2.22      -0.173 0.863  
-    ##  3 slope             -0.0314    0.0993    -0.316 0.752  
-    ##  4 sinuosity         -0.0830    0.0401    -2.07  0.0388 
-    ##  5 erom_v_ma_fps      0.351     0.834      0.421 0.674  
-    ##  6 bf_depth_m        -0.596     0.317     -1.88  0.0604 
-    ##  7 bf_w_d_ratio      -0.751     0.273     -2.76  0.00607
-    ##  8 da_k_erodibility  -0.737     1.31      -0.564 0.573  
-    ##  9 da_avg_slope       0.528     1.15       0.459 0.646  
-    ## 10 mean_ndvi          0.268     0.118      2.26  0.0240 
-    ## # ℹ 26 more rows
+    ## # A tibble: 20 × 5
+    ##    term                  estimate std.error statistic       p.value
+    ##    <chr>                    <dbl>     <dbl>     <dbl>         <dbl>
+    ##  1 (Intercept)           -2.29      2.11       -1.09  0.277        
+    ##  2 flow_norm_cfs         -0.0558    0.0147     -3.79  0.000170     
+    ##  3 slope                  0.00990   0.0401      0.247 0.805        
+    ##  4 sinuosity             -0.0822    0.0352     -2.34  0.0198       
+    ##  5 erom_v_ma_fps         -0.163     0.318      -0.511 0.609        
+    ##  6 bf_depth_m            -0.123     0.261      -0.470 0.638        
+    ##  7 bf_w_d_ratio          -0.0240    0.188      -0.127 0.899        
+    ##  8 da_k_erodibility       1.42      0.753       1.88  0.0609       
+    ##  9 da_avg_slope           1.61      0.806       2.00  0.0465       
+    ## 10 mean_ndvi              0.0812    0.0972      0.835 0.404        
+    ## 11 loc_bfi               -0.348     0.123      -2.82  0.00501      
+    ## 12 loc_pct_clay           0.100     0.0648      1.55  0.123        
+    ## 13 loc_pct_sand           0.103     0.164       0.626 0.532        
+    ## 14 loc_permeability       0.0312    0.0259      1.21  0.228        
+    ## 15 loc_bedrock_depth     -0.121     0.110      -1.09  0.275        
+    ## 16 loc_ppt_mean_mm        0.296     0.251       1.18  0.238        
+    ## 17 mtpi30_min             0.00582   0.00244     2.38  0.0177       
+    ## 18 nf_bfl_dry_cfs_norm    0.821     0.456       1.80  0.0721       
+    ## 19 nf_bfl_wet_cfs_norm   -0.750     0.481      -1.56  0.120        
+    ## 20 flow_norm_cfs_x_slope  0.0126    0.00216     5.83  0.00000000981
 
 ``` r
 lm_si_res <- testing(td_split) |>
@@ -390,10 +396,11 @@ lm_si_res |>
 ![](model-expl_files/figure-gfm/lm-si-1.png)<!-- -->
 
 ``` r
-lm_si_res |> filter(comid<=2821716) |> left_join(transmute(flowline_attributes, comid, erom_q_ma_cfs, chan_width_ft=chan_width_m/0.3048)) |>
+lm_si_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
+  left_join(transmute(flowline_attributes, comid, erom_q_ma_cfs)) |> #, chan_width_ft=chan_width_m/0.3048)) |>
   ggplot(aes(x=flow_norm_cfs*erom_q_ma_cfs, group=1)) + facet_wrap(~comid) + 
-  geom_line(aes(y=hsi_frac_pred*chan_width_ft, color="predicted", group=1)) + geom_line(aes(y=hsi_frac*chan_width_ft, color="actual", group=1)) + 
-  scale_y_log10()
+  geom_line(aes(y=hsi_frac_pred*100, color="predicted", group=1)) + geom_line(aes(y=hsi_frac*100, color="actual", group=1)) + 
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (% of Total Area)")
 ```
 
 ![](model-expl_files/figure-gfm/lm-si-2.png)<!-- -->
@@ -481,10 +488,10 @@ lm_sd_res |>
 ![](model-expl_files/figure-gfm/lm-sd-1.png)<!-- -->
 
 ``` r
-lm_sd_res |> filter(comid<=2821716) |>
+lm_sd_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
   ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
-  scale_y_log10() 
+  scale_y_log10() + xlab("Flow (cfs)") + ylab("Suitable Habitat Area per LF Channel (ft)")
 ```
 
 ![](model-expl_files/figure-gfm/lm-sd-2.png)<!-- -->
@@ -525,26 +532,24 @@ lasso_si |> glance()
     ## # A tibble: 1 × 12
     ##   r.squared adj.r.squared sigma statistic   p.value    df logLik   AIC   BIC
     ##       <dbl>         <dbl> <dbl>     <dbl>     <dbl> <dbl>  <dbl> <dbl> <dbl>
-    ## 1     0.609         0.602 0.132      93.9 1.15e-104     9   339. -656. -609.
+    ## 1     0.588         0.583 0.135      111. 1.19e-100     7   325. -632. -593.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
 lasso_si |> tidy()
 ```
 
-    ## # A tibble: 10 × 5
-    ##    term                              estimate std.error statistic  p.value
-    ##    <chr>                                <dbl>     <dbl>     <dbl>    <dbl>
-    ##  1 (Intercept)                      -0.0567    0.374       -0.152 8.80e- 1
-    ##  2 sinuosity                        -0.0895    0.0331      -2.71  7.00e- 3
-    ##  3 erom_v_ma_fps                    -0.105     0.0364      -2.87  4.20e- 3
-    ##  4 bf_depth_m                       -0.211     0.0387      -5.44  7.92e- 8
-    ##  5 bf_w_d_ratio                     -0.132     0.0974      -1.35  1.76e- 1
-    ##  6 loc_ppt_mean_mm                   0.210     0.0346       6.06  2.51e- 9
-    ##  7 flow_norm_cfs_x_slope             0.0175    0.000891    19.7   1.69e-65
-    ##  8 flow_norm_cfs_x_sinuosity        -0.0953    0.0244      -3.90  1.08e- 4
-    ##  9 flow_norm_cfs_x_erom_v_ma_fps    -0.0275    0.00768     -3.58  3.73e- 4
-    ## 10 flow_norm_cfs_x_loc_permeability -0.000394  0.00266     -0.148 8.83e- 1
+    ## # A tibble: 8 × 5
+    ##   term                  estimate std.error statistic  p.value
+    ##   <chr>                    <dbl>     <dbl>     <dbl>    <dbl>
+    ## 1 (Intercept)            -0.376   0.920       -0.408 6.83e- 1
+    ## 2 sinuosity              -0.151   0.0300      -5.04  6.43e- 7
+    ## 3 erom_v_ma_fps          -0.139   0.0387      -3.59  3.66e- 4
+    ## 4 bf_depth_m             -0.265   0.0254     -10.4   2.36e-23
+    ## 5 bf_w_d_ratio           -0.214   0.126       -1.70  8.92e- 2
+    ## 6 da_avg_slope            0.346   0.359        0.963 3.36e- 1
+    ## 7 loc_ppt_mean_mm         0.125   0.0347       3.61  3.36e- 4
+    ## 8 flow_norm_cfs_x_slope   0.0197  0.000759    26.0   2.13e-97
 
 ``` r
 lasso_si_res <- 
@@ -561,10 +566,11 @@ lasso_si_res |>
 ![](model-expl_files/figure-gfm/lasso-si-1.png)<!-- -->
 
 ``` r
-lasso_si_res |> filter(comid<=2821716) |> left_join(transmute(flowline_attributes, comid, erom_q_ma_cfs, chan_width_ft=chan_width_m/0.3048)) |>
+lasso_si_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
+  left_join(transmute(flowline_attributes, comid, erom_q_ma_cfs)) |> #, chan_width_ft=chan_width_m/0.3048)) |>
   ggplot(aes(x=flow_norm_cfs*erom_q_ma_cfs, group=1)) + facet_wrap(~comid) + 
-  geom_line(aes(y=hsi_frac_pred*chan_width_ft, color="predicted", group=1)) + geom_line(aes(y=hsi_frac*chan_width_ft, color="actual", group=1)) + 
-  scale_y_log10()
+  geom_line(aes(y=hsi_frac_pred*100, color="predicted", group=1)) + geom_line(aes(y=hsi_frac*100, color="actual", group=1)) + 
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (% of Total Area)")
 ```
 
 ![](model-expl_files/figure-gfm/lasso-si-2.png)<!-- -->
@@ -632,10 +638,10 @@ lasso_sd_res |>
 ![](model-expl_files/figure-gfm/lasso-sd-1.png)<!-- -->
 
 ``` r
-lasso_sd_res |> filter(comid<=2821716) |>
+lasso_sd_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
   ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
-  scale_y_log10() 
+  scale_y_log10() + xlab("Flow (cfs)") + ylab("Suitable Habitat Area per LF Channel (ft)")
 ```
 
 ![](model-expl_files/figure-gfm/lasso-sd-2.png)<!-- -->
@@ -668,13 +674,13 @@ rfr_si$fit$fit |> print()
     ## Type:                             Regression 
     ## Number of trees:                  4096 
     ## Sample size:                      553 
-    ## Number of independent variables:  35 
-    ## Mtry:                             5 
+    ## Number of independent variables:  19 
+    ## Mtry:                             4 
     ## Target node size:                 5 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.005088926 
-    ## R squared (OOB):                  0.8842441
+    ## OOB prediction error (MSE):       0.006147312 
+    ## R squared (OOB):                  0.8601694
 
 ``` r
 rfr_si_res <- 
@@ -691,10 +697,11 @@ rfr_si_res |>
 ![](model-expl_files/figure-gfm/rfr-si-1.png)<!-- -->
 
 ``` r
-rfr_si_res |> filter(comid<=2821716) |> left_join(transmute(flowline_attributes, comid, erom_q_ma_cfs, chan_width_ft=chan_width_m/0.3048)) |>
+rfr_si_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
+  left_join(transmute(flowline_attributes, comid, erom_q_ma_cfs)) |> #, chan_width_ft=chan_width_m/0.3048)) |>
   ggplot(aes(x=flow_norm_cfs*erom_q_ma_cfs, group=1)) + facet_wrap(~comid) + 
-  geom_line(aes(y=hsi_frac_pred*chan_width_ft, color="predicted", group=1)) + geom_line(aes(y=hsi_frac*chan_width_ft, color="actual", group=1)) + 
-  scale_y_log10()
+  geom_line(aes(y=hsi_frac_pred*100, color="predicted", group=1)) + geom_line(aes(y=hsi_frac*100, color="actual", group=1)) + 
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (% of Total Area)")
 ```
 
 ![](model-expl_files/figure-gfm/rfr-si-2.png)<!-- -->
@@ -743,133 +750,112 @@ rfr_sd_res |>
 ![](model-expl_files/figure-gfm/rfr-sd-1.png)<!-- -->
 
 ``` r
-rfr_sd_res |> filter(comid<=2821716) |>
+rfr_sd_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
   ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
-  scale_y_log10() 
+  scale_y_log10() + xlab("Flow (cfs)") + ylab("Suitable Habitat Area per LF Channel (ft)") 
 ```
 
 ![](model-expl_files/figure-gfm/rfr-sd-2.png)<!-- -->
 
-## TESTS
-
-### Series interpolated (panel) regression
+## Random Forest model prediction output
 
 ``` r
-# interpolate series so there is a value fo every 100 flows
-td_series <- td |>
-  group_by(comid) |>
+# assemble prediction dataset
+pd <- flowline_attributes |> 
+  # filter for just the areas that are hydrologically similar to the training data
+  filter(hyd_cls %in% c("High-volume snowmelt and rain",
+                        "Low-volume snowmelt and rain")) |>
+  # select the variables that are used in the model and drop NAs
+  mutate(nf_bfl_dry_cfs_norm = coalesce(nf_bfl_dry_cfs/erom_q_ma_cfs,0), # normalized baseflow values
+         nf_bfl_wet_cfs_norm = coalesce(nf_bfl_wet_cfs/erom_q_ma_cfs,0)) |>
+  select(comid, any_of(c(sd_rec$var_info$variable, si_rec$var_info$variable))) |> drop_na() |>
+  # create series of flow prediction points
+  expand_grid(flow_cfs = c(0,signif(100*2^seq(-2,7,0.5),2))) |>
+  mutate(flow_cfs = if_else(flow_cfs>0, flow_cfs, erom_q_ma_cfs)) |> # also evaluate at mean annual flow
+  mutate(flow_norm_cfs = coalesce(flow_cfs/erom_q_ma_cfs,0)) |> # flow as a percent of mean annual flow
   arrange(comid, flow_cfs) |>
-  complete(flow_cfs = seq(from = min(flow_cfs), to = max(flow_cfs), by = 100)) |>
-  mutate(across(hsi_frac:last_col(), function(var) zoo::na.approx(var, x = flow_cfs))) |>
-  filter(flow_cfs%%100==0) |> ungroup()
-
-sd_series_rec <- recipe(data=td_series, 
-      formula = log_wua_per_lf ~ 
-        # flow (cfs)
-        flow_cfs + 
-        # predictors of flow (catchment area, elevation, and MAP) -- attributes for gradient and upstream drainage area are interrelated
-        slope + da_area_sq_km + da_elev_mean + da_ppt_mean_mm +
-        # baseflow/peak flow statistics
-        nf_bfl_dry_cfs + nf_bfl_wet_cfs + erom_q_ma_cfs + #log(peak_q2_cfs)  + log(peak_q5_cfs) + log(peak_q10_cfs) +
-        # flow and channel characteristics, hydrologically predicted
-        erom_v_ma_fps + bf_depth_m + bf_w_d_ratio + 
-        # misc characteristics of the catchment
-        da_k_erodibility + da_avg_slope + mean_ndvi +
-        # misc characteristics of the locality
-        loc_bfi + loc_pct_clay + loc_pct_sand + loc_permeability + loc_bedrock_depth + loc_ppt_mean_mm +
-        # channel confinement characteristics
-        mtpi30_min + #log(vb_width_transect) + log(vb_bf_w_ratio) +
-        # channel sinuosity
-        sinuosity
-        ) |>
-  step_log(all_numeric_predictors(), -mtpi30_min) |>
-  step_interact(terms = ~ flow_cfs:erom_q_ma_cfs) |>
-  step_interact(terms = ~ slope:da_area_sq_km) |>
-  step_interact(terms = ~ flow_cfs:da_area_sq_km) |>
-  step_interact(terms = ~ flow_cfs:da_elev_mean) |>
-  step_interact(terms = ~ flow_cfs:da_ppt_mean_mm) |>
-  step_lag(flow_cfs) |>
-  step_interact(terms = ~ flow_cfs:lag_1_flow_cfs) 
-  #step_interact(terms = ~ lag_1_flow_cfs:all_numeric_predictors())
-
-lm_sd_series <- workflow() |>
-  add_recipe(sd_series_rec) |>
-  add_model(lm_spec) |>
-  fit(data=td_series)
-
-lm_sd_series |> glance()
+  glimpse()
 ```
 
-    ## # A tibble: 1 × 12
-    ##   r.squared adj.r.squared sigma statistic p.value    df logLik   AIC   BIC
-    ##       <dbl>         <dbl> <dbl>     <dbl>   <dbl> <dbl>  <dbl> <dbl> <dbl>
-    ## 1     0.973         0.972 0.422     5557.       0    29 -2530. 5122. 5322.
-    ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
+    ## Rows: 244,420
+    ## Columns: 26
+    ## $ comid               <dbl> 342439, 342439, 342439, 342439, 342439, 342439, 34…
+    ## $ slope               <dbl> 0.00931547, 0.00931547, 0.00931547, 0.00931547, 0.…
+    ## $ da_area_sq_km       <dbl> 8.3835, 8.3835, 8.3835, 8.3835, 8.3835, 8.3835, 8.…
+    ## $ da_elev_mean        <dbl> 2284.09, 2284.09, 2284.09, 2284.09, 2284.09, 2284.…
+    ## $ da_ppt_mean_mm      <dbl> 1248.088, 1248.088, 1248.088, 1248.088, 1248.088, …
+    ## $ nf_bfl_dry_cfs      <dbl> 0.864, 0.864, 0.864, 0.864, 0.864, 0.864, 0.864, 0…
+    ## $ nf_bfl_wet_cfs      <dbl> 4.33, 4.33, 4.33, 4.33, 4.33, 4.33, 4.33, 4.33, 4.…
+    ## $ erom_q_ma_cfs       <dbl> 4.109, 4.109, 4.109, 4.109, 4.109, 4.109, 4.109, 4…
+    ## $ erom_v_ma_fps       <dbl> 0.88129, 0.88129, 0.88129, 0.88129, 0.88129, 0.881…
+    ## $ bf_depth_m          <dbl> 0.76, 0.76, 0.76, 0.76, 0.76, 0.76, 0.76, 0.76, 0.…
+    ## $ bf_w_d_ratio        <dbl> 8.460526, 8.460526, 8.460526, 8.460526, 8.460526, …
+    ## $ da_k_erodibility    <dbl> 0.1827, 0.1827, 0.1827, 0.1827, 0.1827, 0.1827, 0.…
+    ## $ da_avg_slope        <dbl> 19.95, 19.95, 19.95, 19.95, 19.95, 19.95, 19.95, 1…
+    ## $ mean_ndvi           <dbl> 0.2641405, 0.2641405, 0.2641405, 0.2641405, 0.2641…
+    ## $ loc_bfi             <dbl> 58, 58, 58, 58, 58, 58, 58, 58, 58, 58, 58, 58, 58…
+    ## $ loc_pct_clay        <dbl> 13.60, 13.60, 13.60, 13.60, 13.60, 13.60, 13.60, 1…
+    ## $ loc_pct_sand        <dbl> 57.30, 57.30, 57.30, 57.30, 57.30, 57.30, 57.30, 5…
+    ## $ loc_permeability    <dbl> 10.16, 10.16, 10.16, 10.16, 10.16, 10.16, 10.16, 1…
+    ## $ loc_bedrock_depth   <dbl> 123.50, 123.50, 123.50, 123.50, 123.50, 123.50, 12…
+    ## $ loc_ppt_mean_mm     <dbl> 1197.80, 1197.80, 1197.80, 1197.80, 1197.80, 1197.…
+    ## $ mtpi30_min          <dbl> -9, -9, -9, -9, -9, -9, -9, -9, -9, -9, -9, -9, -9…
+    ## $ sinuosity           <dbl> 1.32, 1.32, 1.32, 1.32, 1.32, 1.32, 1.32, 1.32, 1.…
+    ## $ nf_bfl_dry_cfs_norm <dbl> 0.2102701, 0.2102701, 0.2102701, 0.2102701, 0.2102…
+    ## $ nf_bfl_wet_cfs_norm <dbl> 1.0537844, 1.0537844, 1.0537844, 1.0537844, 1.0537…
+    ## $ flow_cfs            <dbl> 4.109, 25.000, 35.000, 50.000, 71.000, 100.000, 14…
+    ## $ flow_norm_cfs       <dbl> 1.000000, 6.084205, 8.517888, 12.168411, 17.279143…
 
 ``` r
-lm_sd_series |> tidy()
+pd_rf <- pd |> #head(100) |>
+  mutate(log_wua_per_lf_pred = predict(rfr_sd, pd)[[".pred"]],
+         wua_per_lf_pred=exp(log_wua_per_lf_pred), flow_cfs,
+         hsi_frac_pred = predict(rfr_si, pd)[[".pred"]]) 
+
+pd_rf |> select(comid, 
+                flow_cfs, wua_per_lf_pred, 
+                flow_norm_cfs, hsi_frac_pred) |> glimpse()
 ```
 
-    ## # A tibble: 30 × 5
-    ##    term            estimate std.error statistic   p.value
-    ##    <chr>              <dbl>     <dbl>     <dbl>     <dbl>
-    ##  1 (Intercept)    -1707.     152.        -11.2  7.20e- 29
-    ##  2 flow_cfs         -19.9      3.34       -5.96 2.65e-  9
-    ##  3 slope              0.794    0.0931      8.53 2.01e- 17
-    ##  4 da_area_sq_km    -23.0      1.29      -17.9  5.92e- 69
-    ##  5 da_elev_mean      83.4     25.0         3.33 8.80e-  4
-    ##  6 da_ppt_mean_mm   207.      11.1        18.6  2.38e- 74
-    ##  7 nf_bfl_dry_cfs    41.8      3.19       13.1  1.09e- 38
-    ##  8 nf_bfl_wet_cfs    50.5      1.83       27.7  6.58e-156
-    ##  9 erom_q_ma_cfs     14.2      0.977      14.5  9.59e- 47
-    ## 10 erom_v_ma_fps      3.80     0.635       5.98 2.33e-  9
-    ## # ℹ 20 more rows
+    ## Rows: 244,420
+    ## Columns: 5
+    ## $ comid           <dbl> 342439, 342439, 342439, 342439, 342439, 342439, 342439…
+    ## $ flow_cfs        <dbl> 4.109, 25.000, 35.000, 50.000, 71.000, 100.000, 140.00…
+    ## $ wua_per_lf_pred <dbl> 6.088317, 6.194938, 6.198909, 6.200995, 6.260987, 6.26…
+    ## $ flow_norm_cfs   <dbl> 1.000000, 6.084205, 8.517888, 12.168411, 17.279143, 24…
+    ## $ hsi_frac_pred   <dbl> 0.6267032, 0.4500373, 0.4398660, 0.4371331, 0.4343720,…
 
 ``` r
-td_series |>
-  mutate(log_wua_per_lf_pred = predict(lm_sd_series, td_series)[[".pred"]]) |>
-  transmute(wua_per_lf=exp(log_wua_per_lf), wua_per_lf_pred=exp(log_wua_per_lf_pred), flow_cfs) |>
-  ggplot() + geom_point(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs)) + 
-  scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c() + 
-  ggtitle("Series interpolated scale-dependent model, linear regression")
+pd_rf |> saveRDS("../data/rf_predictions.Rds")
 ```
 
-    ## Warning: Removed 1 rows containing missing values (`geom_point()`).
-
-![](model-expl_files/figure-gfm/unnamed-chunk-1-1.png)<!-- -->
-
-### Use regression to predict FSA curve shape
-
-- model flow-to-suitable area curve shape with exponential function
-- use spatial predictors to predict the value of this exponent
+Example plot of habitat area per linear foot at 800 cfs (scale-dependent
+model)
 
 ``` r
-exponents <- 
-  td |> 
-  group_by(comid) |>
-  group_modify(~ broom::tidy(lm(log(wua_per_lf) ~ 0 + log(flow_cfs), data = .x))) 
-                                    
-td_exp <- 
-  flowlines |> st_drop_geometry() |>
-  left_join(readRDS("../data/flowline_attributes.Rds"), by=join_by("comid"), relationship="one-to-one") |>
-  inner_join(exponents |> select(comid, fsa_exponent=estimate)) |>
-  select(comid, fsa_exponent,
-       # predictors of flow (as would be found in a regional regression)
-       slope, da_area_sq_km, da_elev_mean, da_ppt_mean_mm, 
-       # baseflow and peakflow statistics
-       nf_bfl_dry_cfs, nf_bfl_wet_cfs, erom_q_ma_cfs, peak_q2_cfs, peak_q5_cfs, peak_q10_cfs,
-       # flow and channel characteristics, hydrologically predicted
-       bf_depth_m, bf_w_d_ratio, erom_v_ma_fps,
-       # misc characteristics of the catchment
-       da_avg_slope, da_k_erodibility, mean_ndvi,
-       # misc characteristics of the locality
-       loc_bfi, loc_pct_clay, loc_pct_sand, loc_permeability, loc_bedrock_depth, loc_ppt_mean_mm,
-       # channel confinement characteristics
-       mtpi30_min, #vb_width_transect, vb_bf_w_ratio, 
-       # channel sinuosity
-       sinuosity,
-       )
+flowlines |> st_zm() |>
+  inner_join(pd_rf |> filter(flow_cfs==800), by=join_by(comid)) |>
+  ggplot() + geom_sf(aes(color = wua_per_lf_pred)) + 
+  scale_color_viridis_c(trans="log")
 ```
 
-    ## Joining with `by = join_by(comid)`
+![](model-expl_files/figure-gfm/map-output-sd-1.png)<!-- -->
+
+Example plot of percent habitat area at mean annual flow
+(scale-independent model)
+
+``` r
+flowlines |> st_zm() |>
+  inner_join(pd_rf |> filter(flow_norm_cfs==1), by=join_by(comid)) |>
+  ggplot() + geom_sf(aes(color = hsi_frac_pred)) + 
+  scale_color_viridis_c(trans="log")
+```
+
+![](model-expl_files/figure-gfm/map-output-si-1.png)<!-- -->
+
+===
+
+``` r
+knitr::knit_exit()
+```

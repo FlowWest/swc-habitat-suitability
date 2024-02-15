@@ -4,3 +4,4 @@
 # *.ZIP filter=lfs diff=lfs merge=lfs -text
 # data-raw/nhdplusv2/**/*.DBF filter=lfs diff=lfs merge=lfs -text
 # data-raw/nhdplusv2/**/*.ADF filter=lfs diff=lfs merge=lfs -text
+

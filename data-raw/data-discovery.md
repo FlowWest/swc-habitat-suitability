@@ -1,7 +1,7 @@
 SWC Habitat Model Data Discovery
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-02-08
+2024-02-14
 
 - [Case study geographic scope](#case-study-geographic-scope)
 - [Data Import](#data-import)
@@ -41,7 +41,9 @@ watersheds <-
 
     ##   <https://gargle.r-lib.org/articles/non-interactive-auth.html>
 
-    ## ℹ The googledrive package is using a cached token for 'slewis@flowwest.com'.
+    ## ℹ The googledrive package is using a cached token for 'mrubenson@flowwest.com'.
+
+    ## temp/WBD_Subwatershed.zip already exists and will be used...
 
     ## Reading layer `WBD_Subwatershed' from data source 
     ##   `/vsizip/temp/WBD_Subwatershed.zip' using driver `ESRI Shapefile'
@@ -385,6 +387,63 @@ catchment_ndvi
     ## 10 342397     0.310
     ## # ℹ 140,608 more rows
 
+#### Aquatic Species
+
+CDFW data:
+<https://data-cdfw.opendata.arcgis.com/datasets/CDFW>::aquatic-species-list-ace-ds2740-2/explore
+TNC data:
+<https://www.scienceforconservation.org/products/california-freshwater-species-database>
+
+``` r
+aquatic_species_cdfw <- readRDS('../data/attr_cdfw_aquatic_species_rank.RDS') |> 
+  glimpse()
+```
+
+    ## Rows: 188,694
+    ## Columns: 2
+    ## $ comid          <int> 20245062, 24085230, 22226684, 22226720, 22226732, 22226…
+    ## $ bio_aq_rank_sw <int> NA, NA, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,…
+
+``` r
+aquatic_species_tnc <- readRDS('../data/attr_tnc_aquatic_species_rank.RDS') |> 
+  glimpse()
+```
+
+    ## Rows: 188,662
+    ## Columns: 32
+    ## $ comid                      <int> 20245062, 24085230, 22226684, 22226720, 222…
+    ## $ species                    <dbl> NA, NA, 281, 281, 281, 281, 281, 281, 139, …
+    ## $ species_fish               <dbl> NA, NA, 16, 16, 16, 16, 16, 16, 11, 16, 11,…
+    ## $ species_crust              <dbl> NA, NA, 3, 3, 3, 3, 3, 3, 0, 3, 0, 0, 0, 0,…
+    ## $ species_herps              <dbl> NA, NA, 16, 16, 16, 16, 16, 16, 14, 16, 14,…
+    ## $ species_inverts            <dbl> NA, NA, 136, 136, 136, 136, 136, 136, 70, 1…
+    ## $ species_mollusks           <dbl> NA, NA, 6, 6, 6, 6, 6, 6, 2, 6, 2, 2, 2, 2,…
+    ## $ species_plants             <dbl> NA, NA, 37, 37, 37, 37, 37, 37, 24, 37, 24,…
+    ## $ species_birds              <dbl> NA, NA, 62, 62, 62, 62, 62, 62, 13, 62, 13,…
+    ## $ species_mammals            <dbl> NA, NA, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,…
+    ## $ species_mollusks_crust     <dbl> NA, NA, 9, 9, 9, 9, 9, 9, 2, 9, 2, 2, 2, 2,…
+    ## $ species_endemic            <dbl> NA, NA, 32, 32, 32, 32, 32, 32, 16, 32, 16,…
+    ## $ species_endemic_fish       <dbl> NA, NA, 3, 3, 3, 3, 3, 3, 1, 3, 1, 1, 1, 1,…
+    ## $ species_endemic_crust      <dbl> NA, NA, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0,…
+    ## $ species_endemic_herps      <dbl> NA, NA, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,…
+    ## $ species_endemic_inverts    <dbl> NA, NA, 26, 26, 26, 26, 26, 26, 13, 26, 13,…
+    ## $ species_endemic_mollusks   <dbl> NA, NA, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,…
+    ## $ species_endemic_plants     <dbl> NA, NA, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,…
+    ## $ species_endemic_birds      <dbl> NA, NA, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,…
+    ## $ species_endemic_mammals    <dbl> NA, NA, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,…
+    ## $ species_vulnerable         <dbl> NA, NA, 66, 66, 66, 66, 66, 66, 36, 66, 36,…
+    ## $ species_listed             <dbl> NA, NA, 6, 6, 6, 6, 6, 6, 2, 6, 2, 2, 2, 2,…
+    ## $ species_endemic_vulnerable <dbl> NA, NA, 11, 11, 11, 11, 11, 11, 4, 11, 4, 4…
+    ## $ species_endemic_listed     <dbl> NA, NA, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0,…
+    ## $ genus                      <dbl> NA, NA, 224, 224, 224, 224, 224, 224, 120, …
+    ## $ family                     <dbl> NA, NA, 111, 111, 111, 111, 111, 111, 76, 1…
+    ## $ tax_order                  <dbl> NA, NA, 56, 56, 56, 56, 56, 56, 39, 56, 39,…
+    ## $ tax_class                  <dbl> NA, NA, 15, 15, 15, 15, 15, 15, 13, 15, 13,…
+    ## $ phylum                     <dbl> NA, NA, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,…
+    ## $ species_current            <dbl> NA, NA, 227, 227, 227, 227, 227, 227, 110, …
+    ## $ species_historical         <dbl> NA, NA, 64, 64, 64, 64, 64, 64, 30, 64, 30,…
+    ## $ species_other              <dbl> NA, NA, 36, 36, 36, 36, 36, 36, 29, 36, 29,…
+
 #### Width Data
 
 Data source: <https://hydro.iis.u-tokyo.ac.jp/~yamadai/MERIT_Hydro/>
@@ -429,6 +488,8 @@ hyd_cls <- drive_file_by_id("1qABq_Y-ZzuH_Am6pkqpno4K5nGYhYd1R", vsizip=T) |>
   glimpse()
 ```
 
+    ## temp/Final_Classification_9CLASS.zip already exists and will be used...
+
     ## Reading layer `Final_Classification_9CLASS' from data source 
     ##   `/vsizip/temp/Final_Classification_9CLASS.zip' using driver `ESRI Shapefile'
     ## Simple feature collection with 70720 features and 5 fields
@@ -451,6 +512,8 @@ nf <-
   read_csv() |>
   filter(comid %in% flowline_table$comid)
 ```
+
+    ## temp/ffm-final-v1.2.1.zip already exists and will be used...
 
     ## Rows: 8151537 Columns: 15
     ## ── Column specification ────────────────────────────────────────────────────────
@@ -534,6 +597,9 @@ flowline_attributes <-
   left_join(flowline_sinuosity) |>
   left_join(da_suppl_attrs) |> 
   left_join(streamcat_data) |>
+  left_join(catchment_ndvi) |> 
+  left_join(aquatic_species_cdfw) |> 
+  left_join(aquatic_species_tnc) |>  
   left_join(catchment_ndvi) |>
   left_join(hyd_cls) |>
   left_join(nf_ffm) |>
@@ -579,6 +645,8 @@ flowlines_sf <-
   select(comid) 
 ```
 
+    ## temp/NHDFlowline.zip already exists and will be used...
+
     ## Reading layer `NHDFlowline' from data source `/vsizip/temp/NHDFlowline.zip' using driver `ESRI Shapefile'
     ## Simple feature collection with 178868 features and 14 fields
     ## Geometry type: LINESTRING
@@ -613,6 +681,8 @@ waterbodies <-
   arrange(comid) |>
   st_transform(project_crs)
 ```
+
+    ## temp/NHDWaterbody.zip already exists and will be used...
 
     ## Reading layer `NHDWaterbody' from data source `/vsizip/temp/NHDWaterbody.zip' using driver `ESRI Shapefile'
     ## Simple feature collection with 9651 features and 12 fields
@@ -949,6 +1019,34 @@ flowlines |>
 
 ![](data-discovery_files/figure-gfm/plot-width-combined-1.png)<!-- -->
 
+``` r
+# plot showing number of species - TNC data
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = species)) +
+  geom_sf(aes(color = species), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(trans = "log")
+```
+
+![](data-discovery_files/figure-gfm/plot-species-1.png)<!-- -->
+
+``` r
+# plot showing number of CDFW aquatic biodiversity rank
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = bio_aq_rank_sw)) +
+  geom_sf(aes(color = bio_aq_rank_sw), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(trans = "log")
+```
+
+![](data-discovery_files/figure-gfm/plot-aqu-rank-1.png)<!-- -->
+
 ## Import catchments
 
 ``` r
@@ -962,6 +1060,8 @@ catchments <-
   arrange(comid) |>
   st_transform(project_crs) 
 ```
+
+    ## temp/Catchment.zip already exists and will be used...
 
     ## Reading layer `Catchment' from data source `/vsizip/temp/Catchment.zip' using driver `ESRI Shapefile'
     ## Simple feature collection with 140835 features and 4 fields

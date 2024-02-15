@@ -30,20 +30,7 @@ theme_set(theme_minimal())
 #project_crs <- "EPSG:5070" # NAD83 CONUS Albers
 project_crs <- "ESRI:102039" # NAD83 CONUS Albers USGS Version
 
-library(googledrive)
-#googledrive::drive_auth()
-drive_file_by_id <- function(id=character(), dir="temp", vsizip=FALSE) {
-  d <- googledrive::as_dribble(googledrive::as_id(id))
-  p <- file.path(dir, d$name)
-  if(!file.exists(p)){
-    googledrive::drive_download(file = d, path = p)
-  }
-  if(vsizip){
-    return(file.path("/vsizip",p))
-  } else {
-    return(p)
-  }
-}
+source('data-functions.R')
 ```
 
 ## Case study geographic scope
@@ -367,6 +354,19 @@ catchment_ndvi <-
 catchment_ndvi
 ```
 
+#### Aquatic Species
+
+CDFW data: https://data-cdfw.opendata.arcgis.com/datasets/CDFW::aquatic-species-list-ace-ds2740-2/explore
+TNC data: https://www.scienceforconservation.org/products/california-freshwater-species-database
+
+```{r aqu-spec, message=FALSE, warning=FALSE}
+aquatic_species_cdfw <- readRDS('../data/attr_cdfw_aquatic_species_rank.RDS') |> 
+  glimpse()
+
+aquatic_species_tnc <- readRDS('../data/attr_tnc_aquatic_species_rank.RDS') |> 
+  glimpse()
+```
+
 #### Width Data
 
 Data source: https://hydro.iis.u-tokyo.ac.jp/~yamadai/MERIT_Hydro/
@@ -502,6 +502,9 @@ flowline_attributes <-
   left_join(flowline_sinuosity) |>
   left_join(da_suppl_attrs) |> 
   left_join(streamcat_data) |>
+  left_join(catchment_ndvi) |> 
+  left_join(aquatic_species_cdfw) |> 
+  left_join(aquatic_species_tnc) |>  
   left_join(catchment_ndvi) |>
   left_join(hyd_cls) |>
   left_join(nf_ffm) |>
@@ -844,6 +847,32 @@ flowlines |>
   ggplot() + 
   geom_sf(data=st_zm(flowlines), aes(color = chan_width_m)) +
   geom_sf(aes(color = chan_width_m), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(trans = "log")
+
+```
+
+```{r plot-species}
+# plot showing number of species - TNC data
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = species)) +
+  geom_sf(aes(color = species), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(trans = "log")
+
+```
+
+```{r plot-aqu-rank}
+# plot showing number of CDFW aquatic biodiversity rank
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = bio_aq_rank_sw)) +
+  geom_sf(aes(color = bio_aq_rank_sw), linewidth=1) + 
   geom_sf(data=waterbodies, fill="gray", color="gray") +
   scale_color_viridis_c(trans = "log")
 

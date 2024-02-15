@@ -97,6 +97,6 @@ flowlines |>
   ggplot() + geom_sf(aes(color=species)) 
 
 comids_joined_aquatic_tnc |> 
-  select(species:species_other) |>
+  select(comid, species:species_other) |>
   saveRDS('../data/attr_tnc_aquatic_species_rank.RDS')
 ```

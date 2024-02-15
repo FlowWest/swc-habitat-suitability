@@ -46,18 +46,22 @@ drive_file_by_id("13S1YWYP_t7pb2SUmEWEprJA-tJ-8FM-V")
 aquatic_cdfw_sf <- read_sf('temp/Aquatic_Species_List_-_ACE_[ds2740].geojson') |> 
   janitor::clean_names() |> 
   st_transform(project_crs) 
-  
-aquatic_flowlines_cdfw <- flowlines |> 
-  st_join(aquatic_cdfw_sf) |> 
-  select(comid, bio_aq_rank_sw) |> glimpse()
 
-ggplot() + 
-  geom_sf(data = aquatic_flowlines_cdfw, aes(color=as.factor(bio_aq_rank_sw))) 
+comids_joined_aquatic_cdfw <-
+  flowlines |>
+  select(comid) |>
+  st_point_on_surface() |>
+  st_join(aquatic_cdfw_sf) |>
+  st_drop_geometry() |>
+  glimpse()
 
-aquatic_flowlines_cdfw |> 
-  st_drop_geometry() |> 
+flowlines |> 
+  left_join(comids_joined_aquatic_cdfw, by=join_by(comid)) |>
+  ggplot() + geom_sf(aes(color=as_factor(bio_aq_rank_sw))) 
+
+comids_joined_aquatic_cdfw |> 
+  select(comid, bio_aq_rank_sw) |>
   saveRDS('../data/attr_cdfw_aquatic_species_rank.RDS')
-  
 ```
 
 ### California Freshwater Species Database V2
@@ -80,15 +84,19 @@ analysis_units <- read_sf('ca_freshwater_species/AnalysisUnits.shp') |>
   st_transform(project_crs) |> 
   glimpse()
 
-flowlines_joined_tnc <- flowlines |> 
-  st_join(analysis_units)
+comids_joined_aquatic_tnc <-
+  flowlines |>
+  select(comid) |>
+  st_point_on_surface() |>
+  st_join(analysis_units) |>
+  st_drop_geometry() |>
+  glimpse()
 
-ggplot() + 
-  geom_sf(data=flowlines_joined_tnc, aes(color=species)) 
+flowlines |> 
+  left_join(comids_joined_aquatic_tnc, by=join_by(comid)) |>
+  ggplot() + geom_sf(aes(color=species)) 
 
-flowlines_joined_tnc |> 
-  select(comid, species:species_other) |> 
-  st_drop_geometry() |> 
+comids_joined_aquatic_tnc |> 
+  select(species:species_other) |>
   saveRDS('../data/attr_tnc_aquatic_species_rank.RDS')
-
 ```

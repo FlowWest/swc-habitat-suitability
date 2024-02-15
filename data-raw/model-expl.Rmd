@@ -571,7 +571,7 @@ watersheds <- pd_rf_by_mainstem |>
 
 watershed_name <- tolower(gsub(pattern = "-| ", replacement = "_", x = watersheds))
 watershed_rda_name <- paste(watershed_name, "floodplain", sep = "_")
-watershed_rda_name <- 
+
 
 dsm_habitat <- map_df(watershed_rda_name, function(watershed) {
   df <- as.data.frame(do.call(`::`, list(pkg = "DSMhabitat", name = watershed)))

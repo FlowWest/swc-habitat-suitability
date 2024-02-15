@@ -61,6 +61,8 @@ df <- flowline_attributes |>
          mtpi30_min, vb_width_transect, vb_bf_w_ratio, 
          # channel sinuosity
          sinuosity,
+         # aquatic
+         bio_aq_rank_sw, species, species_fish
          ) |> 
   na.omit() |> 
   scale() 
@@ -106,6 +108,8 @@ td <- train_data |>
          mtpi30_min, #vb_width_transect, vb_bf_w_ratio, 
          # channel sinuosity
          sinuosity,
+         # aquatic
+         bio_aq_rank_sw, species, species_fish
          ) |> 
   mutate(nf_bfl_dry_cfs_norm = nf_bfl_dry_cfs/erom_q_ma_cfs, 
          nf_bfl_wet_cfs_norm = nf_bfl_wet_cfs/erom_q_ma_cfs) |>
@@ -157,9 +161,11 @@ si_rec <- recipe(data=training(td_split),
         # channel confinement
         mtpi30_min + 
         # baseflow as percent of mean annual flow
-        nf_bfl_dry_cfs_norm + nf_bfl_wet_cfs_norm 
+        nf_bfl_dry_cfs_norm + nf_bfl_wet_cfs_norm + 
+        # aquatic
+        bio_aq_rank_sw + species + species_fish
         ) |>
-  step_log(all_numeric_predictors(), -mtpi30_min, -mean_ndvi) |>
+  step_log(all_numeric_predictors(), -mtpi30_min, -mean_ndvi, -bio_aq_rank_sw) |>
   # let effect of flow vary with gradient
   step_interact(terms = ~ flow_norm_cfs:slope)
   # try interacting with all numeric predictors
@@ -214,7 +220,9 @@ sd_rec <- recipe(data=training(td_split),
         # channel confinement characteristics
         mtpi30_min + #log(vb_width_transect) + log(vb_bf_w_ratio) +
         # channel sinuosity
-        sinuosity
+        sinuosity + 
+        # aquatic
+        bio_aq_rank_sw + species + species_fish
         ) |>
   step_log(all_numeric_predictors(), -mtpi30_min, -mean_ndvi) |>
   step_interact(terms = ~ flow_cfs:erom_q_ma_cfs) |>
@@ -552,7 +560,8 @@ pd_rf_by_mainstem <-
   summarize(tot_wua_per_lf_pred = sum(coalesce(wua_per_lf_pred,0)),
             tot_length_ft = sum(coalesce(length_ft,0))) |>
   mutate(tot_wua_ft2 = tot_wua_per_lf_pred * tot_length_ft,
-         tot_wua_ac = tot_wua_ft2 / 43560) |>
+         tot_wua_ac = tot_wua_ft2 / 43560,
+         avg_wua_ft2_per_1000ft = 1000 * tot_wua_ft2 / tot_length_ft) |>
   glimpse()
 
 pd_rf_by_mainstem |>
@@ -572,21 +581,45 @@ watersheds <- pd_rf_by_mainstem |>
 watershed_name <- tolower(gsub(pattern = "-| ", replacement = "_", x = watersheds))
 watershed_rda_name <- paste(watershed_name, "floodplain", sep = "_")
 
-
-dsm_habitat <- map_df(watershed_rda_name, function(watershed) {
+dsm_habitat_floodplain <- map_df(watershed_rda_name, function(watershed) {
   df <- as.data.frame(do.call(`::`, list(pkg = "DSMhabitat", name = watershed)))
 }) |> 
   rename(river = watershed,
-         flow_cfs_dsm = flow_cfs) 
+         flow_cfs_dsm = flow_cfs) |>
+  mutate(FR_floodplain_m2 = FR_floodplain_acres * 4046.86,
+         FR_floodplain_m2_suitable = DSMhabitat::apply_suitability(FR_floodplain_m2),
+         FR_floodplain_acres_suitable = FR_floodplain_m2_suitable / 4046.86)
 
 pd_rf_by_mainstem |> 
-  left_join(dsm_habitat) |> 
+  left_join(dsm_habitat_floodplain) |> 
   #filter(river == "American River") |> 
   ggplot() +
   geom_line(aes(x = flow_cfs, y = tot_wua_ac, color='modeled')) + 
-  geom_line(aes(x = flow_cfs_dsm, y = FR_floodplain_acres, color = 'DSMhabitat')) + 
-  facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(breaks=c(100,300,1000,3000,10000)) + 
+  geom_line(aes(x = flow_cfs_dsm, y = FR_floodplain_acres_suitable, color = 'DSMhabitat')) + 
+  facet_wrap(~river) +#, scales="free_y") + 
+  scale_x_log10() + #breaks=c(100,300,1000,3000,10000)) + 
+  scale_y_log10() + theme(legend.position="top", panel.grid.minor = element_blank()) 
+
+```
+
+```{r dsmhabitat-watershed-comp-instream, fig.width=15, fig.height=10, dpi=300}
+watersheds <- pd_rf_by_mainstem |> 
+  filter(river != "South Delta") |> 
+  pull(river) |> unique()
+
+watershed_name <- tolower(gsub(pattern = "-| ", replacement = "_", x = watersheds))
+watershed_rda_name <- paste(watershed_name, "instream", sep = "_")
+
+dsm_habitat_instream <- map_df(paste(watershed_name, "instream", sep = "_"), 
+                               possibly(function(watershed) {
+                                 df <- as.data.frame(do.call(`::`, list(pkg = "DSMhabitat", name = watershed)))
+                                 }, otherwise = NULL)) |> rename(river = watershed) 
+
+ggplot() +
+  geom_line(data=pd_rf_by_mainstem, aes(x = flow_cfs, y = avg_wua_ft2_per_1000ft, color='modeled')) + 
+  geom_line(data=dsm_habitat_instream, aes(x = flow_cfs, y = FR_juv_wua, color = 'DSMhabitat')) + 
+  facet_wrap(~river) +#, scales="free_y") + 
+  scale_x_log10() + 
   scale_y_log10() + theme(legend.position="top", panel.grid.minor = element_blank()) 
 
 ```

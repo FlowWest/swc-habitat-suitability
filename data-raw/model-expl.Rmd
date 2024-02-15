@@ -564,6 +564,33 @@ pd_rf_by_mainstem |>
 
 ```
 
+```{r dsmhabitat-watershed-comp, fig.width=15, fig.height=10, dpi=300}
+watersheds <- pd_rf_by_mainstem |> 
+  filter(river != "South Delta") |> 
+  pull(river) |> unique()
+
+watershed_name <- tolower(gsub(pattern = "-| ", replacement = "_", x = watersheds))
+watershed_rda_name <- paste(watershed_name, "floodplain", sep = "_")
+watershed_rda_name <- 
+
+dsm_habitat <- map_df(watershed_rda_name, function(watershed) {
+  df <- as.data.frame(do.call(`::`, list(pkg = "DSMhabitat", name = watershed)))
+}) |> 
+  rename(river = watershed,
+         flow_cfs_dsm = flow_cfs) 
+
+pd_rf_by_mainstem |> 
+  left_join(dsm_habitat) |> 
+  #filter(river == "American River") |> 
+  ggplot() +
+  geom_line(aes(x = flow_cfs, y = tot_wua_ac, color='modeled')) + 
+  geom_line(aes(x = flow_cfs_dsm, y = FR_floodplain_acres, color = 'DSMhabitat')) + 
+  facet_wrap(~river, scales="free_y") + 
+  scale_x_log10(breaks=c(100,300,1000,3000,10000)) + 
+  scale_y_log10() + theme(legend.position="top", panel.grid.minor = element_blank()) 
+
+```
+
 ===
 
 ```{r}

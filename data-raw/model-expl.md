@@ -527,13 +527,7 @@ drop_vars <- workflow() |>
   tidy() |> 
   filter(estimate==0) |> 
   pull(term)
-```
 
-    ## Warning: package 'glmnet' was built under R version 4.3.2
-
-    ## Warning: package 'Matrix' was built under R version 4.3.2
-
-``` r
 lasso_si <- workflow() |>
   add_recipe(si_rec |> step_rm(all_of(drop_vars))) |>
   add_model(lm_spec) |>
@@ -695,11 +689,6 @@ rfr_si_tune <-
   tune_grid(resamples = folds,
             grid = rfr_grid,
             metrics = val_metrics)
-```
-
-    ## Warning: package 'ranger' was built under R version 4.3.2
-
-``` r
 rfr_si_tune |>
   collect_metrics() |>
   ggplot(aes(x = trees, y = mean, color = .metric)) +
@@ -739,8 +728,8 @@ rfr_si$fit$fit |> print()
     ## Target node size:                 5 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.006373427 
-    ## R squared (OOB):                  0.8550261
+    ## OOB prediction error (MSE):       0.006263959 
+    ## R squared (OOB):                  0.8575161
 
 ``` r
 rfr_si_res <- 
@@ -818,8 +807,8 @@ rfr_sd$fit$fit |> print()
     ## Target node size:                 5 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.05933008 
-    ## R squared (OOB):                  0.9889211
+    ## OOB prediction error (MSE):       0.06304099 
+    ## R squared (OOB):                  0.9882281
 
 ``` r
 rfr_sd_res <-
@@ -922,9 +911,9 @@ pd_rf |> select(comid,
     ## Columns: 5
     ## $ comid           <dbl> 342439, 342439, 342439, 342439, 342439, 342439, 342439…
     ## $ flow_cfs        <dbl> 4.109, 25.000, 35.000, 50.000, 71.000, 100.000, 140.00…
-    ## $ wua_per_lf_pred <dbl> 5.243312, 5.362924, 5.369256, 5.369256, 5.409205, 5.40…
+    ## $ wua_per_lf_pred <dbl> 6.571007, 6.656670, 6.656670, 6.656670, 6.685532, 6.68…
     ## $ flow_norm_cfs   <dbl> 1.000000, 6.084205, 8.517888, 12.168411, 17.279143, 24…
-    ## $ hsi_frac_pred   <dbl> 0.6166970, 0.4402185, 0.4277472, 0.4250650, 0.4231579,…
+    ## $ hsi_frac_pred   <dbl> 0.6231031, 0.4308494, 0.4196050, 0.4138172, 0.4101086,…
 
 ``` r
 pd_rf |> saveRDS("../data/rf_predictions.Rds")
@@ -1014,7 +1003,7 @@ pd_dsmhabitat_pred <-
     ## Columns: 3
     ## $ comid           <dbl> 348543, 348543, 348543, 348543, 348543, 348543, 348543…
     ## $ flow_cfs        <dbl> 100, 250, 300, 400, 500, 600, 1000, 3000, 5000, 6000, …
-    ## $ wua_per_lf_pred <dbl> 6.1067584, 6.1800163, 6.1800163, 6.2391662, 6.2825252,…
+    ## $ wua_per_lf_pred <dbl> 6.7144691, 6.8009250, 6.8149497, 6.9570934, 6.9809582,…
 
 ``` r
 pd_rf_by_mainstem <-
@@ -1039,10 +1028,10 @@ pd_rf_by_mainstem <-
     ## $ species             <chr> "Fall Run Chinook", "Fall Run Chinook", "Fall Run …
     ## $ river               <chr> "American River", "American River", "American Rive…
     ## $ flow_cfs            <dbl> 100, 250, 300, 400, 500, 600, 1000, 3000, 5000, 60…
-    ## $ tot_wua_per_lf_pred <dbl> 219.7560, 222.9373, 222.9335, 223.7458, 224.1112, …
+    ## $ tot_wua_per_lf_pred <dbl> 229.2669, 233.3235, 234.5686, 239.0322, 240.2950, …
     ## $ tot_length_ft       <dbl> 142202.8, 142202.8, 142202.8, 142202.8, 142202.8, …
-    ## $ tot_wua_ft2         <dbl> 31249910, 31702305, 31701763, 31817272, 31869235, …
-    ## $ tot_wua_ac          <dbl> 717.3992, 727.7848, 727.7723, 730.4241, 731.6170, …
+    ## $ tot_wua_ft2         <dbl> 32602389, 33179239, 33356299, 33991033, 34170613, …
+    ## $ tot_wua_ac          <dbl> 748.4479, 761.6905, 765.7552, 780.3267, 784.4493, …
 
 ``` r
 pd_rf_by_mainstem |>
@@ -1054,6 +1043,44 @@ pd_rf_by_mainstem |>
 ```
 
 ![](model-expl_files/figure-gfm/dsmhabitat-val-1.png)<!-- -->
+
+``` r
+watersheds <- pd_rf_by_mainstem |> 
+  filter(river != "South Delta") |> 
+  pull(river) |> unique()
+
+watershed_name <- tolower(gsub(pattern = "-| ", replacement = "_", x = watersheds))
+watershed_rda_name <- paste(watershed_name, "floodplain", sep = "_")
+watershed_rda_name <- 
+
+dsm_habitat <- map_df(watershed_rda_name, function(watershed) {
+  df <- as.data.frame(do.call(`::`, list(pkg = "DSMhabitat", name = watershed)))
+}) |> 
+  rename(river = watershed,
+         flow_cfs_dsm = flow_cfs) 
+
+pd_rf_by_mainstem |> 
+  left_join(dsm_habitat) |> 
+  #filter(river == "American River") |> 
+  ggplot() +
+  geom_line(aes(x = flow_cfs, y = tot_wua_ac, color='modeled')) + 
+  geom_line(aes(x = flow_cfs_dsm, y = FR_floodplain_acres, color = 'DSMhabitat')) + 
+  facet_wrap(~river, scales="free_y") + 
+  scale_x_log10(breaks=c(100,300,1000,3000,10000)) + 
+  scale_y_log10() + theme(legend.position="top", panel.grid.minor = element_blank()) 
+```
+
+    ## Joining with `by = join_by(river)`
+
+    ## Warning in left_join(pd_rf_by_mainstem, dsm_habitat): Detected an unexpected many-to-many relationship between `x` and `y`.
+    ## ℹ Row 1 of `x` matches multiple rows in `y`.
+    ## ℹ Row 1 of `y` matches multiple rows in `x`.
+    ## ℹ If a many-to-many relationship is expected, set `relationship =
+    ##   "many-to-many"` to silence this warning.
+
+    ## Warning: Transformation introduced infinite values in continuous y-axis
+
+![](model-expl_files/figure-gfm/dsmhabitat-watershed-comp-1.png)<!-- -->
 
 ===
 

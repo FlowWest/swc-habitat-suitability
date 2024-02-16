@@ -1,7 +1,7 @@
 SWC Habitat Model Data Discovery
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-02-14
+2024-02-16
 
 - [Case study geographic scope](#case-study-geographic-scope)
 - [Data Import](#data-import)
@@ -42,6 +42,8 @@ watersheds <-
     ##   <https://gargle.r-lib.org/articles/non-interactive-auth.html>
 
     ## ℹ The googledrive package is using a cached token for 'slewis@flowwest.com'.
+
+    ## Auto-refreshing stale OAuth token.
 
     ## temp/WBD_Subwatershed.zip already exists and will be used...
 
@@ -597,6 +599,18 @@ valley_bottoms <- readRDS("../data/attr_vb1.Rds") |>
     ## $ comid             <dbl> 8062581, 8061239, 8061235, 8062351, 8061205, 8061189…
     ## $ vb_width_transect <dbl> 47.45505, 27.55365, 555.54340, 99.94706, 68.64580, 1…
 
+#### Levee Confinement Calculations
+
+``` r
+levee_confinement <- readRDS("../data/attr_frac_leveed.Rds") |> glimpse()
+```
+
+    ## Rows: 178,868
+    ## Columns: 3
+    ## $ comid                        <int> 20245062, 24085230, 22226684, 22226720, 2…
+    ## $ frac_leveed_longitudinal     <dbl> 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,…
+    ## $ lateral_levee_confinement_ft <dbl> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, N…
+
 ### Combine all attributes
 
 ``` r
@@ -630,6 +644,7 @@ flowline_attributes <-
   left_join(peak_flows) |>
   left_join(width_data) |>
   left_join(valley_bottoms) |>
+  left_join(levee_confinement) |>
   # fill in gaps in the RF bankfull estimates with the simple Bieger model
   mutate(bf_width_m = coalesce(bf_width_m, 2.76*da_area_sq_km^0.399),
          bf_depth_m = coalesce(bf_depth_m, 0.23*da_area_sq_km^0.294),
@@ -651,9 +666,14 @@ flowline_attributes <-
          grain_size_suspended_mm = 10 * grain_size_suspended_ndim * rho_cgs * nu_cgs^2 /
                          ((rho_s_cgs - rho_cgs) * g_cgs)^(1/3)) |>
   left_join(attr_mtpi) |>
-  left_join(valley_bottoms) |>
-  mutate(vb_width_transect = pmax(coalesce(vb_width_transect, chan_width_m), chan_width_m),
-         vb_bf_w_ratio = vb_width_transect / chan_width_m)
+  mutate(#confined_topo = if_else(is.na(vb_width_transect),1,0),
+         #confined_levee = if_else(frac_leveed_longitudinal>=0.5,1,0),
+         vb_width_transect = pmax(coalesce(vb_width_transect, chan_width_m), chan_width_m),
+         # for majority-leveed reaches, replace the valley bottom width with the leveed width
+         vb_width_transect = if_else(frac_leveed_longitudinal>=0.5,
+                                     coalesce(lateral_levee_confinement_ft*0.3048, vb_width_transect),
+                                     vb_width_transect),
+         vb_bf_w_ratio = vb_width_transect / chan_width_m,) 
 
 flowline_attributes |> saveRDS("../data/flowline_attributes.Rds")
   
@@ -916,7 +936,7 @@ flowlines |>
 ![](data-discovery_files/figure-gfm/plot-loc_twi-1.png)<!-- -->
 
 ``` r
-# plot showing local baseflow index (ratio of baseflow to total flow)
+# plot showing local baseflow 
 flowlines |> 
   st_zm() |>
   filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
@@ -972,36 +992,6 @@ flowlines |>
 ![](data-discovery_files/figure-gfm/plot-mtpi-1.png)<!-- -->
 
 ``` r
-# plot showing valley bottom width calculated from terrain
-flowlines |> 
-  st_zm() |>
-  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
-  ggplot() + 
-  geom_sf(data=st_zm(flowlines), aes(color = vb_width_transect)) +
-  geom_sf(aes(color = vb_width_transect), linewidth=1) + 
-  geom_sf(data=waterbodies, fill="gray", color="gray") +
-  scale_color_viridis_c(direction=1, trans="log10")
-```
-
-    ## Warning: Transformation introduced infinite values in discrete y-axis
-
-![](data-discovery_files/figure-gfm/plot-vb_width_transect-1.png)<!-- -->
-
-``` r
-# plot showing valley bottom width - channel width ratio
-flowlines |> 
-  st_zm() |>
-  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
-  ggplot() + 
-  geom_sf(data=st_zm(flowlines), aes(color = vb_bf_w_ratio)) +
-  geom_sf(aes(color = vb_bf_w_ratio), linewidth=1) + 
-  geom_sf(data=waterbodies, fill="gray", color="gray") +
-  scale_color_viridis_c(direction=-1, trans="log10")
-```
-
-![](data-discovery_files/figure-gfm/plot-vb_bf_w_ratio-1.png)<!-- -->
-
-``` r
 # plot showing hydrologic classification
 flowlines |> 
   st_zm() |>
@@ -1045,6 +1035,50 @@ flowlines |>
 ![](data-discovery_files/figure-gfm/plot-width-combined-1.png)<!-- -->
 
 ``` r
+# plot showing levee confinement data, where available
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = lateral_levee_confinement_ft*0.3048)) +
+  geom_sf(aes(color = lateral_levee_confinement_ft*0.3048), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(trans = "log")
+```
+
+![](data-discovery_files/figure-gfm/plot-leveed-width-1.png)<!-- -->
+
+``` r
+# plot showing valley bottom width calculated from terrain (or leveed width in the case of leveed reaches)
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = vb_width_transect)) +
+  geom_sf(aes(color = vb_width_transect), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(direction=1, trans="log10")
+```
+
+    ## Warning: Transformation introduced infinite values in discrete y-axis
+
+![](data-discovery_files/figure-gfm/plot-vb_width_transect-1.png)<!-- -->
+
+``` r
+# plot showing valley bottom width - channel width ratio
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = vb_bf_w_ratio)) +
+  geom_sf(aes(color = vb_bf_w_ratio), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") +
+  scale_color_viridis_c(direction=-1, trans="log10")
+```
+
+![](data-discovery_files/figure-gfm/plot-vb_bf_w_ratio-1.png)<!-- -->
+
+``` r
 # plot showing number of species - TNC data
 flowlines |> 
   st_zm() |>
@@ -1086,15 +1120,7 @@ catchments <-
   st_transform(project_crs) 
 ```
 
-    ## downloading temp/Catchment.zip...
-
-    ## File downloaded:
-
-    ## • 'Catchment.zip' <id: 16RXk1BplBr8v-IO0QodGEnjBlvOGhbM3>
-
-    ## Saved locally as:
-
-    ## • 'temp/Catchment.zip'
+    ## temp/Catchment.zip already exists and will be used...
 
     ## Reading layer `Catchment' from data source `/vsizip/temp/Catchment.zip' using driver `ESRI Shapefile'
     ## Simple feature collection with 140835 features and 4 fields

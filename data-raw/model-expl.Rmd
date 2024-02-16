@@ -105,7 +105,7 @@ td <- train_data |>
          # misc characteristics of the locality
          loc_bfi, loc_pct_clay, loc_pct_sand, loc_permeability, loc_bedrock_depth, loc_ppt_mean_mm,
          # channel confinement characteristics
-         mtpi30_min, #vb_width_transect, vb_bf_w_ratio, 
+         mtpi30_min, vb_width_transect, vb_bf_w_ratio, frac_leveed_longitudinal,
          # channel sinuosity
          sinuosity,
          # aquatic
@@ -159,13 +159,13 @@ si_rec <- recipe(data=training(td_split),
         # misc characteristics of the locality
         loc_bfi + loc_pct_clay + loc_pct_sand + loc_permeability + loc_bedrock_depth + loc_ppt_mean_mm +
         # channel confinement
-        mtpi30_min + 
+        mtpi30_min + vb_bf_w_ratio + frac_leveed_longitudinal +
         # baseflow as percent of mean annual flow
         nf_bfl_dry_cfs_norm + nf_bfl_wet_cfs_norm + 
         # aquatic
         bio_aq_rank_sw + species + species_fish
         ) |>
-  step_log(all_numeric_predictors(), -mtpi30_min, -mean_ndvi, -bio_aq_rank_sw) |>
+  step_log(all_numeric_predictors(), -mtpi30_min, -mean_ndvi, -bio_aq_rank_sw, -vb_bf_w_ratio, -frac_leveed_longitudinal) |>
   # let effect of flow vary with gradient
   step_interact(terms = ~ flow_norm_cfs:slope)
   # try interacting with all numeric predictors
@@ -218,13 +218,13 @@ sd_rec <- recipe(data=training(td_split),
         # misc characteristics of the locality
         loc_bfi + loc_pct_clay + loc_pct_sand + loc_permeability + loc_bedrock_depth + loc_ppt_mean_mm +
         # channel confinement characteristics
-        mtpi30_min + #log(vb_width_transect) + log(vb_bf_w_ratio) +
+        mtpi30_min + vb_bf_w_ratio + frac_leveed_longitudinal + vb_width_transect +
         # channel sinuosity
         sinuosity + 
         # aquatic
         bio_aq_rank_sw + species + species_fish
         ) |>
-  step_log(all_numeric_predictors(), -mtpi30_min, -mean_ndvi) |>
+  step_log(all_numeric_predictors(), -mtpi30_min, -mean_ndvi, -vb_bf_w_ratio, -frac_leveed_longitudinal) |>
   step_interact(terms = ~ flow_cfs:erom_q_ma_cfs) |>
   step_interact(terms = ~ slope:da_area_sq_km) |>
   step_interact(terms = ~ flow_cfs:da_area_sq_km) |>

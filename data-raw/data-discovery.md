@@ -611,6 +611,17 @@ levee_confinement <- readRDS("../data/attr_frac_leveed.Rds") |> glimpse()
     ## $ frac_leveed_longitudinal     <dbl> 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,…
     ## $ lateral_levee_confinement_ft <dbl> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, N…
 
+#### Geomorph class (experimental!)
+
+``` r
+geomorph_class <- readRDS("../data/attr_geomorph_class.Rds") |> glimpse()
+```
+
+    ## Rows: 85,613
+    ## Columns: 2
+    ## $ comid          <dbl> 8320105, 8320111, 8321245, 8320119, 8320125, 8320133, 8…
+    ## $ geomorph_class <fct> "Partly-confined, cobble-boulder, uniform", "Partly-con…
+
 ### Combine all attributes
 
 ``` r
@@ -645,6 +656,7 @@ flowline_attributes <-
   left_join(width_data) |>
   left_join(valley_bottoms) |>
   left_join(levee_confinement) |>
+  left_join(geomorph_class) |>
   # fill in gaps in the RF bankfull estimates with the simple Bieger model
   mutate(bf_width_m = coalesce(bf_width_m, 2.76*da_area_sq_km^0.399),
          bf_depth_m = coalesce(bf_depth_m, 0.23*da_area_sq_km^0.294),
@@ -1105,6 +1117,19 @@ flowlines |>
 ```
 
 ![](data-discovery_files/figure-gfm/plot-aqu-rank-1.png)<!-- -->
+
+``` r
+# plot showing number of CDFW aquatic biodiversity rank
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = geomorph_class)) +
+  geom_sf(aes(color = geomorph_class), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") 
+```
+
+![](data-discovery_files/figure-gfm/plot-geomorph-class-1.png)<!-- -->
 
 ## Import catchments
 

@@ -1,5 +1,5 @@
 ---
-title: "Import UCD geomorph classes (experimental!)"
+title: "Geomorphology and Soils"
 author: "[Skyler Lewis](mailto:slewis@flowwest.com)"
 date: "`r Sys.Date()`"
 output: 
@@ -46,6 +46,46 @@ flow <-
 
 flowline_attributes <- readRDS("../data/flowline_attributes.Rds")
 ```
+
+## Soils
+
+```{r soils-data}
+soils <- 
+  st_read("/vsizip/soils/Cal_STATSGO2.shp.zip", as_tibble=T) |>
+  st_transform(project_crs) |>
+  janitor::clean_names() |> 
+  transmute(soil_drainage = factor(drainage, levels=c("Very poorly drained",
+                                                      "Poorly drained",
+                                                      "Somewhat poorly drained",
+                                                      "Well drained",
+                                                      "Somewhat excessively drained",
+                                                      "Excessively drained")),
+            soil_hsg = factor(hydro_g, levels=c("A","B","C","D")),
+            soil_salt_accum = factor(salt, levels=c("acid","nonacid","euic","calcareous")),
+            soil_climate = factor(climate, levels=c("frigid","mesic","thermic","hyperthermic","isofrigid","isomesic","isothermic","isohyperthermic")),
+            soil_minerology = factor(minerology, levels=c("superactive","active","semiactive","subactive")),
+            soil_volcanic = if_else(str_detect(texture,"ashy") | str_detect(texture,"cindery") | str_detect(texture,"medial"), 1, 0),
+            soil_texture_simple = case_when(str_detect(word(texture,1), "ashy") ~ "ashy",
+                                            str_detect(word(texture,1), "medial") ~ "medial",
+                                            str_detect(word(texture,1), "clayey") ~ "clayey",
+                                            str_detect(word(texture,1), "clayey") ~ "silty",
+                                            str_detect(word(texture,1), "clayey") ~ "sandy",
+                                            str_detect(word(texture,1), "clayey") ~ "loamy",
+                                            str_detect(word(texture,1), "clayey") ~ "fine"
+                                            ) |> factor())
+
+soils_comid <-
+  flow |>
+  select(comid) |>
+  st_point_on_surface() |>
+  st_join(soils) |>
+  st_drop_geometry() |>
+  glimpse()
+
+saveRDS("../data/attr_soils.Rds")
+```
+
+## UCD Geomorphology classes (experimental)
 
 ```{r geomorph-data-import}
 geomorph_site_data <- 

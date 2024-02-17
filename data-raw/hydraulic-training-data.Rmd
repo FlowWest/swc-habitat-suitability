@@ -422,3 +422,170 @@ fsa_combined <-
 
 fsa_combined |> glimpse() |> saveRDS("../data/fsa_combined.Rds")
 ```
+
+## Yuba River
+
+Import SRH2D model data for Yuba (adapted version of Stanislaus methods)
+
+```{r yuba-import, message=FALSE, warning=FALSE}
+
+# IMPORT DATA
+
+flows <- c(300, 350, 400, 450, 530, 600, 622, 700, 800, 880, 930,
+           1000, 1300, 1500, 1700, 2000, 2500, 3000, 4000, 5000, 7500, 
+           10000, 15000, 21100, 30000, 42200, 84400, 110400)
+
+# extract CSV results
+yuba_csv_results <- drive_file_by_id("155QA16y1PP5wFAc21Uvwb_gj2tNqdYDG") 
+
+if(!file.exists("temp/lyr_srh2d_csv.tar")){
+  yuba_csv_results |> archive::archive_extract(dir="temp", files="lyr_srh2d_csv.tar")
+  yuba_csv_results |> archive::archive_extract(dir="temp")
+}
+
+yuba_gdrive_ids <- tribble(
+  ~reach, ~domain, ~vertices, ~thiessen,
+  "EDR", "17KmDTcYfTDJTF-6WcbhQd_5WUbqrVs3k", "1t_oT37auM_25SnU3TLrXa_xCyoV9H9qt", "1s-FhTTDlclwcuu-H-9wIwwC1K7lEijXI", 
+  "TBR", "1IArTq6Yh_R44csnUYEayNtbRFYr3xPsl", "1tHAvrhIaw_Gz47K5pL0SpeniEMYnczln", "1E7ucN5WOyynzNjeYTiPiS_ixbaJXA6cW",
+  "HR" , "1HXYUeop_otp0H06x69NPrE02SNradmEC", "1cByc4uVCf46lwVnvfECmKi3IOsR3T2sU", "1ca5tpyAAe2DzeiVStl4Cl8qEvwI7Jaxx",
+  "DGR", "17ybIFHUBlKmMuQkXVIrQOOPPnoDWQkRe", "1aSsCAHVwRyquDH_-tA89-7qObJ4eqc-v", "1aCvZAd7YqU5kzQfshmxIBNECWQqRJKoC",
+  "FR" , "1f0N27qss7FsXHfml8U_B-FtoVApbaVKV", "1teWo-kp-ujtKtHfvoLfZZCKcGsh0twiD", "1lkGlWPqBDHHP8yN8U-lkxKBnkRKmfVgS")
+
+# FUNCTIONS FOR IMPORTING ALL REACHES, ALL FLOWS
+
+r <- "EDR" # FOR TESTING PURPOSES
+q <- 700  # FOR TESTING PURPOSES
+
+result_cols <- c("vid"="n", 
+                 "x_ft"="n", "y_ft"="n", "z_ft"="n", 
+                 "wse_ft"="n", "wdepth_ft"="n", 
+                 "vel_x"="n", "vel_y"="n", "vel_mag"="n", 
+                 "froude"="n", "stress"="n")
+
+get_reach_flow_result <- function(r, q) {
+  message(q)
+  # returns a data frame of results for a particular reach and flow
+  #yuba_csv_results |>
+  #  archive::archive_read(paste0("temp/", r, "_", q, "_SMS.csv"))
+  filename <- paste0("temp/", r, "_", q, "_SMS.csv") 
+  if(file.exists(filename)) {
+    out <- filename |>
+    read_csv(col_names=names(result_cols), col_types=result_cols, skip=1) |>
+    mutate(discharge_cfs = q, 
+           vid=row_number())
+    return(out)
+  } else {
+    return(NULL)
+  }
+}
+
+get_reach_result <- function(r) {
+  message(r)
+  # returns a merged data frame of results for all flows of a particular reach
+  flows |> 
+    lapply(function(q) get_reach_flow_result(r, q)) |> 
+    bind_rows() |>
+    transmute(discharge_cfs, reach=r, vid, depth_ft=wdepth_ft, velocity_fps=vel_mag) 
+}
+
+# COMBINE RESULT
+
+if(!file.exists("temp/hsi_yuba.Rds")) {
+
+yuba_result <- 
+  yuba_gdrive_ids$reach |>
+  lapply(get_reach_result) |>
+  bind_rows() |>
+  mutate(across(everything(), function(x) if_else(x==-999,NA,x))) |>
+  mutate(
+    cover_hs = 1, # cover habitat suitability should be added here
+    hsi_simp = dvhsi(depth_ft, velocity_fps, method=0) * cover_hs,
+    hsi_frac = dvhsi(depth_ft, velocity_fps, method=1) * cover_hs,
+  ) |>
+  glimpse()
+
+  yuba_result |> saveRDS("temp/hsi_yuba.Rds")
+  
+} else {
+  
+  yuba_result <- readRDS("temp/hsi_yuba.Rds") |> glimpse()
+  
+}
+
+```
+
+```{r yuba-calc-hsi}
+
+# IMPORT COMID REACH POLYGON DELINEATIONS
+
+yuba_comid <- drive_file_by_id("1-xSi142jtNZKQS9-VgXZT1yzTfH1KjyR", vsizip=T) |>
+  st_read(as_tibble=T) |> st_zm() |> janitor::clean_names()
+
+yuba_calc_comid_hsi <- function(g, q, t){
+  message(q)
+  t |>
+    left_join(filter(yuba_result, discharge_cfs==q), by=join_by(vid)) |> 
+    st_intersection(g) |>
+    mutate(area_ft2 = if_else(depth_ft>0, units::drop_units(st_area(geometry)), 0),
+           wua_simp = hsi_simp * area_ft2,
+           wua_frac = hsi_frac * area_ft2) |>
+    summarize(area_ft2 = sum(area_ft2),
+              wua_simp = sum(wua_simp),
+              wua_frac = sum(wua_frac)) |>
+    mutate(pcthab_simp = wua_simp / area_ft2,
+           pcthab_frac = wua_frac / area_ft2) |>
+    st_drop_geometry()
+}
+
+r_q_combos <- yuba_result |> rename(flow_cfs = discharge_cfs) |> group_by(reach, flow_cfs) |> summarize() |> ungroup()
+
+yuba_calc_reach_hsis <- function(r) {
+  message(r)
+  ids <- yuba_gdrive_ids |> filter(reach==r)
+  
+  # vertices
+  v <- drive_file_by_id(ids[["vertices"]], vsizip=T) |>
+    st_read(as_tibble=T) |> 
+    mutate(vid=row_number()) |> 
+    select(vid)
+  
+  # thiessen
+  t <- drive_file_by_id(ids[["thiessen"]], vsizip=T) |>
+    st_read(as_tibble=T) |> 
+    st_join(v, join=st_nearest_feature) |>
+    select(vid) |>
+    arrange(vid)
+  
+  yuba_comid |>
+    filter(reach_lyr==r) |>
+    #expand_grid(flow_cfs = flows) |>
+    inner_join(r_q_combos, by=join_by(reach_lyr==reach), relationship="many-to-many") |>
+    mutate(result = map2(geometry, flow_cfs, function(g, q) yuba_calc_comid_hsi(st_sfc(g, crs=st_crs(yuba_comid)), q, t))) |>
+    unnest_wider(result) |>
+    st_as_sf() |>
+    glimpse()
+
+}
+
+
+if(!file.exists("../data/fsa_yuba.Rds")) {
+  
+  fsa_yuba <-
+    yuba_gdrive_ids$reach |>
+    lapply(yuba_calc_reach_hsis) |>
+    bind_rows()
+    
+  fsa_yuba |> saveRDS("../data/fsa_yuba.Rds")
+  
+} else {
+  
+  fsa_yuba <- readRDS("../data/fsa_yuba.Rds") |> glimpse()
+  
+}
+
+
+```
+
+```{r yuba-plot-hsi, fig.width=6.5, fig.height=4, dpi=300}
+fsa_yuba |> ggplot() + geom_line(aes(x = flow_cfs, y = pcthab_frac, color=factor(comid))) 
+```

@@ -393,36 +393,6 @@ deer_hsi_result |> glimpse()
 deer_hsi_result |> ggplot() + geom_line(aes(x = flow_cfs, y = area_pct, color=factor(comid)))
 ```
 
-## Combined flow-to-suitable-area training set
-
-Combining the results of the above two imports into a consistent dataset. `fsa_combined.Rds` should be joined by `comid` with the flowlines and the predictor variables to use for modeling. 
-
-For now, just bringing over the simple threshold-based HSI calculation that uses depth and velocity thresholds (`(d>0.5 & d<=5.2) & (v>0.1 & v<=4.0)`). To be improved. 
-
-```{r}
-fsa_combined <- 
-  bind_rows(
-    deer_hsi_result |> 
-      st_drop_geometry() |>
-      transmute(dataset = "Deer Creek",
-                comid, 
-                flow_cfs, 
-                area_tot_ft2 = area_tot, 
-                area_wua_ft2 = area_wua,
-                hsi_frac = area_pct),
-    fsa_stanislaus |> 
-      st_drop_geometry() |>
-      transmute(dataset = "Stanislaus River",
-                comid,
-                flow_cfs,
-                area_tot_ft2 = area_m2 / 3.281^2,
-                area_wua_ft2 = wua_simp / 3.281^2,
-                hsi_frac = pcthab_simp)
-          ) |> arrange(dataset, comid, flow_cfs)
-
-fsa_combined |> glimpse() |> saveRDS("../data/fsa_combined.Rds")
-```
-
 ## Yuba River
 
 Import SRH2D model data for Yuba (adapted version of Stanislaus methods)
@@ -588,4 +558,42 @@ if(!file.exists("../data/fsa_yuba.Rds")) {
 
 ```{r yuba-plot-hsi, fig.width=6.5, fig.height=4, dpi=300}
 fsa_yuba |> ggplot() + geom_line(aes(x = flow_cfs, y = pcthab_frac, color=factor(comid))) 
+```
+
+## Combined flow-to-suitable-area training set
+
+Combining the results of the above two imports into a consistent dataset. `fsa_combined.Rds` should be joined by `comid` with the flowlines and the predictor variables to use for modeling. 
+
+For now, just bringing over the simple threshold-based HSI calculation that uses depth and velocity thresholds (`(d>0.5 & d<=5.2) & (v>0.1 & v<=4.0)`). To be improved. 
+
+```{r}
+fsa_combined <- 
+  bind_rows(
+    deer_hsi_result |> 
+      st_drop_geometry() |>
+      transmute(dataset = "Deer Creek",
+                comid, 
+                flow_cfs, 
+                area_tot_ft2 = area_tot, 
+                area_wua_ft2 = area_wua,
+                hsi_frac = area_pct),
+    fsa_stanislaus |> 
+      st_drop_geometry() |>
+      transmute(dataset = "Stanislaus River",
+                comid,
+                flow_cfs,
+                area_tot_ft2 = area_m2 / 3.281^2,
+                area_wua_ft2 = wua_simp / 3.281^2,
+                hsi_frac = pcthab_simp),
+    fsa_yuba |> 
+      st_drop_geometry() |>
+      transmute(dataset = "Lower Yuba River",
+                comid,
+                flow_cfs,
+                area_tot_ft2 = area_ft2,
+                area_wua_ft2 = wua_simp,
+                hsi_frac = pcthab_simp)
+          ) |> arrange(dataset, comid, flow_cfs)
+
+fsa_combined |> glimpse() |> saveRDS("../data/fsa_combined.Rds")
 ```

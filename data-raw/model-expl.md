@@ -61,20 +61,11 @@ if(FALSE){
 }
 
 train_data <- flowlines |> st_drop_geometry() |>
-  left_join(readRDS("../data/flowline_attributes.Rds"), by=join_by("comid"), relationship="one-to-one") |>
+  left_join(flowline_attributes, by=join_by("comid"), relationship="one-to-one") |>
   inner_join(flow_to_suitable_area, by=join_by("comid"), relationship="one-to-many") |> 
   filter(hqt_gradient_class != "Valley Lowland") |>
   glimpse()
 ```
-
-    ## Warning in readRDS("../data/flowline_attributes.Rds"): input string 'Ca<bf>on
-    ## Creek' cannot be translated to UTF-8, is it valid in 'ASCII'?
-
-    ## Warning in readRDS("../data/flowline_attributes.Rds"): input string 'A<bf>o
-    ## Nuevo Creek' cannot be translated to UTF-8, is it valid in 'ASCII'?
-
-    ## Warning in readRDS("../data/flowline_attributes.Rds"): input string 'Pe<bf>a
-    ## Creek' cannot be translated to UTF-8, is it valid in 'ASCII'?
 
     ## Rows: 2,612
     ## Columns: 122
@@ -210,6 +201,15 @@ train_data <- flowlines |> st_drop_geometry() |>
     ## $ area_tot_ft2                 <dbl> 85674.83, 87418.12, 88986.52, 90401.46, 9…
     ## $ area_wua_ft2                 <dbl> 55276.70, 55670.01, 55687.43, 55934.38, 5…
     ## $ hsi_frac                     <dbl> 0.6451919, 0.6368246, 0.6257963, 0.618733…
+
+``` r
+flowlines |> st_zm() |>
+  filter(comid %in% unique(flow_to_suitable_area$comid)) |>
+  left_join(flowline_attributes, by=join_by("comid"), relationship="one-to-one") |>
+  ggplot() + geom_sf(aes(color = hqt_gradient_class)) + theme(legend.title=element_blank())
+```
+
+![](model-expl_files/figure-gfm/import-1.png)<!-- -->
 
 ## Exploration and PCA of training data
 
@@ -363,7 +363,7 @@ td |>
   group_by(dataset, comid) |>
   complete(flow_cfs = interp_flows) |>
   arrange(dataset, comid, flow_cfs) |>
-  mutate(across(slope:last_col(), function(var) zoo::na.approx(var, x = flow_cfs))) |>
+  mutate(across(hsi_frac:last_col(), function(var) zoo::na.approx(var, x = flow_cfs))) |>
   filter(flow_cfs %in% interp_flows) |>
   ungroup() |>
   # summarize by quantile of each variable
@@ -376,8 +376,6 @@ td |>
 
     ## `summarise()` has grouped output by 'flow_cfs', 'varname'. You can override
     ## using the `.groups` argument.
-
-    ## Warning: Removed 15 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/td-gridplot-1.png)<!-- -->
 

@@ -51,10 +51,15 @@ if(FALSE){
 }
 
 train_data <- flowlines |> st_drop_geometry() |>
-  left_join(readRDS("../data/flowline_attributes.Rds"), by=join_by("comid"), relationship="one-to-one") |>
+  left_join(flowline_attributes, by=join_by("comid"), relationship="one-to-one") |>
   inner_join(flow_to_suitable_area, by=join_by("comid"), relationship="one-to-many") |> 
   filter(hqt_gradient_class != "Valley Lowland") |>
   glimpse()
+
+flowlines |> st_zm() |>
+  filter(comid %in% unique(flow_to_suitable_area$comid)) |>
+  left_join(flowline_attributes, by=join_by("comid"), relationship="one-to-one") |>
+  ggplot() + geom_sf(aes(color = hqt_gradient_class)) + theme(legend.title=element_blank())
 
 ```
 
@@ -140,7 +145,7 @@ td |>
   group_by(dataset, comid) |>
   complete(flow_cfs = interp_flows) |>
   arrange(dataset, comid, flow_cfs) |>
-  mutate(across(slope:last_col(), function(var) zoo::na.approx(var, x = flow_cfs))) |>
+  mutate(across(hsi_frac:last_col(), function(var) zoo::na.approx(var, x = flow_cfs))) |>
   filter(flow_cfs %in% interp_flows) |>
   ungroup() |>
   # summarize by quantile of each variable

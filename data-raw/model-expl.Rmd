@@ -36,10 +36,26 @@ flowlines <- readRDS("../data/flowline_geometries.Rds") |>
 
 flowline_attributes <- readRDS("../data/flowline_attributes.Rds")
 
+flow_to_suitable_area <- readRDS("../data/fsa_combined.Rds")
+
+# EXPERIMENTAL: Limit to flow ranges covered by all trianing data, and interpolate gaps
+if(FALSE){
+  interp_flows <- seq(700,5000,100)
+  flow_to_suitable_area <- 
+    readRDS("../data/fsa_combined.Rds") |>
+    group_by(dataset, comid) |>
+    complete(flow_cfs = interp_flows) |>
+    arrange(dataset, comid, flow_cfs) |>
+    mutate(across(c(area_tot_ft2, area_wua_ft2, hsi_frac), function(var) zoo::na.approx(var, x = flow_cfs))) |>
+    filter(flow_cfs %in% interp_flows)
+}
+
 train_data <- flowlines |> st_drop_geometry() |>
   left_join(readRDS("../data/flowline_attributes.Rds"), by=join_by("comid"), relationship="one-to-one") |>
-  inner_join(readRDS("../data/fsa_combined.Rds"), by=join_by("comid"), relationship="one-to-many") |> 
+  inner_join(flow_to_suitable_area, by=join_by("comid"), relationship="one-to-many") |> 
+  filter(hqt_gradient_class != "Valley Lowland") |>
   glimpse()
+
 ```
 
 ## Exploration and PCA of training data
@@ -118,9 +134,19 @@ td <- train_data |>
 
 
 ```{r td-gridplot}
+interp_flows <- seq(700,5000,100)
 td |> 
+  # interpolate so that we are comparing like flows with like
+  group_by(dataset, comid) |>
+  complete(flow_cfs = interp_flows) |>
+  arrange(dataset, comid, flow_cfs) |>
+  mutate(across(slope:last_col(), function(var) zoo::na.approx(var, x = flow_cfs))) |>
+  filter(flow_cfs %in% interp_flows) |>
+  ungroup() |>
+  # summarize by quantile of each variable
   mutate(across(slope:last_col(), function(x) factor(cut(x, breaks=5, labels=F)))) |>
   pivot_longer(cols=slope:last_col(), names_to="varname", values_to="qtile") |>
+  mutate(qtile = factor(qtile, levels=c(1,2,3,4,5))) |>
   group_by(flow_cfs, varname, qtile) |> summarize(wua_per_lf=mean(wua_per_lf)) |> ungroup() |>
   ggplot() + geom_line(aes(x=flow_cfs, y=wua_per_lf, color=qtile)) + facet_wrap(~varname) + scale_color_viridis_d() + scale_y_log10() + scale_x_log10()
 ```
@@ -455,6 +481,8 @@ rfr_sd_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
 ```{r prediction-data}
 # assemble prediction dataset
 pd <- flowline_attributes |> 
+  # filter out Valley Lowland areas
+  filter(hqt_gradient_class != "Valley Lowland") |>
   # filter for just the areas that are hydrologically similar to the training data
   filter(hyd_cls %in% c("High-volume snowmelt and rain",
                         "Low-volume snowmelt and rain")) |>
@@ -520,19 +548,20 @@ flowlines |> st_zm() |>
 mainstems <- 
   st_read("/vsizip/rearing_spatial_data/habitat_extents_combined_gradients_v3.shp.zip", as_tibble=T) |>
   janitor::clean_names() |>
-  group_by(habitat, species, river) |>
+  group_by(habitat, species, river, hqt_type) |>
   summarize() |>
   st_buffer(dist=50) |>
   st_union(by_feature=T) |>
   st_transform(st_crs(flowlines)) |>
-  filter(habitat=="rearing" & species=="Fall Run Chinook")
+  filter(habitat=="rearing" & species=="Fall Run Chinook") |>
+  filter(hqt_type=="Valley Foothill")
   
 mainstems_comid <- 
   flowlines |> st_zm() |>
   st_join(mainstems, join=st_intersects, left=F) |>
   mutate(length_ft = st_length(geometry) |> units::set_units("ft") |> units::drop_units())
 
-mainstems_comid |> ggplot() + geom_sf(aes(color=river))
+mainstems_comid |> ggplot() + geom_sf(aes(color=river, linetype=hqt_type)) + theme(legend.key.height = unit(12, "point"))
 ```
 
 ```{r dsmhabitat-val, fig.width=15, fig.height=10, dpi=300}

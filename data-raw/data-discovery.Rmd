@@ -54,6 +54,19 @@ watersheds <-
 watersheds |> ggplot() + geom_sf()
 ```
 
+### Import Flowline Geometry
+
+```{r flowlines}
+flowlines_sf <- 
+  drive_file_by_id("1UiG8AeMr6mFOw7Jx--LyNRzez7GsDhzK", vsizip=T) |>
+  st_read() |>
+  janitor::clean_names() |>
+  select(comid) 
+
+flowlines_sf |> saveRDS("../data/flowline_geometries.Rds")
+
+```
+
 ## Data Import
 
 ### Consolidating NHDPlusV2 Flowline Attributes
@@ -488,6 +501,38 @@ levee_confinement <- readRDS("../data/attr_frac_leveed.Rds") |> glimpse()
 ```{r import-geomorph}
 geomorph_class <- readRDS("../data/attr_geomorph_class.Rds") |> glimpse()
 ```
+#### HQT boundaries
+
+```{r import-hqt-bounds}
+cv_alluvial <- st_read("/vsizip/hqt/Alluvial_Bnd.shp.zip") |> 
+  st_transform("ESRI:102039") |> 
+  select(geometry)
+# valley_lowland <- st_read("hqt/hqt_valley_lowland.kml") |> 
+#   st_transform("ESRI:102039") |>
+#   mutate(hqt_gradient_class = "Valley Foothill")
+valley_lowland <- readRDS("hqt/hqt_valley_lowland.Rds") |> 
+  st_transform("ESRI:102039") |> 
+  st_sf() |>
+  st_set_geometry("geometry") |>
+  mutate(hqt_gradient_class = "Valley Lowland")
+valley_foothill <- st_difference(cv_alluvial, valley_lowland) |> 
+  mutate(hqt_gradient_class = "Valley Foothill")
+hqt_gradient_class <- bind_rows(valley_lowland, valley_foothill) 
+hqt_gradient_class |> saveRDS("../data/hqt_gradient_class.Rds")
+hqt_gradient_class |> ggplot() + geom_sf(aes(fill = hqt_gradient_class))
+
+hqt_cls <- flowlines_sf |>
+  st_zm() |>
+  st_transform("ESRI:102039") |> 
+  st_point_on_surface() |>
+  st_join(hqt_gradient_class) |>
+  st_drop_geometry() |> 
+  select(comid, hqt_gradient_class) |>
+  mutate(hqt_gradient_class = coalesce(hqt_gradient_class, "Bedrock"),
+         hqt_gradient_class = factor(hqt_gradient_class, levels=c("Valley Lowland", "Valley Foothill", "Bedrock")))
+  glimpse()
+  
+```
 
 ### Combine all attributes
 
@@ -525,6 +570,7 @@ flowline_attributes <-
   left_join(valley_bottoms) |>
   left_join(levee_confinement) |>
   left_join(geomorph_class) |>
+  left_join(hqt_cls) |>
   # fill in gaps in the RF bankfull estimates with the simple Bieger model
   mutate(bf_width_m = coalesce(bf_width_m, 2.76*da_area_sq_km^0.399),
          bf_depth_m = coalesce(bf_depth_m, 0.23*da_area_sq_km^0.294),
@@ -560,17 +606,9 @@ flowline_attributes |> saveRDS("../data/flowline_attributes.Rds")
 #}
 ```
 
-### Import Flowline Geometry
+## Join to Flowline Geometry
 
-```{r flowlines}
-flowlines_sf <- 
-  drive_file_by_id("1UiG8AeMr6mFOw7Jx--LyNRzez7GsDhzK", vsizip=T) |>
-  st_read() |>
-  janitor::clean_names() |>
-  select(comid) 
-
-flowlines_sf |> saveRDS("../data/flowline_geometries.Rds")
-
+```{r flowlines-join}
 flowlines <- 
   flowlines_sf |>
   inner_join(flowline_attributes) |>
@@ -578,6 +616,7 @@ flowlines <-
   arrange(hydro_seq) |>
   st_transform(project_crs)
 
+# for visualizing
 waterbodies <- 
   drive_file_by_id("1ZGS3M97xTPb87k-78sGPJx_c1QkSq3AZ", vsizip=T) |>
   st_read() |>
@@ -588,6 +627,7 @@ waterbodies <-
   filter(huc_8 %in% selected_huc_8) |>
   arrange(comid) |>
   st_transform(project_crs)
+
 ```
 
 ## Maps of attribute data (exploratory)
@@ -910,13 +950,22 @@ flowlines |>
 ```
 
 ```{r plot-geomorph-class}
-# plot showing number of CDFW aquatic biodiversity rank
 flowlines |> 
   st_zm() |>
   filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
   ggplot() + 
   geom_sf(data=st_zm(flowlines), aes(color = geomorph_class)) +
   geom_sf(aes(color = geomorph_class), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") 
+```
+
+```{r plot-hqt-class}
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = factor(hqt_gradient_class))) +
+  geom_sf(aes(color = factor(hqt_gradient_class)), linewidth=1) + 
   geom_sf(data=waterbodies, fill="gray", color="gray") 
 ```
 

@@ -1,7 +1,7 @@
 SWC Habitat Model Data Discovery
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-02-16
+2024-02-23
 
 - [Case study geographic scope](#case-study-geographic-scope)
 - [Data Import](#data-import)
@@ -42,8 +42,6 @@ watersheds <-
     ##   <https://gargle.r-lib.org/articles/non-interactive-auth.html>
 
     ## ℹ The googledrive package is using a cached token for 'slewis@flowwest.com'.
-
-    ## Auto-refreshing stale OAuth token.
 
     ## temp/WBD_Subwatershed.zip already exists and will be used...
 
@@ -622,6 +620,63 @@ geomorph_class <- readRDS("../data/attr_geomorph_class.Rds") |> glimpse()
     ## $ comid          <dbl> 8320105, 8320111, 8321245, 8320119, 8320125, 8320133, 8…
     ## $ geomorph_class <fct> "Partly-confined, cobble-boulder, uniform", "Partly-con…
 
+#### HQT boundaries
+
+``` r
+cv_alluvial <- st_read("/vsizip/hqt/Alluvial_Bnd.shp.zip") |> 
+  st_transform("ESRI:102039") |> 
+  select(geometry)
+```
+
+    ## Reading layer `Alluvial_Bnd' from data source `/vsizip/hqt/Alluvial_Bnd.shp.zip' using driver `ESRI Shapefile'
+    ## Simple feature collection with 1 feature and 2 fields
+    ## Geometry type: MULTIPOLYGON
+    ## Dimension:     XY
+    ## Bounding box:  xmin: -221390.2 ymin: 1317285 xmax: 127998 ymax: 1965683
+    ## Projected CRS: NAD_1983_Albers
+
+``` r
+# valley_lowland <- st_read("hqt/hqt_valley_lowland.kml") |> 
+#   st_transform("ESRI:102039") |>
+#   mutate(hqt_gradient_class = "Valley Foothill")
+valley_lowland <- readRDS("hqt/hqt_valley_lowland.Rds") |> 
+  st_transform("ESRI:102039") |> 
+  st_sf() |>
+  st_set_geometry("geometry") |>
+  mutate(hqt_gradient_class = "Valley Lowland")
+valley_foothill <- st_difference(cv_alluvial, valley_lowland) |> 
+  mutate(hqt_gradient_class = "Valley Foothill")
+```
+
+    ## Warning: attribute variables are assumed to be spatially constant throughout
+    ## all geometries
+
+``` r
+hqt_gradient_class <- bind_rows(valley_lowland, valley_foothill) 
+hqt_gradient_class |> saveRDS("../data/hqt_gradient_class.Rds")
+hqt_gradient_class |> ggplot() + geom_sf(aes(fill = hqt_gradient_class))
+```
+
+![](data-discovery_files/figure-gfm/import-hqt-bounds-1.png)<!-- -->
+
+``` r
+hqt_cls <- readRDS("../data/flowline_geometries.Rds") |>
+  st_transform("ESRI:102039") |>
+  st_zm() |>
+  st_point_on_surface() |>
+  st_join(hqt_gradient_class) |>
+  st_drop_geometry() |> 
+  select(comid, hqt_gradient_class) |>
+  glimpse()
+```
+
+    ## Warning: st_point_on_surface assumes attributes are constant over geometries
+
+    ## Rows: 178,868
+    ## Columns: 2
+    ## $ comid              <int> 20245062, 24085230, 22226684, 22226720, 22226732, 2…
+    ## $ hqt_gradient_class <chr> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA,…
+
 ### Combine all attributes
 
 ``` r
@@ -657,6 +712,7 @@ flowline_attributes <-
   left_join(valley_bottoms) |>
   left_join(levee_confinement) |>
   left_join(geomorph_class) |>
+  left_join(hqt_cls) |>
   # fill in gaps in the RF bankfull estimates with the simple Bieger model
   mutate(bf_width_m = coalesce(bf_width_m, 2.76*da_area_sq_km^0.399),
          bf_depth_m = coalesce(bf_depth_m, 0.23*da_area_sq_km^0.294),

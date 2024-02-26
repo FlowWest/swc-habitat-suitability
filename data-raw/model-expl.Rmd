@@ -39,14 +39,14 @@ flowline_attributes <- readRDS("../data/flowline_attributes.Rds")
 flow_to_suitable_area <- readRDS("../data/fsa_combined.Rds")
 
 # EXPERIMENTAL: Limit to flow ranges covered by all trianing data, and interpolate gaps
-if(FALSE){
-  interp_flows <- seq(700,5000,100)
+if(TRUE){
+  interp_flows <- seq(300,5000,100)
   flow_to_suitable_area <- 
     readRDS("../data/fsa_combined.Rds") |>
     group_by(dataset, comid) |>
     complete(flow_cfs = interp_flows) |>
     arrange(dataset, comid, flow_cfs) |>
-    mutate(across(c(area_tot_ft2, area_wua_ft2, hsi_frac), function(var) zoo::na.approx(var, x = flow_cfs))) |>
+    mutate(across(c(area_tot_ft2, area_wua_ft2, hsi_frac), function(var) zoo::na.approx(var, x = flow_cfs, na.rm=F))) |>
     filter(flow_cfs %in% interp_flows)
 }
 
@@ -54,6 +54,8 @@ train_data <- flowlines |> st_drop_geometry() |>
   left_join(flowline_attributes, by=join_by("comid"), relationship="one-to-one") |>
   inner_join(flow_to_suitable_area, by=join_by("comid"), relationship="one-to-many") |> 
   filter(hqt_gradient_class != "Valley Lowland") |>
+  # eliminate reaches with near zero mean annual flow
+  filter(erom_q_ma_cfs>10) |>
   glimpse()
 
 flowlines |> st_zm() |>
@@ -110,7 +112,7 @@ td <- train_data |>
   mutate(flow_norm_cfs = flow_cfs / erom_q_ma_cfs) |> # flow as a percent of mean annual flow
   mutate(wua_per_lf = area_wua_ft2 / (reach_length_km*3280.84),
          log_wua_per_lf = log(wua_per_lf)) |> # transect-wise habitat area per linear foot
-  select(dataset, comid, 
+  transmute(dataset, comid, 
          # suitable habitat area normalized by reach length
          hsi_frac, wua_per_lf, log_wua_per_lf,
          # flow cfs normalized by mean annual flow
@@ -130,7 +132,9 @@ td <- train_data |>
          # channel sinuosity
          sinuosity,
          # aquatic
-         bio_aq_rank_sw, species, species_fish
+         bio_aq_rank_sw, species, species_fish,
+         # fixed effects
+         hqt_gradient_class=droplevels(hqt_gradient_class), hyd_cls=droplevels(hyd_cls)
          ) |> 
   mutate(nf_bfl_dry_cfs_norm = nf_bfl_dry_cfs/erom_q_ma_cfs, 
          nf_bfl_wet_cfs_norm = nf_bfl_wet_cfs/erom_q_ma_cfs) |>
@@ -159,7 +163,7 @@ td |>
 ## Split into training and testing datasets
 ```{r td-split}
 set.seed(47)
-td_split <- initial_split(td, strata=dataset)
+td_split <- group_initial_split(td, group=comid, strata=dataset)
 ```
 
 ## Modeling
@@ -194,13 +198,21 @@ si_rec <- recipe(data=training(td_split),
         # baseflow as percent of mean annual flow
         nf_bfl_dry_cfs_norm + nf_bfl_wet_cfs_norm + 
         # aquatic
-        bio_aq_rank_sw + species + species_fish
+        bio_aq_rank_sw + species + species_fish + 
+        # fixed effects
+        hqt_gradient_class + hyd_cls
         ) |>
   step_log(all_numeric_predictors(), -mtpi30_min, -mean_ndvi, -bio_aq_rank_sw, -vb_bf_w_ratio, -frac_leveed_longitudinal) |>
   # let effect of flow vary with gradient
-  step_interact(terms = ~ flow_norm_cfs:slope)
+  # step_interact(terms = ~ flow_norm_cfs:slope) #|>
+  step_dummy(hqt_gradient_class) |>
+  step_dummy(hyd_cls) |>
   # try interacting with all numeric predictors
-  #step_interact(terms = ~ flow_norm_cfs:all_numeric_predictors()) 
+  step_interact(terms = ~ flow_norm_cfs:all_predictors()) |>
+  # let all effects vary with class
+  #step_interact(terms = ~hqt_gradient_class:all_numeric_predictors())
+  step_naomit(all_predictors()) |>
+  step_zv(all_predictors())
 
 lm_si <- workflow() |>
   add_recipe(si_rec |> step_normalize(all_numeric_predictors())) |>
@@ -215,9 +227,9 @@ lm_si_res <- testing(td_split) |>
   mutate(hsi_frac_pred = predict(lm_si, testing(td_split))[[".pred"]]) |>
   select(comid, hsi_frac, hsi_frac_pred, flow_norm_cfs) 
 
-lm_si_res |>
+lm_si_res |> 
   ggplot() + geom_point(aes(x=hsi_frac, y=hsi_frac_pred, color=flow_norm_cfs)) + 
-  coord_fixed() + geom_abline() + scale_color_viridis_c() + 
+  coord_fixed() + geom_abline() + scale_color_viridis_c(trans="log10") + 
   ggtitle("Scale-independent model, linear regression")
 
 lm_si_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
@@ -253,14 +265,24 @@ sd_rec <- recipe(data=training(td_split),
         # channel sinuosity
         sinuosity + 
         # aquatic
-        bio_aq_rank_sw + species + species_fish
+        bio_aq_rank_sw + species + species_fish + 
+        # fixed effects
+        hqt_gradient_class + hyd_cls
         ) |>
   step_log(all_numeric_predictors(), -mtpi30_min, -mean_ndvi, -vb_bf_w_ratio, -frac_leveed_longitudinal) |>
-  step_interact(terms = ~ flow_cfs:erom_q_ma_cfs) |>
+  #step_interact(terms = ~ flow_cfs:erom_q_ma_cfs) |>
   step_interact(terms = ~ slope:da_area_sq_km) |>
-  step_interact(terms = ~ flow_cfs:da_area_sq_km) |>
-  step_interact(terms = ~ flow_cfs:da_elev_mean) |>
-  step_interact(terms = ~ flow_cfs:da_ppt_mean_mm) 
+  #step_interact(terms = ~ flow_cfs:da_area_sq_km) |>
+  #step_interact(terms = ~ flow_cfs:da_elev_mean) |>
+  #step_interact(terms = ~ flow_cfs:da_ppt_mean_mm) #|>
+  # let all effects vary with class
+  #step_interact(terms = ~hqt_gradient_class:all_numeric_predictors())
+  step_dummy(hqt_gradient_class) |>
+  step_dummy(hyd_cls) |>
+  # intract all terms with flow
+  step_interact(terms = ~flow_cfs:all_predictors()) |>
+  step_naomit(all_predictors()) |>
+  step_zv(all_predictors())
 
 lm_sd <- workflow() |>
   add_recipe(sd_rec |> step_normalize(all_numeric_predictors())) |>
@@ -278,7 +300,7 @@ testing(td_split) |>
 
 lm_sd_res |>
   ggplot() + geom_point(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs)) + 
-  scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c() + 
+  scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c(trans="log10") + 
   ggtitle("Scale-dependent model, linear regression")
 
 lm_sd_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
@@ -421,7 +443,7 @@ testing(td_split) |>
 
 rfr_si_res |> 
   ggplot() + geom_point(aes(x=hsi_frac, y=hsi_frac_pred, color=flow_norm_cfs)) + 
-  coord_fixed() + geom_abline() + scale_color_viridis_c() + 
+  coord_fixed() + geom_abline() + scale_color_viridis_c(trans="log10") + 
   ggtitle("Scale-independent model, random forest regression")
 
 rfr_si_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
@@ -472,7 +494,7 @@ testing(td_split) |>
 
 rfr_sd_res |>
   ggplot() + geom_point(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs)) + 
-  scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c()   + 
+  scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c(trans="log10")   + 
   ggtitle("Scale-dependent model, random forest regression")
 
 rfr_sd_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
@@ -516,23 +538,35 @@ pd <- flowline_attributes |>
 ```
 
 ```{r prediction-output}
-pd_rf <- pd |> #head(100) |>
-  mutate(log_wua_per_lf_pred = predict(rfr_sd, pd)[[".pred"]],
-         wua_per_lf_pred=exp(log_wua_per_lf_pred), flow_cfs,
-         hsi_frac_pred = predict(rfr_si, pd)[[".pred"]]) 
+sd_pred <- 
+  sd_rec |> 
+  prep(td) |> 
+  bake(pd) |> 
+  bind_cols(pd |> select(comid)) |>
+  drop_na() %>% # need to use magrittr pipe for this purpose
+  mutate(log_wua_per_lf_pred = predict(rfr_sd$fit$fit, new_data=.)[[".pred"]]) |>
+  transmute(comid, flow_cfs=exp(flow_cfs), log_wua_per_lf_pred) |>
+  mutate(wua_per_lf_pred = exp(log_wua_per_lf_pred)) |>
+  glimpse()
 
-pd_rf |> select(comid, 
-                flow_cfs, wua_per_lf_pred, 
-                flow_norm_cfs, hsi_frac_pred) |> glimpse()
-
-pd_rf |> saveRDS("../data/rf_predictions.Rds")
+si_pred <- 
+  si_rec |> 
+  prep(td) |> 
+  bake(pd) |> 
+  bind_cols(pd |> select(comid)) |>
+  drop_na() %>% # need to use magrittr pipe for this purpose
+  mutate(hsi_frac_pred = predict(rfr_si$fit$fit, new_data=.)[[".pred"]]) |>
+  transmute(comid, flow_norm_cfs=exp(flow_norm_cfs), hsi_frac_pred) |>
+  left_join(flowline_attributes |> transmute(comid, bf_width_ft = bf_width_m/0.3048), by=join_by(comid)) |>
+  mutate(wua_per_lf_pred = hsi_frac_pred * bf_width_ft) |>
+  glimpse()
 ```
 
 Example plot of habitat area per linear foot at 800 cfs (scale-dependent model)
 
 ```{r map-output-sd}
 flowlines |> st_zm() |>
-  inner_join(pd_rf |> filter(flow_cfs==800), by=join_by(comid)) |>
+  inner_join(sd_pred |> filter(as.integer(flow_cfs)==800), by=join_by(comid)) |>
   ggplot() + geom_sf(aes(color = wua_per_lf_pred)) + 
   scale_color_viridis_c(trans="log")
 ```
@@ -541,7 +575,7 @@ Example plot of percent habitat area at mean annual flow (scale-independent mode
 
 ```{r map-output-si}
 flowlines |> st_zm() |>
-  inner_join(pd_rf |> filter(flow_norm_cfs==1), by=join_by(comid)) |>
+  inner_join(si_pred |> filter(flow_norm_cfs==1), by=join_by(comid)) |>
   ggplot() + geom_sf(aes(color = hsi_frac_pred)) + 
   scale_color_viridis_c(trans="log")
 ```

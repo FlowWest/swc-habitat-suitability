@@ -9,6 +9,15 @@ library(sf)
 library(stars)
 library(terra)
 
+# implement parallel processing
+library(future) # parallel processing backend
+library(future.apply) # parallelized versions of lapply, sapply, ...
+library(furrr) # parallelized versions of purrr functions: map, map2, pmap,...
+library(tictoc) # measure time to run
+message(availableCores())
+if (availableCores()>1) plan(multisession) else plan(sequential)
+# use plan(sequential) to run all as ordinary lapply, pmap, etc.
+ 
 theme_set(theme_minimal())
 
 #project_crs <- "EPSG:3310" # NAD83 California Teale Albers
@@ -46,13 +55,13 @@ linterp <- function(x, x1, x2, y1, y2){
 # method=0 uses simple 1/0 thresholds (CVPIA -  see Deer Creek FR juvenile rearing floodplain criteria)
 # method=1 uses ranges defined in CBEC Lower Yuba River report, tables 8-9
 # method=2 uses ranges defined for USBR San Joaquin model (which also did not incorporate cover)
-# method=4 uses simple 1/0 thresholds from HQT
+# method=3 uses simple 1/0 thresholds from HQT
 
 dvhsi <- function(d, v, method=0) {
   
   if(method==0){
     
-    return(if_else(d>0.5 & d<=5.2 & v>0.1 & v<=4.0, 1, 0))
+    return(if_else(d>0.5 & d<=5.2 & v>0 & v<=4.0, 1, 0))
     
   } else if(method==1){
     
@@ -70,7 +79,7 @@ dvhsi <- function(d, v, method=0) {
       v>4.0 ~ 0)
     return(sqrt(dhsi*vhsi))
     
-  } else if(method==3){
+  } else if(method==2){
     
     dhsi <- case_when(d<=0.01 ~ 0.00,
                       d<=0.10 ~ 0.10,
@@ -106,7 +115,7 @@ dvhsi <- function(d, v, method=0) {
                       v>3.5 ~ 0.00)
     return(pmin(dhsi, vhsi))
     
-  } else if(method==4){
+  } else if(method==3){
     
     return(if_else(d>1 & d<=3.28 & v>0 & v<=1.5, 1, 0))
 
@@ -197,6 +206,8 @@ stan_result <-
     cover_hs = 1, # cover habitat suitability should be added here
     hsi_simp = dvhsi(depth_ft, velocity_fps, method=0) * cover_hs,
     hsi_frac = dvhsi(depth_ft, velocity_fps, method=1) * cover_hs,
+    hsi_sjrm = dvhsi(depth_ft, velocity_fps, method=2) * cover_hs,
+    hsi_shqt = dvhsi(depth_ft, velocity_fps, method=3) * cover_hs
   ) |>
   glimpse()
 
@@ -225,7 +236,9 @@ test <- stan_thiessen |>
   st_intersection(stan_comid[1]) |>
     mutate(area_m2 = units::drop_units(st_area(geometry)),
            wua_simp = hsi_simp * area_m2,
-           wua_frac = hsi_frac * area_m2) |>
+           wua_frac = hsi_frac * area_m2,
+           wua_sjrm = hsi_sjrm * area_m2,
+           wua_shqt = hsi_shqt * area_m2) |>
   glimpse()
 
 #test |> ggplot() + geom_sf(aes(fill=hsi_simp), color=NA)
@@ -235,28 +248,37 @@ Batch process, saving flow-to-suitable-area (fsa) by comid to file
 
 ```{r stan-calc-hsi}
 stan_calc_hsi <- function(g, q){
+  message(q)
   stan_thiessen |>
     left_join(filter(stan_result, discharge_cfs==q), by=join_by(vid)) |> 
     st_intersection(g) |>
     mutate(area_m2 = if_else(depth_ft>0, units::drop_units(st_area(geometry)), 0),
            wua_simp = hsi_simp * area_m2,
-           wua_frac = hsi_frac * area_m2) |>
+           wua_frac = hsi_frac * area_m2,
+           wua_sjrm = hsi_sjrm * area_m2,
+           wua_shqt = hsi_shqt * area_m2) |>
     summarize(area_m2 = sum(area_m2),
               wua_simp = sum(wua_simp),
-              wua_frac = sum(wua_frac)) |>
+              wua_frac = sum(wua_frac),
+              wua_sjrm = sum(wua_sjrm),
+              wua_shqt = sum(wua_shqt)) |>
     mutate(pcthab_simp = wua_simp / area_m2,
-           pcthab_frac = wua_frac / area_m2) |>
+           pcthab_frac = wua_frac / area_m2,
+           pcthab_sjrm = wua_sjrm / area_m2,
+           pcthab_shqt = wua_shqt / area_m2) |>
     st_drop_geometry()
 }
 
 if(!file.exists("../data/fsa_stanislaus.Rds")) {
+  tic("calculate stanislaus fsa")
   fsa_stanislaus <- 
     stan_comid |>
     expand_grid(flow_cfs = as.numeric(names(stan_result_filenames))) |>
-    mutate(result = map2(geometry, flow_cfs, function(g, q) stan_calc_hsi(st_sfc(g, crs=st_crs(stan_comid)), q))) |>
+    mutate(result = future_map2(geometry, flow_cfs, function(g, q) stan_calc_hsi(st_sfc(g, crs=st_crs(stan_comid)), q))) |>
     unnest_wider(result) |>
     st_as_sf() |>
     glimpse()
+  toc()
   fsa_stanislaus |> saveRDS("../data/fsa_stanislaus.Rds")
 } else {
   fsa_stanislaus <- readRDS("../data/fsa_stanislaus.Rds") |> glimpse()
@@ -358,13 +380,22 @@ raster_hsi <- function(g, q, crs="EPSG:6416"){
   d <- dep_r[[as.character(q)]] |> terra::crop(comid) 
   v <- vel_r[[as.character(q)]] |> terra::crop(comid) 
   ext <- (d>0)
-  hsi <- (d>0.5 & d<=5.2) & (v>0.1 & v<=4.0)
+  # LYR version
+  hsi <- (d>0.5 & d<=5.2) & (v>0 & v<=4.0)
   area_wua <- terra::global(hsi, "sum", na.rm=TRUE)[[1]]
   area_tot <- terra::global(ext, "sum", na.rm=TRUE)[[1]]
   area_pct <- area_wua / area_tot
+  # HQT version
+  hsi_hqt <- (d>1 & d<=3.28) & (v>0 & v<=1.5)
+  area_wua_hqt <- terra::global(hsi_hqt, "sum", na.rm=TRUE)[[1]]
+  area_tot_hqt <- terra::global(ext, "sum", na.rm=TRUE)[[1]]
+  area_pct_hqt <- area_wua_hqt / area_tot_hqt
   return(list("area_tot"=area_tot, 
               "area_wua"=area_wua, 
-              "area_pct"=area_pct))
+              "area_pct"=area_pct,
+              "area_tot_hqt"=area_tot_hqt, 
+              "area_wua_hqt"=area_wua_hqt, 
+              "area_pct_hqt"=area_pct_hqt))
 }
 
 # getting a memory error doing this all at once:
@@ -377,14 +408,16 @@ raster_hsi <- function(g, q, crs="EPSG:6416"){
 run_for_flow <- function(q){
   message(paste0("calculating HSI for q=",q))
   deer_comids |> 
-    mutate(result = map(geometry, function(g) raster_hsi(g, q))) |>
+    mutate(result = future_map(geometry, function(g) raster_hsi(g, q))) |>
     unnest_wider(result) |> 
     st_drop_geometry() |>
     mutate(flow_cfs=q)
 }
 
 if(!file.exists("../data/fsa_deercreek.Rds")) {
-  deer_hsi_result <- bind_rows(lapply(filenames$flow_cfs, run_for_flow))
+  tic("calculate deer fsa")
+  deer_hsi_result <- bind_rows(future_lapply(filenames$flow_cfs, run_for_flow))
+  toc()
   deer_hsi_result |> saveRDS("../data/fsa_deercreek.Rds")
 } else {
   deer_hsi_result <- readRDS("../data/fsa_deercreek.Rds")
@@ -458,7 +491,7 @@ get_reach_result <- function(r) {
   message(r)
   # returns a merged data frame of results for all flows of a particular reach
   flows |> 
-    lapply(function(q) get_reach_flow_result(r, q)) |> 
+    future_lapply(function(q) get_reach_flow_result(r, q)) |> 
     bind_rows() |>
     transmute(discharge_cfs, reach=r, vid, depth_ft=wdepth_ft, velocity_fps=vel_mag) 
 }
@@ -468,16 +501,19 @@ get_reach_result <- function(r) {
 if(!file.exists("temp/hsi_yuba.Rds")) {
 
 yuba_result <- 
+  tic("calculate yuba hsi")
   yuba_gdrive_ids$reach |>
-  lapply(get_reach_result) |>
+  future_lapply(get_reach_result) |>
   bind_rows() |>
   mutate(across(everything(), function(x) if_else(x==-999,NA,x))) |>
   mutate(
     cover_hs = 1, # cover habitat suitability should be added here
     hsi_simp = dvhsi(depth_ft, velocity_fps, method=0) * cover_hs,
     hsi_frac = dvhsi(depth_ft, velocity_fps, method=1) * cover_hs,
-  ) |>
+    hsi_sjrm = dvhsi(depth_ft, velocity_fps, method=2) * cover_hs,
+    hsi_shqt = dvhsi(depth_ft, velocity_fps, method=3) * cover_hs) |>
   glimpse()
+  toc()
 
   yuba_result |> saveRDS("temp/hsi_yuba.Rds")
   
@@ -503,12 +539,18 @@ yuba_calc_comid_hsi <- function(g, q, t){
     st_intersection(g) |>
     mutate(area_ft2 = if_else(depth_ft>0, units::drop_units(st_area(geometry)), 0),
            wua_simp = hsi_simp * area_ft2,
-           wua_frac = hsi_frac * area_ft2) |>
+           wua_frac = hsi_frac * area_ft2,
+           wua_sjrm = hsi_sjrm * area_ft2,
+           wua_shqt = hsi_shqt * area_ft2) |>
     summarize(area_ft2 = sum(area_ft2),
               wua_simp = sum(wua_simp),
-              wua_frac = sum(wua_frac)) |>
+              wua_frac = sum(wua_frac),
+              wua_sjrm = sum(wua_sjrm),
+              wua_shqt = sum(wua_shqt)) |>
     mutate(pcthab_simp = wua_simp / area_ft2,
-           pcthab_frac = wua_frac / area_ft2) |>
+           pcthab_frac = wua_frac / area_ft2,
+           pcthab_sjrm = wua_sjrm / area_ft2,
+           pcthab_shqt = wua_shqt / area_ft2) |>
     st_drop_geometry()
 }
 
@@ -535,7 +577,7 @@ yuba_calc_reach_hsis <- function(r) {
     filter(reach_lyr==r) |>
     #expand_grid(flow_cfs = flows) |>
     inner_join(r_q_combos, by=join_by(reach_lyr==reach), relationship="many-to-many") |>
-    mutate(result = map2(geometry, flow_cfs, function(g, q) yuba_calc_comid_hsi(st_sfc(g, crs=st_crs(yuba_comid)), q, t))) |>
+    mutate(result = future_map2(geometry, flow_cfs, function(g, q) yuba_calc_comid_hsi(st_sfc(g, crs=st_crs(yuba_comid)), q, t))) |>
     unnest_wider(result) |>
     st_as_sf() |>
     glimpse()
@@ -545,10 +587,12 @@ yuba_calc_reach_hsis <- function(r) {
 
 if(!file.exists("../data/fsa_yuba.Rds")) {
   
+  tic("calculate yuba fsa")
   fsa_yuba <-
     yuba_gdrive_ids$reach |>
-    lapply(yuba_calc_reach_hsis) |>
+    future_lapply(yuba_calc_reach_hsis) |>
     bind_rows()
+  toc()
     
   fsa_yuba |> saveRDS("../data/fsa_yuba.Rds")
   

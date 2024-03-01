@@ -182,6 +182,8 @@ First set up recipes (sets of predictor and response variables), then train and 
 
 Scale-independent model version predicts the percent suitable habitat area using normalized flow, and without using any direct correlates of watershed size.
 
+Technically this should not use linear regression as it is a proportion between zero and one, it should be using beta regression via the betareg package.
+
 ```{r lm-si, message=FALSE}
 si_rec <- recipe(data=training(td_split), 
       formula=hsi_frac ~ 
@@ -215,7 +217,7 @@ si_rec <- recipe(data=training(td_split),
   #step_interact(terms = ~hqt_gradient_class:all_numeric_predictors())
   step_naomit(all_predictors()) |>
   step_zv(all_predictors()) |>
-  step_normalize(all_numeric_predictors())
+  step_normalize(all_numeric_predictors())#, -flow_cfs)
 
 si_rec_pca <- 
   si_rec |> step_pca(all_numeric_predictors(), -flow_norm_cfs, threshold = 0.85)
@@ -231,7 +233,9 @@ lm_si$fit$fit |> dotwhisker::dwplot()
 
 lm_si_res <- testing(td_split) |>
   mutate(hsi_frac_pred = predict(lm_si, testing(td_split))[[".pred"]]) |>
-  select(comid, hsi_frac, hsi_frac_pred, flow_norm_cfs) 
+  select(comid, hsi_frac, hsi_frac_pred, flow_norm_cfs) |>
+  # crude constraint to between 0 and 1; better to use betareg
+  mutate(hsi_frac_pred=pmax(pmin(hsi_frac_pred,1),0))
 
 lm_si_res |>
   arrange(comid, flow_norm_cfs) |>
@@ -330,7 +334,7 @@ sd_rec <- recipe(data=training(td_split),
   step_interact(terms = ~flow_cfs:all_predictors()) |>
   step_naomit(all_predictors()) |>
   step_zv(all_predictors()) |>
-  step_normalize(all_numeric_predictors())
+  step_normalize(all_numeric_predictors())#, -flow_cfs)
 
 sd_rec_pca <- 
   sd_rec |> step_pca(all_numeric_predictors(), -flow_cfs, threshold = 0.85)
@@ -425,7 +429,9 @@ lasso_si$fit$fit |> dotwhisker::dwplot()
 lasso_si_res <- 
 testing(td_split) |>
   mutate(hsi_frac_pred = predict(lasso_si, testing(td_split))[[".pred"]]) |>
-  select(comid, hsi_frac, hsi_frac_pred, flow_norm_cfs)
+  select(comid, hsi_frac, hsi_frac_pred, flow_norm_cfs) |>
+  # crude constraint to between 0 and 1; better to use betareg
+  mutate(hsi_frac_pred=pmax(pmin(hsi_frac_pred,1),0))
 
 lasso_si_res |>
   arrange(comid, flow_norm_cfs) |>
@@ -604,7 +610,9 @@ rfr_si$fit$fit |> print()
 rfr_si_res <- 
 testing(td_split) |>
   mutate(hsi_frac_pred = predict(rfr_si, testing(td_split))[[".pred"]]) |>
-  select(comid, hsi_frac, hsi_frac_pred, flow_norm_cfs) 
+  select(comid, hsi_frac, hsi_frac_pred, flow_norm_cfs) |>
+  # crude constraint to between 0 and 1; better to use betareg
+  mutate(hsi_frac_pred=pmax(pmin(hsi_frac_pred,1),0))
 
 rfr_si_res |>
   arrange(comid, flow_norm_cfs) |>
@@ -729,10 +737,10 @@ sd_pred <-
   sd_rec |> 
   prep(td) |> 
   bake(pd) |> 
-  bind_cols(pd |> select(comid)) |>
+  bind_cols(pd |> transmute(comid, flow_cfs_orig=flow_cfs)) |>
   drop_na() %>% # need to use magrittr pipe for this purpose
   mutate(log_wua_per_lf_pred = predict(rfr_sd$fit$fit, new_data=.)[[".pred"]]) |>
-  transmute(comid, flow_cfs=exp(flow_cfs), log_wua_per_lf_pred) |>
+  transmute(comid, flow_cfs=flow_cfs_orig, log_wua_per_lf_pred) |>
   mutate(wua_per_lf_pred = exp(log_wua_per_lf_pred)) |>
   glimpse()
 
@@ -740,10 +748,10 @@ si_pred <-
   si_rec |> 
   prep(td) |> 
   bake(pd) |> 
-  bind_cols(pd |> select(comid)) |>
+  bind_cols(pd |> transmute(comid, flow_norm_cfs_orig=flow_norm_cfs)) |>
   drop_na() %>% # need to use magrittr pipe for this purpose
   mutate(hsi_frac_pred = predict(rfr_si$fit$fit, new_data=.)[[".pred"]]) |>
-  transmute(comid, flow_norm_cfs=exp(flow_norm_cfs), hsi_frac_pred) |>
+  transmute(comid, flow_norm_cfs=flow_norm_cfs_orig, hsi_frac_pred) |>
   left_join(flowline_attributes |> transmute(comid, bf_width_ft = bf_width_m/0.3048), by=join_by(comid)) |>
   mutate(wua_per_lf_pred = hsi_frac_pred * bf_width_ft) |>
   glimpse()
@@ -754,7 +762,7 @@ Example plot of habitat area per linear foot at 800 cfs (scale-dependent model)
 ```{r map-output-sd, fig.height=6.5}
 flowlines |> st_zm() |>
   inner_join(sd_pred |> filter(round(flow_cfs)==800), by=join_by(comid)) |>
-  ggplot() + geom_sf(aes(color = wua_per_lf_pred*1000)) + 
+  ggplot() + geom_sf(aes(color = wua_per_lf_pred)) + 
   scale_color_viridis_c(trans="log", breaks = scales::breaks_log(6))
 ```
 
@@ -780,7 +788,7 @@ mainstems <-
   st_union(by_feature=T) |>
   st_transform(st_crs(flowlines)) |>
   filter(habitat=="rearing" & species=="Fall Run Chinook") |>
-  filter(!(str_detect(river, "Sacramento") | str_detect(river, "San Joaquin")))
+  filter(!(str_detect(river, "Sacramento") | str_detect(river, "San Joaquin") | river %in% c("North Delta", "South Delta")))
   #filter(hqt_type=="Valley Foothill")
   
 mainstems_comid <- 
@@ -793,7 +801,12 @@ mainstems_comid |>
   geom_sf(aes(color=river, linetype=hqt_type)) + 
   theme(legend.key.height = unit(12, "point"))
 ```
+
 ```{r dsmhabitat-join}
+watersheds <- mainstems |> pull(river) |> unique()
+watershed_name <- tolower(gsub(pattern = "-| ", replacement = "_", x = watersheds))
+watershed_rda_name <- paste(watershed_name, "floodplain", sep = "_")
+
 dsm_habitat_floodplain <- map_df(watershed_rda_name, function(watershed) {
   df <- as.data.frame(do.call(`::`, list(pkg = "DSMhabitat", name = watershed)))
 }) |> 
@@ -847,13 +860,13 @@ pd_dsmhabitat_pred <-
   sd_rec |> 
   prep(td) |> 
   bake(pd_dsmhabitat) |> 
-  bind_cols(pd_dsmhabitat |> select(comid)) |>
+  bind_cols(pd_dsmhabitat |> transmute(comid, flow_cfs_orig=flow_cfs)) |>
   drop_na() %>% # need to use magrittr pipe for this purpose
   mutate(log_wua_per_lf_pred = predict(rfr_sd$fit$fit, new_data=.)[[".pred"]]) |>
-  transmute(comid, flow_cfs=exp(flow_cfs), log_wua_per_lf_pred) |>
+  transmute(comid, flow_cfs=flow_cfs_orig, log_wua_per_lf_pred) |>
   mutate(wua_per_lf_pred = exp(log_wua_per_lf_pred)) |>
   select(comid, 
-         flow_cfs, wua_per_lf_pred) |> glimpse()
+         flow_cfs, wua_per_lf_pred)
 
 pd_rf_by_mainstem <-
   mainstems_comid |> 
@@ -865,8 +878,7 @@ pd_rf_by_mainstem <-
   mutate(tot_wua_ft2 = tot_wua_per_lf_pred * tot_length_ft,
          tot_wua_ac = tot_wua_ft2 / 43560,
          avg_wua_ft2_per_lf = tot_wua_ft2 / tot_length_ft,
-         avg_wua_ft2_per_1000ft = 1000 * avg_wua_ft2_per_lf) |>
-  glimpse()
+         avg_wua_ft2_per_1000ft = 1000 * avg_wua_ft2_per_lf) 
 
 pd_rf_by_mainstem |>
   ggplot() + 

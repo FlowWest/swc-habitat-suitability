@@ -15,7 +15,8 @@ library(future.apply) # parallelized versions of lapply, sapply, ...
 library(furrr) # parallelized versions of purrr functions: map, map2, pmap,...
 library(tictoc) # measure time to run
 message(availableCores())
-if (availableCores()>1) plan(multisession) else plan(sequential)
+#if (availableCores()>1) plan(multisession) else plan(sequential)
+plan(multisession, workers = 4)
 # use plan(sequential) to run all as ordinary lapply, pmap, etc.
  
 theme_set(theme_minimal())
@@ -321,7 +322,6 @@ dir.create("temp/deer_model_output", recursive = TRUE)
 drive_file_by_id("1rmMw6PXJGS0-ui52eaotABCSlJsZOzvr", dir="temp/deer_model_output") |>
   archive::archive_extract(dir="temp/deer_model_output")
 
-
 filenames <- tribble(~flow_cfs, ~timestep,
         100, "15NOV2018 06 00 00",
         250, "15NOV2018 16 00 00",
@@ -346,30 +346,11 @@ filenames <- tribble(~flow_cfs, ~timestep,
 
 dep_r <- terra::rast(filenames$depth)
 terra::set.names(dep_r, filenames$flow_cfs)
+dep_r_packed <- terra::wrap(dep_r)
 
 vel_r <- terra::rast(filenames$velocity)
 terra::set.names(vel_r, filenames$flow_cfs)
-
-# STARS VERSION
-
-dep_s <- dep_r |> 
-  st_as_stars() |> 
-  st_set_dimensions(3, names="flow") |>
-  setNames("depth")
-
-vel_s <- vel_r |> 
-  st_as_stars() |> 
-  st_set_dimensions(3, names="flow") |>
-  setNames("velocity")
-
-#deer_dep_vel <- c(dep_s, vel_s)
-# raster_hsi <- function(q) {
-#   d <- dep_s[,,,q]
-#   v <- vel_s[,,,q]
-#   #...
-# }
-
-# TERRA VERSION
+vel_r_packed <- terra::wrap(vel_r)
 
 deer_comids <- 
   st_read("/vsizip/hydraulic_model_data/deercreek_hecras2d_2018/model_perim_split_comid_generalized.shp.zip", as_tibble=T) |>
@@ -377,8 +358,10 @@ deer_comids <-
 
 raster_hsi <- function(g, q, crs="EPSG:6416"){
   comid <- terra::vect(st_sfc(g, crs=crs))
-  d <- dep_r[[as.character(q)]] |> terra::crop(comid) 
-  v <- vel_r[[as.character(q)]] |> terra::crop(comid) 
+  dep_r_unpacked <- terra::unpack(dep_r_packed)
+  vel_r_unpacked <- terra::unpack(vel_r_packed)  
+  d <- dep_r_unpacked[[as.character(q)]] |> terra::crop(comid) 
+  v <- vel_r_unpacked[[as.character(q)]] |> terra::crop(comid) 
   ext <- (d>0)
   # LYR version
   hsi <- (d>0.5 & d<=5.2) & (v>0 & v<=4.0)
@@ -408,7 +391,7 @@ raster_hsi <- function(g, q, crs="EPSG:6416"){
 run_for_flow <- function(q){
   message(paste0("calculating HSI for q=",q))
   deer_comids |> 
-    mutate(result = future_map(geometry, function(g) raster_hsi(g, q))) |>
+    mutate(result = map(geometry, function(g) raster_hsi(g, q))) |>
     unnest_wider(result) |> 
     st_drop_geometry() |>
     mutate(flow_cfs=q)
@@ -500,10 +483,10 @@ get_reach_result <- function(r) {
 
 if(!file.exists("temp/hsi_yuba.Rds")) {
 
-yuba_result <- 
   tic("calculate yuba hsi")
+yuba_result <- 
   yuba_gdrive_ids$reach |>
-  future_lapply(get_reach_result) |>
+  lapply(get_reach_result) |> # don't use future_lapply here because get_reach_result is already parallelized
   bind_rows() |>
   mutate(across(everything(), function(x) if_else(x==-999,NA,x))) |>
   mutate(
@@ -528,6 +511,10 @@ yuba_result <-
 ```{r yuba-calc-hsi}
 
 # IMPORT COMID REACH POLYGON DELINEATIONS
+
+# allow sufficient sized files to be passed through parallel nodes
+message(object.size(yuba_result))
+options(future.globals.maxSize = 8000 * 1024^2)
 
 yuba_comid <- drive_file_by_id("1-xSi142jtNZKQS9-VgXZT1yzTfH1KjyR", vsizip=T) |>
   st_read(as_tibble=T) |> st_zm() |> janitor::clean_names()
@@ -584,13 +571,12 @@ yuba_calc_reach_hsis <- function(r) {
 
 }
 
-
 if(!file.exists("../data/fsa_yuba.Rds")) {
   
   tic("calculate yuba fsa")
   fsa_yuba <-
     yuba_gdrive_ids$reach |>
-    future_lapply(yuba_calc_reach_hsis) |>
+    lapply(yuba_calc_reach_hsis) |> # don't use future_lapply here because yuba_calc_reach_hsis is already parallelized
     bind_rows()
   toc()
     

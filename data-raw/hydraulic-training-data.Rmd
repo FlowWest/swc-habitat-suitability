@@ -427,6 +427,7 @@ flows <- c(300, 350, 400, 450, 530, 600, 622, 700, 800, 880, 930,
            10000, 15000, 21100, 30000, 42200, 84400, 110400)
 
 # extract CSV results
+dir.create("temp", recursive = TRUE)
 yuba_csv_results <- drive_file_by_id("155QA16y1PP5wFAc21Uvwb_gj2tNqdYDG") 
 
 if(!file.exists("temp/lyr_srh2d_csv.tar")){

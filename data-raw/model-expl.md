@@ -1,7 +1,7 @@
 Exploratory Modeling
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-02-29
+2024-03-04
 
 - [Exploration and PCA of training
   data](#exploration-and-pca-of-training-data)
@@ -72,7 +72,7 @@ train_data <- flowlines |> st_drop_geometry() |>
 ```
 
     ## Rows: 4,848
-    ## Columns: 122
+    ## Columns: 124
 
     ## Warning in grepl(",", levels(x), fixed = TRUE): input string 3 is invalid in
     ## this locale
@@ -203,8 +203,10 @@ train_data <- flowlines |> st_drop_geometry() |>
     ## $ dataset                      <chr> "Lower Yuba River", "Lower Yuba River", "…
     ## $ flow_cfs                     <dbl> 300, 400, 500, 600, 700, 800, 900, 1000, …
     ## $ area_tot_ft2                 <dbl> 85674.83, 88986.52, 91918.76, 94412.89, 9…
-    ## $ area_wua_ft2                 <dbl> 55276.70, 55687.43, 56073.65, 56453.34, 5…
-    ## $ hsi_frac                     <dbl> 0.6451919, 0.6257963, 0.6101202, 0.597941…
+    ## $ area_wua_ft2                 <dbl> 61615.77, 61266.25, 60818.44, 60450.49, 6…
+    ## $ hsi_frac                     <dbl> 0.7191817, 0.6884891, 0.6617851, 0.640277…
+    ## $ area_wua_ft2_hqt             <dbl> 21950.714, 19940.527, NA, 15550.221, 1411…
+    ## $ hsi_frac_hqt                 <dbl> 0.25620961, 0.22408480, NA, 0.16470442, 0…
 
 ``` r
 flowlines |> st_zm() |>
@@ -324,9 +326,9 @@ td <- train_data |>
     ## Columns: 41
     ## $ dataset                  <chr> "Lower Yuba River", "Lower Yuba River", "Lowe…
     ## $ comid                    <dbl> 8062583, 8062583, 8062583, 8062583, 8062583, …
-    ## $ hsi_frac                 <dbl> 0.6630366, 0.6193890, 0.5801705, 0.5635361, 0…
-    ## $ wua_per_lf               <dbl> 178.8609, 174.5413, 168.4112, 167.4973, 165.0…
-    ## $ log_wua_per_lf           <dbl> 5.186609, 5.162161, 5.126409, 5.120967, 5.106…
+    ## $ hsi_frac                 <dbl> 0.7645903, 0.7142137, 0.6698769, 0.6525566, 0…
+    ## $ wua_per_lf               <dbl> 206.2561, 201.2625, 194.4578, 193.9564, 192.1…
+    ## $ log_wua_per_lf           <dbl> 5.329119, 5.304610, 5.270215, 5.267633, 5.258…
     ## $ flow_cfs                 <dbl> 300, 400, 500, 600, 700, 800, 900, 1000, 1100…
     ## $ flow_norm_cfs            <dbl> 0.1132416, 0.1509889, 0.1887361, 0.2264833, 0…
     ## $ slope                    <dbl> 0.008, 0.008, 0.008, 0.008, 0.008, 0.008, 0.0…
@@ -464,7 +466,7 @@ lm_si |> glance()
     ## # A tibble: 1 × 12
     ##   r.squared adj.r.squared  sigma statistic p.value    df logLik    AIC    BIC
     ##       <dbl>         <dbl>  <dbl>     <dbl>   <dbl> <dbl>  <dbl>  <dbl>  <dbl>
-    ## 1     0.729         0.726 0.0790      191.       0    49  3960. -7818. -7504.
+    ## 1     0.749         0.746 0.0760      211.       0    49  4095. -8089. -7774.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
@@ -472,18 +474,18 @@ lm_si |> tidy()
 ```
 
     ## # A tibble: 50 × 5
-    ##    term              estimate std.error statistic  p.value
-    ##    <chr>                <dbl>     <dbl>     <dbl>    <dbl>
-    ##  1 (Intercept)       0.468      0.00133   351.    0       
-    ##  2 flow_norm_cfs    -2.21       1.13       -1.96  5.06e- 2
-    ##  3 slope             0.581      0.0898      6.47  1.14e-10
-    ##  4 sinuosity        -0.00302    0.00308    -0.980 3.27e- 1
-    ##  5 erom_v_ma_fps    -0.543      0.0792     -6.86  8.30e-12
-    ##  6 bf_depth_m        0.0233     0.0372      0.628 5.30e- 1
-    ##  7 bf_w_d_ratio      0.00632    0.0187      0.337 7.36e- 1
-    ##  8 da_k_erodibility -0.132      0.0373     -3.54  4.06e- 4
-    ##  9 da_avg_slope     -0.0413     0.0170     -2.43  1.51e- 2
-    ## 10 mean_ndvi        -0.000971   0.00342    -0.284 7.76e- 1
+    ##    term             estimate std.error statistic  p.value
+    ##    <chr>               <dbl>     <dbl>     <dbl>    <dbl>
+    ##  1 (Intercept)       0.498     0.00128   389.    0       
+    ##  2 flow_norm_cfs    -0.769     1.09       -0.708 4.79e- 1
+    ##  3 slope             0.530     0.0864      6.13  9.83e-10
+    ##  4 sinuosity        -0.00362   0.00296    -1.22  2.22e- 1
+    ##  5 erom_v_ma_fps    -0.503     0.0762     -6.59  4.91e-11
+    ##  6 bf_depth_m        0.0167    0.0358      0.467 6.41e- 1
+    ##  7 bf_w_d_ratio      0.0107    0.0180      0.593 5.53e- 1
+    ##  8 da_k_erodibility -0.140     0.0359     -3.91  9.59e- 5
+    ##  9 da_avg_slope     -0.0268    0.0163     -1.64  1.01e- 1
+    ## 10 mean_ndvi         0.00701   0.00329     2.13  3.32e- 2
     ## # ℹ 40 more rows
 
 ``` r
@@ -626,7 +628,7 @@ lm_sd |> glance()
     ## # A tibble: 1 × 12
     ##   r.squared adj.r.squared sigma statistic p.value    df logLik   AIC   BIC
     ##       <dbl>         <dbl> <dbl>     <dbl>   <dbl> <dbl>  <dbl> <dbl> <dbl>
-    ## 1     0.985         0.984 0.348     3655.       0    61 -1250. 2626. 3014.
+    ## 1     0.985         0.985 0.341     3755.       0    61 -1179. 2484. 2873.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
@@ -634,18 +636,18 @@ lm_sd |> tidy()
 ```
 
     ## # A tibble: 62 × 5
-    ##    term           estimate std.error statistic       p.value
-    ##    <chr>             <dbl>     <dbl>     <dbl>         <dbl>
-    ##  1 (Intercept)        4.72   0.00587   803.    0            
-    ##  2 flow_cfs        -341.   104.         -3.29  0.00102      
-    ##  3 slope             -4.77   2.98       -1.60  0.110        
-    ##  4 da_area_sq_km    -21.0   22.6        -0.929 0.353        
-    ##  5 da_elev_mean     -68.7   14.2        -4.85  0.00000129   
-    ##  6 da_ppt_mean_mm   -30.2    9.65       -3.13  0.00179      
-    ##  7 nf_bfl_dry_cfs   -75.3   13.1        -5.74  0.0000000104 
-    ##  8 nf_bfl_wet_cfs   -11.5    8.80       -1.31  0.191        
-    ##  9 erom_q_ma_cfs     11.7    1.96        5.97  0.00000000256
-    ## 10 erom_v_ma_fps     -7.53   4.88       -1.54  0.123        
+    ##    term           estimate std.error statistic  p.value
+    ##    <chr>             <dbl>     <dbl>     <dbl>    <dbl>
+    ##  1 (Intercept)        4.79   0.00576   831.    0       
+    ##  2 flow_cfs        -297.   102.         -2.92  3.49e- 3
+    ##  3 slope             -7.83   2.92       -2.68  7.35e- 3
+    ##  4 da_area_sq_km    -37.8   22.1        -1.71  8.75e- 2
+    ##  5 da_elev_mean     -60.1   13.9        -4.33  1.53e- 5
+    ##  6 da_ppt_mean_mm   -15.2    9.46       -1.60  1.09e- 1
+    ##  7 nf_bfl_dry_cfs   -84.2   12.9        -6.55  6.74e-11
+    ##  8 nf_bfl_wet_cfs    -4.43   8.63       -0.514 6.08e- 1
+    ##  9 erom_q_ma_cfs      9.57   1.92        4.99  6.44e- 7
+    ## 10 erom_v_ma_fps     -1.24   4.78       -0.260 7.95e- 1
     ## # ℹ 52 more rows
 
 ``` r
@@ -752,7 +754,7 @@ lasso_si |> glance()
     ## # A tibble: 1 × 12
     ##   r.squared adj.r.squared  sigma statistic p.value    df logLik    AIC    BIC
     ##       <dbl>         <dbl>  <dbl>     <dbl>   <dbl> <dbl>  <dbl>  <dbl>  <dbl>
-    ## 1     0.668         0.667 0.0870      642.       0    11  3603. -7180. -7100.
+    ## 1     0.682         0.681 0.0852      682.       0    11  3677. -7328. -7247.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
@@ -762,18 +764,18 @@ lasso_si |> tidy()
     ## # A tibble: 12 × 5
     ##    term                                    estimate std.error statistic  p.value
     ##    <chr>                                      <dbl>     <dbl>     <dbl>    <dbl>
-    ##  1 (Intercept)                              4.68e-1   0.00147   319.    0       
-    ##  2 bf_depth_m                              -6.96e-3   0.00316    -2.21  2.75e- 2
-    ##  3 loc_bfi                                  1.21e-2   0.00316     3.84  1.26e- 4
-    ##  4 species_fish                            -8.67e-3   0.00184    -4.71  2.52e- 6
-    ##  5 hyd_cls_Low.volume.snowmelt.and.rain     7.81e-2   0.00560    13.9   4.66e-43
-    ##  6 flow_norm_cfs_x_sinuosity               -1.77e-2   0.00193    -9.17  7.83e-20
-    ##  7 flow_norm_cfs_x_erom_v_ma_fps           -1.90e-3   0.00285    -0.669 5.03e- 1
-    ##  8 flow_norm_cfs_x_bf_depth_m               5.81e-3   0.0114      0.508 6.11e- 1
-    ##  9 flow_norm_cfs_x_loc_pct_sand            -8.56e-2   0.0120     -7.14  1.15e-12
-    ## 10 flow_norm_cfs_x_vb_bf_w_ratio            9.55e-4   0.00235     0.406 6.85e- 1
-    ## 11 flow_norm_cfs_x_frac_leveed_longitudin… -1.22e-2   0.00286    -4.27  2.00e- 5
-    ## 12 flow_norm_cfs_x_nf_bfl_wet_cfs_norm      5.77e-2   0.00506    11.4   1.17e-29
+    ##  1 (Intercept)                              0.498     0.00144   347.    0       
+    ##  2 bf_depth_m                              -0.00343   0.00308    -1.11  2.66e- 1
+    ##  3 loc_bfi                                  0.00630   0.00310     2.03  4.22e- 2
+    ##  4 species_fish                            -0.0127    0.00180    -7.09  1.62e-12
+    ##  5 hyd_cls_Low.volume.snowmelt.and.rain     0.0887    0.00548    16.2   5.70e-57
+    ##  6 flow_norm_cfs_x_sinuosity               -0.0148    0.00187    -7.91  3.34e-15
+    ##  7 flow_norm_cfs_x_erom_v_ma_fps            0.00230   0.00286     0.805 4.21e- 1
+    ##  8 flow_norm_cfs_x_bf_depth_m               0.0168    0.0111      1.51  1.31e- 1
+    ##  9 flow_norm_cfs_x_loc_pct_sand            -0.0787    0.0124     -6.35  2.38e-10
+    ## 10 flow_norm_cfs_x_loc_permeability        -0.00536   0.00260    -2.06  3.96e- 2
+    ## 11 flow_norm_cfs_x_frac_leveed_longitudin… -0.0141    0.00225    -6.28  3.80e-10
+    ## 12 flow_norm_cfs_x_nf_bfl_wet_cfs_norm      0.0775    0.00521    14.9   1.29e-48
 
 ``` r
 lasso_si$fit$fit |> dotwhisker::dwplot()
@@ -877,27 +879,27 @@ lasso_sd |> glance()
     ## # A tibble: 1 × 12
     ##   r.squared adj.r.squared sigma statistic p.value    df logLik   AIC   BIC
     ##       <dbl>         <dbl> <dbl>     <dbl>   <dbl> <dbl>  <dbl> <dbl> <dbl>
-    ## 1     0.978         0.978 0.418     7338.       0    21 -1907. 3861. 4002.
+    ## 1     0.979         0.979 0.401     6347.       0    26 -1763. 3582. 3755.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
 lasso_sd |> tidy()
 ```
 
-    ## # A tibble: 22 × 5
-    ##    term              estimate std.error statistic   p.value
-    ##    <chr>                <dbl>     <dbl>     <dbl>     <dbl>
-    ##  1 (Intercept)         4.72     0.00704   670.    0        
-    ##  2 da_elev_mean       -0.140    0.0261     -5.38  7.81e-  8
-    ##  3 da_ppt_mean_mm      2.66     0.0805     33.1   6.19e-209
-    ##  4 nf_bfl_wet_cfs      0.742    0.0551     13.4   3.06e- 40
-    ##  5 bf_w_d_ratio        0.156    0.0247      6.30  3.27e- 10
-    ##  6 mean_ndvi           0.0104   0.0172      0.604 5.46e-  1
-    ##  7 loc_pct_clay       -0.0641   0.0656     -0.977 3.29e-  1
-    ##  8 loc_pct_sand        0.489    0.0555      8.82  1.83e- 18
-    ##  9 loc_bedrock_depth   0.354    0.0403      8.79  2.31e- 18
-    ## 10 loc_ppt_mean_mm     0.180    0.0631      2.85  4.39e-  3
-    ## # ℹ 12 more rows
+    ## # A tibble: 27 × 5
+    ##    term           estimate std.error statistic  p.value
+    ##    <chr>             <dbl>     <dbl>     <dbl>    <dbl>
+    ##  1 (Intercept)      4.79     0.00676   708.    0       
+    ##  2 da_area_sq_km   -6.05     0.852      -7.11  1.43e-12
+    ##  3 da_elev_mean    -0.753    0.0581    -13.0   1.53e-37
+    ##  4 da_ppt_mean_mm   1.66     0.133      12.5   4.50e-35
+    ##  5 nf_bfl_dry_cfs   6.18     0.571      10.8   6.90e-27
+    ##  6 nf_bfl_wet_cfs   1.29     0.469       2.74  6.10e- 3
+    ##  7 bf_w_d_ratio     0.133    0.0245      5.42  6.28e- 8
+    ##  8 mean_ndvi        0.0263   0.0168      1.56  1.19e- 1
+    ##  9 loc_pct_clay     0.0296   0.0913      0.324 7.46e- 1
+    ## 10 loc_pct_sand     0.595    0.0543     11.0   1.67e-27
+    ## # ℹ 17 more rows
 
 ``` r
 lasso_sd$fit$fit |> dotwhisker::dwplot()
@@ -1042,8 +1044,8 @@ rfr_si$fit$fit |> print()
     ## Target node size:                 5 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.0008747244 
-    ## R squared (OOB):                  0.9615537
+    ## OOB prediction error (MSE):       0.0008033711 
+    ## R squared (OOB):                  0.9646423
 
 ``` r
 rfr_si_res <- 
@@ -1139,8 +1141,8 @@ rfr_sd$fit$fit |> print()
     ## Target node size:                 5 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.001178401 
-    ## R squared (OOB):                  0.9998492
+    ## OOB prediction error (MSE):       0.001159747 
+    ## R squared (OOB):                  0.9998496
 
 ``` r
 rfr_sd_res <-
@@ -1269,8 +1271,8 @@ sd_pred <-
     ## Columns: 4
     ## $ comid               <dbl> 342439, 342439, 342439, 342439, 342439, 342439, 34…
     ## $ flow_cfs            <dbl> 4.109, 25.000, 35.000, 50.000, 71.000, 100.000, 14…
-    ## $ log_wua_per_lf_pred <dbl> 1.784911, 1.838994, 1.837752, 1.837089, 1.840641, …
-    ## $ wua_per_lf_pred     <dbl> 5.959050, 6.290206, 6.282399, 6.278238, 6.300578, …
+    ## $ log_wua_per_lf_pred <dbl> 1.791700, 1.908058, 1.908147, 1.902353, 1.884718, …
+    ## $ wua_per_lf_pred     <dbl> 5.999640, 6.739984, 6.740587, 6.701647, 6.584498, …
 
 ``` r
 si_pred <- 
@@ -1290,9 +1292,9 @@ si_pred <-
     ## Columns: 5
     ## $ comid           <dbl> 342439, 342439, 342439, 342439, 342439, 342439, 342439…
     ## $ flow_norm_cfs   <dbl> 1.000000, 6.084205, 8.517888, 12.168411, 17.279143, 24…
-    ## $ hsi_frac_pred   <dbl> 0.6258175, 0.5177464, 0.4969831, 0.4845514, 0.4759066,…
+    ## $ hsi_frac_pred   <dbl> 0.6497609, 0.5270429, 0.5098045, 0.4933380, 0.4818982,…
     ## $ bf_width_ft     <dbl> 21.09580, 21.09580, 21.09580, 21.09580, 21.09580, 21.0…
-    ## $ wua_per_lf_pred <dbl> 13.202122, 10.922274, 10.484256, 10.222000, 10.039631,…
+    ## $ wua_per_lf_pred <dbl> 13.707225, 11.118392, 10.754735, 10.407361, 10.166028,…
 
 Example plot of habitat area per linear foot at 800 cfs (scale-dependent
 model)

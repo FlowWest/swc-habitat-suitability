@@ -1,7 +1,7 @@
 Exploratory Modeling
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-03-04
+2024-03-05
 
 - [Exploration and PCA of training
   data](#exploration-and-pca-of-training-data)
@@ -60,7 +60,7 @@ if(FALSE){
 }
   
 # Limit to flow ranges covered by all training data, and interpolate gaps
-interp_flows <- seq(300,5000,100)
+interp_flows <- seq(300,15000,100)
 if(TRUE){
   flow_to_suitable_area <- 
     flow_to_suitable_area |>
@@ -68,7 +68,8 @@ if(TRUE){
     complete(flow_cfs = interp_flows) |>
     arrange(dataset, comid, flow_cfs) |>
     mutate(across(c(area_tot_ft2, area_wua_ft2, hsi_frac), function(var) zoo::na.approx(var, x = flow_cfs, na.rm=F))) |>
-    filter(flow_cfs %in% interp_flows)
+    filter(flow_cfs %in% interp_flows) |>
+    filter(!is.na(hsi_frac))
 }
 
 train_data <- flowlines |> st_drop_geometry() |>
@@ -80,7 +81,7 @@ train_data <- flowlines |> st_drop_geometry() |>
   glimpse()
 ```
 
-    ## Rows: 4,848
+    ## Rows: 13,104
     ## Columns: 124
 
     ## Warning in grepl(",", levels(x), fixed = TRUE): input string 3 is invalid in
@@ -331,7 +332,7 @@ td <- train_data |>
   drop_na() |> glimpse()
 ```
 
-    ## Rows: 4,660
+    ## Rows: 12,660
     ## Columns: 41
     ## $ dataset                  <chr> "Lower Yuba River", "Lower Yuba River", "Lowe…
     ## $ comid                    <dbl> 8062583, 8062583, 8062583, 8062583, 8062583, …
@@ -376,14 +377,53 @@ td <- train_data |>
     ## $ nf_bfl_wet_cfs_norm      <dbl> 0.3487843, 0.3487843, 0.3487843, 0.3487843, 0…
 
 ``` r
-interp_flows <- seq(700,5000,100)
+td |> 
+  group_by(dataset) |>
+  select_if(is.numeric) |>
+  pivot_longer(cols = hsi_frac:last_col()) |>
+  group_by(dataset, name) |>
+  summarize(min = min(value), max=max(value))
+```
+
+    ## `summarise()` has grouped output by 'dataset'. You can override using the
+    ## `.groups` argument.
+
+    ## # A tibble: 111 × 4
+    ## # Groups:   dataset [3]
+    ##    dataset    name                  min      max
+    ##    <chr>      <chr>               <dbl>    <dbl>
+    ##  1 Deer Creek bf_depth_m          1.66     1.94 
+    ##  2 Deer Creek bf_w_d_ratio       16.6     19.9  
+    ##  3 Deer Creek bio_aq_rank_sw      5        5    
+    ##  4 Deer Creek da_area_sq_km     543.     573.   
+    ##  5 Deer Creek da_avg_slope       26.0     27.6  
+    ##  6 Deer Creek da_elev_mean     1206.    1279.   
+    ##  7 Deer Creek da_k_erodibility    0.294    0.297
+    ##  8 Deer Creek da_ppt_mean_mm   1437.    1484.   
+    ##  9 Deer Creek erom_q_ma_cfs     341.     347.   
+    ## 10 Deer Creek erom_v_ma_fps       0.827    1.76 
+    ## # ℹ 101 more rows
+
+``` r
+domain <- td |> 
+  select_if(is.numeric) |>
+  select(-flow_cfs) |>
+  pivot_longer(cols = hsi_frac:last_col()) |>
+  group_by(name) |>
+  summarize(min=min(value), max=max(value)) |>
+  mutate(value = map2(min, max, function(x, y) list(min=x, max=y))) |>
+  select(name, value) |> deframe()
+```
+
+``` r
+interp_flows_plot <- seq(700,5000,100)
 td |> 
   # interpolate so that we are comparing like flows with like
   group_by(dataset, comid) |>
-  complete(flow_cfs = interp_flows) |>
+  complete(flow_cfs = interp_flows_plot) |>
   arrange(dataset, comid, flow_cfs) |>
   mutate(across(hsi_frac:last_col(), function(var) zoo::na.approx(var, x = flow_cfs))) |>
-  filter(flow_cfs %in% interp_flows) |>
+  filter(flow_cfs %in% interp_flows_plot) |>
   ungroup() |>
   # summarize by quantile of each variable
   mutate(across(slope:last_col(), function(x) factor(cut(x, breaks=5, labels=F)))) |>
@@ -402,8 +442,20 @@ td |>
 
 ``` r
 set.seed(47)
-td_split <- group_initial_split(td, group=comid, strata=dataset)
+td_split <- group_initial_split(td |> mutate(strata=paste(hyd_cls, dataset)), strata=strata, group=comid)
+
+test_comids <- testing(td_split) |> group_by(dataset, hyd_cls, comid) |> summarize() |> group_by(dataset, hyd_cls) |> filter(row_number()<=6) |> pull(comid)
 ```
+
+    ## `summarise()` has grouped output by 'dataset', 'hyd_cls'. You can override
+    ## using the `.groups` argument.
+
+``` r
+test_comids
+```
+
+    ##  [1] 12069362 12071090 12071480  7981734  7981752  7981768  7982806  7982808
+    ##  [9]  7982840  2821822
 
 ## Modeling
 
@@ -461,7 +513,7 @@ si_rec <- recipe(data=training(td_split),
   #step_interact(terms = ~hqt_gradient_class:all_numeric_predictors())
   step_naomit(all_predictors()) |>
   step_zv(all_predictors()) |>
-  step_normalize(all_numeric_predictors())#, -flow_cfs)
+  step_normalize(all_numeric_predictors()) #, -flow_cfs)
 
 lm_si <- workflow() |>
   add_recipe(si_rec) |>
@@ -472,9 +524,9 @@ lm_si |> glance()
 ```
 
     ## # A tibble: 1 × 12
-    ##   r.squared adj.r.squared  sigma statistic p.value    df logLik    AIC    BIC
-    ##       <dbl>         <dbl>  <dbl>     <dbl>   <dbl> <dbl>  <dbl>  <dbl>  <dbl>
-    ## 1     0.749         0.746 0.0760      211.       0    49  4095. -8089. -7774.
+    ##   r.squared adj.r.squared  sigma statistic p.value    df logLik     AIC     BIC
+    ##       <dbl>         <dbl>  <dbl>     <dbl>   <dbl> <dbl>  <dbl>   <dbl>   <dbl>
+    ## 1     0.724         0.723 0.0728      548.       0    49 12341. -24581. -24212.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
@@ -484,16 +536,16 @@ lm_si |> tidy()
     ## # A tibble: 50 × 5
     ##    term             estimate std.error statistic  p.value
     ##    <chr>               <dbl>     <dbl>     <dbl>    <dbl>
-    ##  1 (Intercept)       0.498     0.00128   389.    0       
-    ##  2 flow_norm_cfs    -0.769     1.09       -0.708 4.79e- 1
-    ##  3 slope             0.530     0.0864      6.13  9.83e-10
-    ##  4 sinuosity        -0.00362   0.00296    -1.22  2.22e- 1
-    ##  5 erom_v_ma_fps    -0.503     0.0762     -6.59  4.91e-11
-    ##  6 bf_depth_m        0.0167    0.0358      0.467 6.41e- 1
-    ##  7 bf_w_d_ratio      0.0107    0.0180      0.593 5.53e- 1
-    ##  8 da_k_erodibility -0.140     0.0359     -3.91  9.59e- 5
-    ##  9 da_avg_slope     -0.0268    0.0163     -1.64  1.01e- 1
-    ## 10 mean_ndvi         0.00701   0.00329     2.13  3.32e- 2
+    ##  1 (Intercept)       0.395    0.000719    549.   0       
+    ##  2 flow_norm_cfs    -2.25     0.876        -2.57 1.03e- 2
+    ##  3 slope            -0.433    0.0749       -5.78 7.75e- 9
+    ##  4 sinuosity        -0.00264  0.00179      -1.47 1.41e- 1
+    ##  5 erom_v_ma_fps     0.348    0.0658        5.28 1.28e- 7
+    ##  6 bf_depth_m       -0.0729   0.0306       -2.38 1.72e- 2
+    ##  7 bf_w_d_ratio      0.0257   0.0160        1.61 1.07e- 1
+    ##  8 da_k_erodibility -0.0979   0.0265       -3.70 2.16e- 4
+    ##  9 da_avg_slope     -0.0180   0.0154       -1.17 2.43e- 1
+    ## 10 mean_ndvi         0.0168   0.00255       6.58 4.79e-11
     ## # ℹ 40 more rows
 
 ``` r
@@ -523,7 +575,7 @@ lm_si_res |>
 lm_si_res |> 
   left_join(select(flowline_attributes, comid, erom_q_ma_cfs)) |>
   mutate(flow_cfs = flow_norm_cfs * erom_q_ma_cfs) |>
-  filter(flow_cfs %in% c(400,600,800,1200,1600,2400,3200,4800)) |>
+  filter(flow_cfs %in% c(300,500,1000,1500,3000,5000,10000,15000)) |>
   ggplot() + geom_point(aes(x=hsi_frac, y=hsi_frac_pred, color=flow_cfs)) + 
   facet_wrap(~flow_cfs, ncol = 4) +
   coord_fixed() + geom_abline() + scale_color_viridis_c(name = "Flow (cfs)") + 
@@ -534,7 +586,7 @@ lm_si_res |>
 ![](model-expl_files/figure-gfm/lm-si-3.png)<!-- -->
 
 ``` r
-lm_si_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
+lm_si_res |> filter(comid %in% test_comids) |>
   left_join(transmute(flowline_attributes, comid, erom_q_ma_cfs)) |> #, chan_width_ft=chan_width_m/0.3048)) |>
   ggplot(aes(x=flow_norm_cfs*erom_q_ma_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=hsi_frac_pred*100, color="predicted", group=1)) + geom_line(aes(y=hsi_frac*100, color="actual", group=1)) + 
@@ -635,7 +687,7 @@ lm_sd |> glance()
     ## # A tibble: 1 × 12
     ##   r.squared adj.r.squared sigma statistic p.value    df logLik   AIC   BIC
     ##       <dbl>         <dbl> <dbl>     <dbl>   <dbl> <dbl>  <dbl> <dbl> <dbl>
-    ## 1     0.985         0.985 0.341     3755.       0    61 -1179. 2484. 2873.
+    ## 1     0.979         0.978 0.349     7620.       0    61 -3721. 7569. 8025.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
@@ -645,16 +697,16 @@ lm_sd |> tidy()
     ## # A tibble: 62 × 5
     ##    term           estimate std.error statistic  p.value
     ##    <chr>             <dbl>     <dbl>     <dbl>    <dbl>
-    ##  1 (Intercept)        4.79   0.00576   831.    0       
-    ##  2 flow_cfs        -297.   102.         -2.92  3.49e- 3
-    ##  3 slope             -7.83   2.92       -2.68  7.35e- 3
-    ##  4 da_area_sq_km    -37.8   22.1        -1.71  8.75e- 2
-    ##  5 da_elev_mean     -60.1   13.9        -4.33  1.53e- 5
-    ##  6 da_ppt_mean_mm   -15.2    9.46       -1.60  1.09e- 1
-    ##  7 nf_bfl_dry_cfs   -84.2   12.9        -6.55  6.74e-11
-    ##  8 nf_bfl_wet_cfs    -4.43   8.63       -0.514 6.08e- 1
-    ##  9 erom_q_ma_cfs      9.57   1.92        4.99  6.44e- 7
-    ## 10 erom_v_ma_fps     -1.24   4.78       -0.260 7.95e- 1
+    ##  1 (Intercept)        5.09   0.00344   1478.   0       
+    ##  2 flow_cfs         297.   117.           2.54 1.12e- 2
+    ##  3 slope              7.14   2.01         3.55 3.84e- 4
+    ##  4 da_area_sq_km   -144.    28.7         -5.02 5.31e- 7
+    ##  5 da_elev_mean      58.0    9.17         6.33 2.60e-10
+    ##  6 da_ppt_mean_mm    61.7    6.31         9.77 1.94e-22
+    ##  7 nf_bfl_dry_cfs   -19.2    8.89        -2.16 3.10e- 2
+    ##  8 nf_bfl_wet_cfs    64.7    6.06        10.7  1.82e-26
+    ##  9 erom_q_ma_cfs      5.71   2.38         2.40 1.63e- 2
+    ## 10 erom_v_ma_fps    -11.6    4.22        -2.74 6.21e- 3
     ## # ℹ 52 more rows
 
 ``` r
@@ -681,7 +733,7 @@ lm_sd_res |>
 
 ``` r
 lm_sd_res |>
-  filter(flow_cfs %in% c(400,600,800,1200,1600,2400,3200,4800)) |>
+  filter(flow_cfs %in% c(300,500,1000,1500,3000,5000,10000,15000)) |>
   ggplot() + geom_point(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs)) + 
   facet_wrap(~flow_cfs, ncol = 4) +
   scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c(name="Flow (cfs)") + 
@@ -692,7 +744,7 @@ lm_sd_res |>
 ![](model-expl_files/figure-gfm/lm-sd-3.png)<!-- -->
 
 ``` r
-lm_sd_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
+lm_sd_res |> filter(comid %in% test_comids) |>
   ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
   scale_y_log10() + xlab("Flow (cfs)") + ylab("Suitable Habitat Area per LF Channel (ft)")
@@ -759,9 +811,9 @@ lasso_si |> glance()
 ```
 
     ## # A tibble: 1 × 12
-    ##   r.squared adj.r.squared  sigma statistic p.value    df logLik    AIC    BIC
-    ##       <dbl>         <dbl>  <dbl>     <dbl>   <dbl> <dbl>  <dbl>  <dbl>  <dbl>
-    ## 1     0.682         0.681 0.0852      682.       0    11  3677. -7328. -7247.
+    ##   r.squared adj.r.squared  sigma statistic p.value    df logLik     AIC     BIC
+    ##       <dbl>         <dbl>  <dbl>     <dbl>   <dbl> <dbl>  <dbl>   <dbl>   <dbl>
+    ## 1     0.665         0.664 0.0802     1846.       0    11 11334. -22642. -22548.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
@@ -769,20 +821,20 @@ lasso_si |> tidy()
 ```
 
     ## # A tibble: 12 × 5
-    ##    term                                    estimate std.error statistic  p.value
-    ##    <chr>                                      <dbl>     <dbl>     <dbl>    <dbl>
-    ##  1 (Intercept)                              0.498     0.00144   347.    0       
-    ##  2 bf_depth_m                              -0.00343   0.00308    -1.11  2.66e- 1
-    ##  3 loc_bfi                                  0.00630   0.00310     2.03  4.22e- 2
-    ##  4 species_fish                            -0.0127    0.00180    -7.09  1.62e-12
-    ##  5 hyd_cls_Low.volume.snowmelt.and.rain     0.0887    0.00548    16.2   5.70e-57
-    ##  6 flow_norm_cfs_x_sinuosity               -0.0148    0.00187    -7.91  3.34e-15
-    ##  7 flow_norm_cfs_x_erom_v_ma_fps            0.00230   0.00286     0.805 4.21e- 1
-    ##  8 flow_norm_cfs_x_bf_depth_m               0.0168    0.0111      1.51  1.31e- 1
-    ##  9 flow_norm_cfs_x_loc_pct_sand            -0.0787    0.0124     -6.35  2.38e-10
-    ## 10 flow_norm_cfs_x_loc_permeability        -0.00536   0.00260    -2.06  3.96e- 2
-    ## 11 flow_norm_cfs_x_frac_leveed_longitudin… -0.0141    0.00225    -6.28  3.80e-10
-    ## 12 flow_norm_cfs_x_nf_bfl_wet_cfs_norm      0.0775    0.00521    14.9   1.29e-48
+    ##    term                                   estimate std.error statistic   p.value
+    ##    <chr>                                     <dbl>     <dbl>     <dbl>     <dbl>
+    ##  1 (Intercept)                             0.395    0.000792    499.   0        
+    ##  2 mean_ndvi                              -0.00159  0.00118      -1.35 1.77e-  1
+    ##  3 loc_bfi                                 0.0269   0.00188      14.3  3.83e- 46
+    ##  4 vb_bf_w_ratio                           0.00444  0.00139       3.19 1.44e-  3
+    ##  5 species_fish                           -0.0103   0.00108      -9.59 1.10e- 21
+    ##  6 hyd_cls_Low.volume.snowmelt.and.rain    0.0291   0.00250      11.7  3.03e- 31
+    ##  7 flow_norm_cfs_x_sinuosity              -0.0187   0.00102     -18.2  3.26e- 73
+    ##  8 flow_norm_cfs_x_erom_v_ma_fps          -0.00810  0.00112      -7.25 4.38e- 13
+    ##  9 flow_norm_cfs_x_bf_depth_m             -0.0802   0.00246     -32.6  9.82e-222
+    ## 10 flow_norm_cfs_x_vb_bf_w_ratio           0.00998  0.00158       6.32 2.72e- 10
+    ## 11 flow_norm_cfs_x_nf_bfl_wet_cfs_norm     0.0360   0.00319      11.3  2.52e- 29
+    ## 12 flow_norm_cfs_x_hqt_gradient_class_Be…  0.00499  0.00161       3.10 1.92e-  3
 
 ``` r
 lasso_si$fit$fit |> dotwhisker::dwplot()
@@ -812,7 +864,7 @@ lasso_si_res |>
 lasso_si_res |> 
   left_join(select(flowline_attributes, comid, erom_q_ma_cfs)) |>
   mutate(flow_cfs = flow_norm_cfs * erom_q_ma_cfs) |>
-  filter(flow_cfs %in% c(400,600,800,1200,1600,2400,3200,4800)) |>
+  filter(flow_cfs %in% c(300,500,1000,1500,3000,5000,10000,15000)) |>
   ggplot() + geom_point(aes(x=hsi_frac, y=hsi_frac_pred, color=flow_cfs)) + 
   facet_wrap(~flow_cfs, ncol = 4) +
   coord_fixed() + geom_abline() + scale_color_viridis_c(name = "Flow (cfs)") + 
@@ -823,7 +875,7 @@ lasso_si_res |>
 ![](model-expl_files/figure-gfm/lasso-si-3.png)<!-- -->
 
 ``` r
-lasso_si_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
+lasso_si_res |> filter(comid %in% test_comids) |>
   left_join(transmute(flowline_attributes, comid, erom_q_ma_cfs)) |> #, chan_width_ft=chan_width_m/0.3048)) |>
   ggplot(aes(x=flow_norm_cfs*erom_q_ma_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=hsi_frac_pred*100, color="predicted", group=1)) + geom_line(aes(y=hsi_frac*100, color="actual", group=1)) + 
@@ -884,29 +936,29 @@ lasso_sd |> glance()
 ```
 
     ## # A tibble: 1 × 12
-    ##   r.squared adj.r.squared sigma statistic p.value    df logLik   AIC   BIC
-    ##       <dbl>         <dbl> <dbl>     <dbl>   <dbl> <dbl>  <dbl> <dbl> <dbl>
-    ## 1     0.979         0.979 0.401     6347.       0    26 -1763. 3582. 3755.
+    ##   r.squared adj.r.squared sigma statistic p.value    df logLik    AIC    BIC
+    ##       <dbl>         <dbl> <dbl>     <dbl>   <dbl> <dbl>  <dbl>  <dbl>  <dbl>
+    ## 1     0.966         0.966 0.438    12688.       0    23 -6062. 12175. 12356.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
 lasso_sd |> tidy()
 ```
 
-    ## # A tibble: 27 × 5
-    ##    term           estimate std.error statistic  p.value
-    ##    <chr>             <dbl>     <dbl>     <dbl>    <dbl>
-    ##  1 (Intercept)      4.79     0.00676   708.    0       
-    ##  2 da_area_sq_km   -6.05     0.852      -7.11  1.43e-12
-    ##  3 da_elev_mean    -0.753    0.0581    -13.0   1.53e-37
-    ##  4 da_ppt_mean_mm   1.66     0.133      12.5   4.50e-35
-    ##  5 nf_bfl_dry_cfs   6.18     0.571      10.8   6.90e-27
-    ##  6 nf_bfl_wet_cfs   1.29     0.469       2.74  6.10e- 3
-    ##  7 bf_w_d_ratio     0.133    0.0245      5.42  6.28e- 8
-    ##  8 mean_ndvi        0.0263   0.0168      1.56  1.19e- 1
-    ##  9 loc_pct_clay     0.0296   0.0913      0.324 7.46e- 1
-    ## 10 loc_pct_sand     0.595    0.0543     11.0   1.67e-27
-    ## # ℹ 17 more rows
+    ## # A tibble: 24 × 5
+    ##    term              estimate std.error statistic  p.value
+    ##    <chr>                <dbl>     <dbl>     <dbl>    <dbl>
+    ##  1 (Intercept)         5.09     0.00432  1178.    0       
+    ##  2 da_area_sq_km       0.135    0.654       0.207 8.36e- 1
+    ##  3 da_elev_mean       -0.0804   0.0664     -1.21  2.26e- 1
+    ##  4 da_ppt_mean_mm      2.42     0.122      19.9   1.95e-86
+    ##  5 nf_bfl_dry_cfs      2.00     0.655       3.06  2.24e- 3
+    ##  6 erom_q_ma_cfs      -0.369    0.105      -3.51  4.44e- 4
+    ##  7 bf_w_d_ratio       -0.630    0.0334    -18.9   5.18e-78
+    ##  8 loc_bfi            -0.0240   0.0211     -1.14  2.56e- 1
+    ##  9 loc_pct_sand       -0.856    0.136      -6.29  3.21e-10
+    ## 10 loc_bedrock_depth   1.26     0.134       9.37  9.03e-21
+    ## # ℹ 14 more rows
 
 ``` r
 lasso_sd$fit$fit |> dotwhisker::dwplot()
@@ -932,7 +984,7 @@ lasso_sd_res |>
 
 ``` r
 lasso_sd_res |>
-  filter(flow_cfs %in% c(400,600,800,1200,1600,2400,3200,4800)) |>
+  filter(flow_cfs %in% c(300,500,1000,1500,3000,5000,10000,15000)) |>
   ggplot() + geom_point(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs)) + 
   facet_wrap(~flow_cfs, ncol = 4) +
   scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c(name="Flow (cfs)") + 
@@ -943,7 +995,7 @@ lasso_sd_res |>
 ![](model-expl_files/figure-gfm/lasso-sd-3.png)<!-- -->
 
 ``` r
-lasso_sd_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
+lasso_sd_res |> filter(comid %in% test_comids) |>
   ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
   scale_y_log10() + xlab("Flow (cfs)") + ylab("Suitable Habitat Area per LF Channel (ft)")
@@ -1007,11 +1059,6 @@ rfr_si_tune <-
   tune_grid(resamples = folds,
             grid = rfr_grid,
             metrics = val_metrics)
-```
-
-    ## Warning: package 'ranger' was built under R version 4.3.2
-
-``` r
 rfr_si_tune |>
   collect_metrics() |>
   ggplot(aes(x = trees, y = mean, color = .metric)) +
@@ -1022,8 +1069,6 @@ rfr_si_tune |>
   facet_wrap(. ~ .metric, ncol = 1, scales="free") +
   theme(legend.position = "none") + scale_x_log10()
 ```
-
-![](model-expl_files/figure-gfm/rfr-si-tune-1.png)<!-- -->
 
 ``` r
 rfr_spec <- rand_forest(mode = "regression", trees = 2^8)
@@ -1045,14 +1090,14 @@ rfr_si$fit$fit |> print()
     ## 
     ## Type:                             Regression 
     ## Number of trees:                  256 
-    ## Sample size:                      3516 
+    ## Sample size:                      10256 
     ## Number of independent variables:  49 
     ## Mtry:                             7 
     ## Target node size:                 5 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.0008033711 
-    ## R squared (OOB):                  0.9646423
+    ## OOB prediction error (MSE):       0.0002116388 
+    ## R squared (OOB):                  0.9889484
 
 ``` r
 rfr_si_res <- 
@@ -1076,7 +1121,7 @@ rfr_si_res |>
 rfr_si_res |> 
   left_join(select(flowline_attributes, comid, erom_q_ma_cfs)) |>
   mutate(flow_cfs = flow_norm_cfs * erom_q_ma_cfs) |>
-  filter(flow_cfs %in% c(400,600,800,1200,1600,2400,3200,4800)) |>
+  filter(flow_cfs %in% c(300,500,1000,1500,3000,5000,10000,15000)) |>
   ggplot() + geom_point(aes(x=hsi_frac, y=hsi_frac_pred, color=flow_cfs)) + 
   facet_wrap(~flow_cfs, ncol = 4) +
   coord_fixed() + geom_abline() + scale_color_viridis_c(name = "Flow (cfs)") + 
@@ -1087,7 +1132,7 @@ rfr_si_res |>
 ![](model-expl_files/figure-gfm/rfr-si-2.png)<!-- -->
 
 ``` r
-rfr_si_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
+rfr_si_res |> filter(comid %in% test_comids) |>
   left_join(transmute(flowline_attributes, comid, erom_q_ma_cfs)) |> #, chan_width_ft=chan_width_m/0.3048)) |>
   ggplot(aes(x=flow_norm_cfs*erom_q_ma_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=hsi_frac_pred*100, color="predicted", group=1)) + geom_line(aes(y=hsi_frac*100, color="actual", group=1)) + 
@@ -1120,8 +1165,6 @@ rfr_sd_tune |>
   theme(legend.position = "none") + scale_x_log10()
 ```
 
-![](model-expl_files/figure-gfm/rfr-sd-tune-1.png)<!-- -->
-
 ``` r
 rfr_spec <- rand_forest(mode = "regression", trees = 2^8)
 
@@ -1142,14 +1185,14 @@ rfr_sd$fit$fit |> print()
     ## 
     ## Type:                             Regression 
     ## Number of trees:                  256 
-    ## Sample size:                      3516 
+    ## Sample size:                      10256 
     ## Number of independent variables:  61 
     ## Mtry:                             7 
     ## Target node size:                 5 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.001159747 
-    ## R squared (OOB):                  0.9998496
+    ## OOB prediction error (MSE):       0.0004525351 
+    ## R squared (OOB):                  0.9999197
 
 ``` r
 rfr_sd_res <-
@@ -1169,7 +1212,7 @@ rfr_sd_res |>
 
 ``` r
 rfr_sd_res |>
-  filter(flow_cfs %in% c(400,600,800,1200,1600,2400,3200,4800)) |>
+  filter(flow_cfs %in% c(300,500,1000,1500,3000,5000,10000,15000)) |>
   ggplot() + geom_point(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs)) + 
   facet_wrap(~flow_cfs, ncol = 4) +
   scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c(name="Flow (cfs)") + 
@@ -1180,7 +1223,7 @@ rfr_sd_res |>
 ![](model-expl_files/figure-gfm/rfr-sd-2.png)<!-- -->
 
 ``` r
-rfr_sd_res |> filter(comid %in% head(unique(testing(td_split)$comid),12)) |>
+rfr_sd_res |> filter(comid %in% test_comids) |>
   ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
   scale_y_log10() + xlab("Flow (cfs)") + ylab("Suitable Habitat Area per LF Channel (ft)") 
@@ -1264,7 +1307,7 @@ pd <- flowline_attributes |>
 ``` r
 sd_pred <- 
   sd_rec |> 
-  prep(td) |> 
+  prep(training(td_split)) |> 
   bake(pd) |> 
   bind_cols(pd |> transmute(comid, flow_cfs_orig=flow_cfs)) |>
   drop_na() %>% # need to use magrittr pipe for this purpose
@@ -1278,13 +1321,13 @@ sd_pred <-
     ## Columns: 4
     ## $ comid               <dbl> 342439, 342439, 342439, 342439, 342439, 342439, 34…
     ## $ flow_cfs            <dbl> 4.109, 25.000, 35.000, 50.000, 71.000, 100.000, 14…
-    ## $ log_wua_per_lf_pred <dbl> 1.791700, 1.908058, 1.908147, 1.902353, 1.884718, …
-    ## $ wua_per_lf_pred     <dbl> 5.999640, 6.739984, 6.740587, 6.701647, 6.584498, …
+    ## $ log_wua_per_lf_pred <dbl> 1.876630, 2.043876, 2.042967, 2.042590, 2.015825, …
+    ## $ wua_per_lf_pred     <dbl> 6.531456, 7.720472, 7.713464, 7.710556, 7.506915, …
 
 ``` r
 si_pred <- 
   si_rec |> 
-  prep(td) |> 
+  prep(training(td_split)) |> 
   bake(pd) |> 
   bind_cols(pd |> transmute(comid, flow_norm_cfs_orig=flow_norm_cfs)) |>
   drop_na() %>% # need to use magrittr pipe for this purpose
@@ -1299,9 +1342,9 @@ si_pred <-
     ## Columns: 5
     ## $ comid           <dbl> 342439, 342439, 342439, 342439, 342439, 342439, 342439…
     ## $ flow_norm_cfs   <dbl> 1.000000, 6.084205, 8.517888, 12.168411, 17.279143, 24…
-    ## $ hsi_frac_pred   <dbl> 0.6497609, 0.5270429, 0.5098045, 0.4933380, 0.4818982,…
+    ## $ hsi_frac_pred   <dbl> 0.5914188, 0.4645539, 0.4574729, 0.4477992, 0.4424751,…
     ## $ bf_width_ft     <dbl> 21.09580, 21.09580, 21.09580, 21.09580, 21.09580, 21.0…
-    ## $ wua_per_lf_pred <dbl> 13.707225, 11.118392, 10.754735, 10.407361, 10.166028,…
+    ## $ wua_per_lf_pred <dbl> 12.476453, 9.800136, 9.650756, 9.446683, 9.334366, 9.3…
 
 Example plot of habitat area per linear foot at 800 cfs (scale-dependent
 model)
@@ -1430,7 +1473,7 @@ mainstems_comid |>
 ``` r
 pd_dsmhabitat_pred <- 
   sd_rec |> 
-  prep(td) |> 
+  prep(training(td_split)) |> 
   bake(pd_dsmhabitat) |> 
   bind_cols(pd_dsmhabitat |> transmute(comid, flow_cfs_orig=flow_cfs)) |>
   drop_na() %>% # need to use magrittr pipe for this purpose
@@ -1527,6 +1570,11 @@ pd_rf_by_mainstem |>
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
 ```
+
+    ## `geom_line()`: Each group consists of only one observation.
+    ## ℹ Do you need to adjust the group aesthetic?
+    ## `geom_line()`: Each group consists of only one observation.
+    ## ℹ Do you need to adjust the group aesthetic?
 
 ![](model-expl_files/figure-gfm/dsmhabitat-watershed-comp-instream-1.png)<!-- -->
 

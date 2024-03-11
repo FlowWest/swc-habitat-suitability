@@ -131,9 +131,10 @@ training_cdec_data <- training_reach_gages |>
   drop_na() |>
   group_by(river, date = date(date_time)) |>
   summarize(q_gauge = mean(q_gauge)) |>
+  mutate(water_year = if_else(month(date)>=10, year(date)+1, year(date))) |>
   # just data for November through June, as was done with LYR analysis
   filter(month(date) %in% c(11, 12, 1, 2, 3, 4, 5, 6)) |>
-  glimpse()
+  glimpse() 
 ```
 
 ```{r exceedence-periods, message=FALSE, warning=FALSE}
@@ -150,12 +151,13 @@ calculate_exceedence <- function(q_gauge, q_crit) {
     filter(exceeds_q) |>
     summarize(duration_days = max(cumulative_exceedence)) |>
     mutate(durhsi_vl = case_when(duration_days == 0  ~ 0,
-                                 duration_days >= 1  ~ 0.66,
-                                 duration_days >= 18 ~ 1.00,
-                                 duration_days >= 25 ~ 0.66),
-           durhsi_vf = case_when(duration_days < 9  ~ 0,
-                                 duration_days >= 9  ~ 1.00,
-                                 duration_days >= 10 ~ 0.66))
+                                 duration_days < 18  ~ 2/3,
+                                 duration_days < 25 ~ 1.00,
+                                 duration_days >= 25 ~ 2/3),
+           durhsi_vf = case_when(duration_days < 0  ~ 0,
+                                 duration_days < 10 ~ 1,
+                                 duration_days >= 10 ~ 2/3)) 
+    
   exceedence_intervals |>
     summarize(n_inundations = n(),
               avg_days_inundated = mean(duration_days),
@@ -166,11 +168,13 @@ calculate_exceedence <- function(q_gauge, q_crit) {
               tot_days_weighted_vf = sum(duration_days * durhsi_vf)) |>
     mutate(avg_daily_durhsi_vl = tot_days_weighted_vl / n_days,
            avg_daily_durhsi_vf = tot_days_weighted_vf / n_days) |>
+    mutate(across(everything(), function(x) if_else(is.nan(x), 0, x))) |>
     as.list()
 }
 
 # example usage
-calculate_exceedence(training_cdec_data$q_gauge, 500)
+calculate_exceedence(filter(training_cdec_data, river=="Deer Creek" & water_year==2017)$q_gauge, 500)
+
 ```
 
 ```{r calc-duration-hsi, message=FALSE, warning=FALSE}
@@ -193,6 +197,27 @@ durhsi_by_model_q <-
   select(-gauge_ts) |>
   unnest_wider(result) |>
   glimpse()
+
+durhsi_by_model_q_wy <- 
+  training_reach_gages |> 
+  expand_grid(water_year = seq(1998, 2023, 1)) |>
+  left_join(training_cdec_data, by=join_by(river, water_year), relationship="one-to-many") |>
+  select(river, water_year, flows, date, q_gauge) |>
+  nest(gauge_ts = c(date, q_gauge)) |>
+  unnest(flows) |> rename(model_q = flows) |>
+  mutate(result = map2(gauge_ts, model_q, 
+                       function(df, q) calculate_exceedence(df$q_gauge, q))) |>
+  select(-gauge_ts) |>
+  unnest_wider(result) |>
+  glimpse()
+```
+
+```{r}
+durhsi_by_model_q |> 
+  pivot_longer(cols=c(avg_durhsi_vf, avg_durhsi_vl)) |> 
+  ggplot() + 
+  geom_histogram(aes(x = value)) + 
+  facet_wrap(~name, ncol=1)
 ```
 
 *To apply this output:*
@@ -212,6 +237,7 @@ The avg_durhsi is based on the typical duration of an individual inundation peri
 
 ```{r}
 durhsi_by_model_q |> saveRDS("../data/durhsi_by_model_q.Rds")
+durhsi_by_model_q_wy |> saveRDS("../data/durhsi_by_model_q_wy.Rds")
 ```
 
 ```{r}

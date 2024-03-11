@@ -40,6 +40,17 @@ drive_file_by_id <- function(id=character(), dir="temp", vsizip=FALSE) {
 }
 
 set.seed(47)
+
+```
+
+```{r import, message=FALSE, warning=FALSE}
+flowlines <- readRDS("../data/flowline_geometries.Rds") |>
+  st_transform("ESRI:102039")
+
+flowline_attributes <- readRDS("../data/flowline_attributes.Rds")
+
+# import duration info from inundation-duration.Rmd
+durhsi_by_first_inundating_flow <- readRDS("../data/durhsi_by_model_q.Rds")
 ```
 
 Define habitat suitability functions
@@ -230,6 +241,27 @@ stan_vertices |> left_join(stan_material) |>
   ggplot() + geom_sf(aes(color=factor(material_id)), size=1) + theme(legend.position = "top")
 ```
 
+```{r stan-import-durhsi}
+# first determine which vids are valley lowland vs foothill
+stan_vid_lowland <- stan_thiessen |>
+  mutate(lowland = st_intersects(geometry, st_transform(valley_lowland, st_crs(stan_thiessen)))) |>
+  select(vid, lowland)
+
+# for each grid cell, get the first flow at which the cell is inundated, and the avg DurHSI for that flow
+stan_durhsi_by_vid <- stan_result |>
+  filter(depth_ft>0) |>
+  group_by(vid) |>
+  summarize(first_inundating_flow = min(discharge_cfs)) |>
+  left_join(durhsi_by_first_inundating_flow |> 
+              filter(river=="Stanislaus River"), 
+            by=join_by(first_inundating_flow == model_q),
+            relationship="many-to-one") |>
+  left_join(stan_vid_lowland, by=join_by(vid), relationship="one-to-one") |>
+  mutate(avg_durhsi = if_else(lowland, avg_durhsi_vl, avg_durhsi_vf)) |>
+  select(vid, first_inundating_flow, avg_durhsi) |>
+  glimpse()
+```
+
 Import polygons created for each COMID reach, and calculate suitable area for each
 
 Proof of concept, first comid, 500 cfs:
@@ -254,21 +286,35 @@ stan_calc_hsi <- function(g, q){
   message(q)
   stan_thiessen |>
     left_join(filter(stan_result, discharge_cfs==q), by=join_by(vid)) |> 
+    left_join(stan_durhsi_by_vid, by=join_by(vid)) |>
+    mutate(avg_durhsi = coalesce(avg_durhsi, 0)) |>
     st_intersection(g) |>
     mutate(area_m2 = if_else(depth_ft>0, units::drop_units(st_area(geometry)), 0),
            wua_simp = hsi_simp * area_m2,
            wua_frac = hsi_frac * area_m2,
            wua_sjrm = hsi_sjrm * area_m2,
-           wua_shqt = hsi_shqt * area_m2) |>
+           wua_shqt = hsi_shqt * area_m2,
+           wua_simp_dur = hsi_simp * area_m2 * avg_durhsi,
+           wua_frac_dur = hsi_frac * area_m2 * avg_durhsi,
+           wua_sjrm_dur = hsi_sjrm * area_m2 * avg_durhsi,
+           wua_shqt_dur = hsi_shqt * area_m2 * avg_durhsi) |>
     summarize(area_m2 = sum(area_m2),
               wua_simp = sum(wua_simp),
               wua_frac = sum(wua_frac),
               wua_sjrm = sum(wua_sjrm),
-              wua_shqt = sum(wua_shqt)) |>
+              wua_shqt = sum(wua_shqt),
+              wua_simp_dur = sum(wua_simp_dur),
+              wua_frac_dur = sum(wua_frac_dur),
+              wua_sjrm_dur = sum(wua_sjrm_dur),
+              wua_shqt_dur = sum(wua_shqt_dur)) |>
     mutate(pcthab_simp = wua_simp / area_m2,
            pcthab_frac = wua_frac / area_m2,
            pcthab_sjrm = wua_sjrm / area_m2,
-           pcthab_shqt = wua_shqt / area_m2) |>
+           pcthab_shqt = wua_shqt / area_m2,
+           pcthab_simp_dur = wua_simp / area_m2,
+           pcthab_frac_dur = wua_frac / area_m2,
+           pcthab_sjrm_dur = wua_sjrm / area_m2,
+           pcthab_shqt_dur = wua_shqt / area_m2) |>
     st_drop_geometry()
 }
 
@@ -345,7 +391,66 @@ filenames <- tribble(~flow_cfs, ~timestep,
       15000, "22NOV2018 08 00 00") |>
   mutate(depth = paste0("temp/deer_model_output/Depth (",timestep,").vrt"),
          velocity = paste0("temp/deer_model_output/Velocity (",timestep,").vrt"))
+```
 
+```{r deer-duration}
+depth_rasters <- filenames |> 
+  select(flow_cfs, depth) |>
+  deframe()
+
+first_inundating_flow <- 
+  names(depth_rasters) |>
+  lapply(function(q) (terra::ifel(terra::rast(depth_rasters[[q]]) > 0, 1, NA) * as.numeric(q))) |>
+  terra::rast() |>
+  terra::app(fun = "min", na.rm=TRUE) 
+
+first_inundating_flow |> terra::set.names("flow_cfs")
+
+first_inundating_flow |> plot(main="First Inundating Flow (cfs)", col=grDevices::terrain.colors(50))
+```
+
+```{r deer-duration-calc}
+deer_dhsis_vl <-
+  durhsi_by_first_inundating_flow |> filter(river=="Deer Creek") |>
+  select(model_q, avg_durhsi_vl) |>
+  deframe()
+
+deer_dhsis_vf <-
+  durhsi_by_first_inundating_flow |> filter(river=="Deer Creek") |>
+  select(model_q, avg_durhsi_vf) |>
+  deframe()
+
+deer_avg_days_inundated <-
+  durhsi_by_first_inundating_flow |> filter(river=="Deer Creek") |>
+  select(model_q, avg_days_inundated) |>
+  deframe()
+
+deer_dhsi_components <- terra::rast(list(
+  "vf" = first_inundating_flow |> terra::app(function(x) deer_dhsis_vf[as.character(x)]),
+  "vl" = first_inundating_flow |> terra::app(function(x) deer_dhsis_vl[as.character(x)]),
+  "di" = first_inundating_flow |> terra::app(function(x) deer_avg_days_inundated[as.character(x)])))
+
+terra::rast(list(deer_dhsi_components$vf, deer_dhsi_components$vl)) |> plot(range=c(0,1))
+
+deer_dhsi_components$di |> plot(main="Average Length of Continuous Inundation (days)")
+
+deer_dhsi |> plot(main="Duration HSI Factor")
+
+cls_vl <- valley_lowland |> 
+  st_transform(st_crs(first_inundating_flow)) |> 
+  st_crop(st_bbox(first_inundating_flow)) |> 
+  terra::rasterize(first_inundating_flow, values=1, background=0)
+
+deer_dhsi <- terra::ifel(cls_vl==1, deer_dhsi_components$vl, deer_dhsi_components$vf)
+
+deer_dhsi |> plot(main="Duration HSI Factor")
+
+dhsi_packed <- terra::wrap(deer_dhsi)
+
+deer_dhsi_components
+```
+
+```{r deer-calc-hsi}
 dep_r <- terra::rast(filenames$depth)
 terra::set.names(dep_r, filenames$flow_cfs)
 dep_r_packed <- terra::wrap(dep_r)
@@ -375,12 +480,24 @@ raster_hsi <- function(g, q, crs="EPSG:6416"){
   area_wua_hqt <- terra::global(hsi_hqt, "sum", na.rm=TRUE)[[1]]
   area_tot_hqt <- terra::global(ext, "sum", na.rm=TRUE)[[1]]
   area_pct_hqt <- area_wua_hqt / area_tot_hqt
+  # versions adding the duration HSI
+  dhsi <- terra::unwrap(dhsi_packed) |> terra::crop(comid)
+  hsi_d <- hsi * dhsi
+  hsi_hqt_d <- hsi_hqt * dhsi
+  area_wua_d <- terra::global(hsi_d, "sum", na.rm=TRUE)[[1]]
+  area_pct_d <- area_wua_d / area_tot
+  area_wua_hqt_d <- terra::global(hsi_hqt_d, "sum", na.rm=TRUE)[[1]]
+  area_pct_hqt_d <- area_wua_hqt_d / area_tot_hqt
   return(list("area_tot"=area_tot, 
               "area_wua"=area_wua, 
               "area_pct"=area_pct,
               "area_tot_hqt"=area_tot_hqt, 
               "area_wua_hqt"=area_wua_hqt, 
-              "area_pct_hqt"=area_pct_hqt))
+              "area_pct_hqt"=area_pct_hqt,
+              "area_wua_d"=area_wua_d, 
+              "area_pct_d"=area_pct_d,
+              "area_wua_hqt_d"=area_wua_hqt_d, 
+              "area_pct_hqt_d"=area_pct_hqt_d))
 }
 
 # getting a memory error doing this all at once:
@@ -510,8 +627,28 @@ yuba_result <-
 }
 ```
 
-```{r yuba-calc-hsi}
+```{r yuba-import-durhsi}
+# first determine which vids are valley lowland vs foothill
+yuba_vid_lowland <- yuba_thiessen |>
+  mutate(lowland = st_intersects(geometry, st_transform(valley_lowland, st_crs(yuba_thiessen)))) |>
+  select(vid, lowland)
 
+# for each grid cell, what is the first flow at which the cell is inundated? 
+yuba_durhsi_by_vid <- yuba_result |>
+  filter(depth_ft>0) |>
+  group_by(vid) |>
+  summarize(first_inundating_flow = min(discharge_cfs)) |>
+  left_join(durhsi_by_first_inundating_flow |> 
+              filter(river=="Lower Yuba River"), 
+            by=join_by(first_inundating_flow == model_q),
+            relationship="many-to-one") |>
+  left_join(yuba_vid_lowland, by=join_by(vid), relationship="one-to-one") |>
+  mutate(avg_durhsi = if_else(lowland, avg_durhsi_vl, avg_durhsi_vf)) |>
+  select(vid, first_inundating_flow, avg_durhsi) |>
+  glimpse()
+```
+
+```{r yuba-calc-hsi}
 # IMPORT COMID REACH POLYGON DELINEATIONS
 
 # allow sufficient sized files to be passed through parallel nodes
@@ -525,21 +662,35 @@ yuba_calc_comid_hsi <- function(g, q, t){
   message(q)
   t |>
     left_join(filter(yuba_result, discharge_cfs==q), by=join_by(vid)) |> 
+    left_join(yuba_durhsi_by_vid, by=join_by(vid)) |>
+    mutate(avg_durhsi = coalesce(avg_durhsi, 0)) |>
     st_intersection(g) |>
     mutate(area_ft2 = if_else(depth_ft>0, units::drop_units(st_area(geometry)), 0),
            wua_simp = hsi_simp * area_ft2,
            wua_frac = hsi_frac * area_ft2,
            wua_sjrm = hsi_sjrm * area_ft2,
-           wua_shqt = hsi_shqt * area_ft2) |>
+           wua_shqt = hsi_shqt * area_ft2,
+           wua_simp_dur = hsi_simp * area_ft2 * avg_durhsi,
+           wua_frac_dur = hsi_frac * area_ft2 * avg_durhsi,
+           wua_sjrm_dur = hsi_sjrm * area_ft2 * avg_durhsi,
+           wua_shqt_dur = hsi_shqt * area_ft2 * avg_durhsi) |>
     summarize(area_ft2 = sum(area_ft2),
               wua_simp = sum(wua_simp),
               wua_frac = sum(wua_frac),
               wua_sjrm = sum(wua_sjrm),
-              wua_shqt = sum(wua_shqt)) |>
+              wua_shqt = sum(wua_shqt),
+              wua_simp_dur = sum(wua_simp_dur),
+              wua_frac_dur = sum(wua_frac_dur),
+              wua_sjrm_dur = sum(wua_sjrm_dur),
+              wua_shqt_dur = sum(wua_shqt_dur)) |>
     mutate(pcthab_simp = wua_simp / area_ft2,
            pcthab_frac = wua_frac / area_ft2,
            pcthab_sjrm = wua_sjrm / area_ft2,
-           pcthab_shqt = wua_shqt / area_ft2) |>
+           pcthab_shqt = wua_shqt / area_ft2,
+           pcthab_simp_dur = wua_simp_dur / area_ft2,
+           pcthab_frac_dur = wua_frac_dur / area_ft2,
+           pcthab_sjrm_dur = wua_sjrm_dur / area_ft2,
+           pcthab_shqt_dur = wua_shqt_dur / area_ft2) |>
     st_drop_geometry()
 }
 
@@ -613,7 +764,12 @@ fsa_combined <-
                 area_wua_ft2 = area_wua,
                 hsi_frac = area_pct,
                 area_wua_ft2_hqt = area_wua_hqt,
-                hsi_frac_hqt = area_pct_hqt),
+                hsi_frac_hqt = area_pct_hqt,
+                # duration versions
+                area_dwua_ft2 = area_wua_d,
+                dhsi_frac = area_pct_d,
+                area_dwua_ft2_hqt = area_wua_hqt_d,
+                dhsi_frac_hqt = area_pct_hqt_d),
     fsa_stanislaus |> 
       st_drop_geometry() |>
       transmute(dataset = "Stanislaus River",
@@ -623,7 +779,12 @@ fsa_combined <-
                 area_wua_ft2 = wua_simp / 3.281^2,
                 hsi_frac = pcthab_simp,
                 area_wua_ft2_hqt = wua_shqt / 3.281^2,
-                hsi_frac_hqt = pcthab_shqt),
+                hsi_frac_hqt = pcthab_shqt,
+                # duration versions
+                area_dwua_ft2 = wua_simp_dur / 3.281^2,
+                dhsi_frac = pcthab_simp_dur,
+                area_dwua_ft2_hqt = wua_shqt_dur / 3.281^2,
+                dhsi_frac_hqt = pcthab_shqt_dur),
     fsa_yuba |> 
       st_drop_geometry() |>
       transmute(dataset = "Lower Yuba River",
@@ -633,7 +794,12 @@ fsa_combined <-
                 area_wua_ft2 = wua_simp,
                 hsi_frac = pcthab_simp,
                 area_wua_ft2_hqt = wua_shqt,
-                hsi_frac_hqt = pcthab_shqt)
+                hsi_frac_hqt = pcthab_shqt,
+                # duration versions
+                area_dwua_ft2 = wua_simp_dur,
+                dhsi_frac = pcthab_simp_dur,
+                area_dwua_ft2_hqt = wua_shqt_dur,
+                dhsi_frac_hqt = pcthab_shqt_dur)
           ) |> 
   arrange(dataset, comid, flow_cfs) |>
   glimpse()

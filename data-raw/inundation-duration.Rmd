@@ -135,6 +135,13 @@ training_cdec_data <- training_reach_gages |>
   # just data for November through June, as was done with LYR analysis
   filter(month(date) %in% c(11, 12, 1, 2, 3, 4, 5, 6)) |>
   glimpse() 
+
+training_cdec_data |> 
+  #filter(water_year>=2013) |>
+  ggplot() + 
+  facet_wrap(~river, ncol=1, scales="free_y") +
+  geom_point(aes(x = date, y = q_gauge), size=1) 
+
 ```
 
 ```{r exceedence-periods, message=FALSE, warning=FALSE}
@@ -210,6 +217,12 @@ durhsi_by_model_q_wy <-
   select(-gauge_ts) |>
   unnest_wider(result) |>
   glimpse()
+
+durhsi_by_model_q |> ggplot() +
+  facet_wrap(~river, ncol=1) + 
+  geom_line(aes(x = model_q, y = avg_days_inundated)) + 
+  scale_x_log10(labels = scales::label_comma()) +
+  scale_y_continuous(limits = c(0,36), breaks = c(0,6,12,18,24,30,36), minor_breaks=NULL) 
 ```
 
 ```{r}

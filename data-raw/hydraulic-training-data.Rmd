@@ -51,6 +51,12 @@ flowline_attributes <- readRDS("../data/flowline_attributes.Rds")
 
 # import duration info from inundation-duration.Rmd
 durhsi_by_first_inundating_flow <- readRDS("../data/durhsi_by_model_q.Rds")
+
+valley_lowland <- readRDS("hqt/hqt_valley_lowland.Rds") |> 
+  st_transform("ESRI:102039") |> 
+  st_sf() |>
+  st_set_geometry("geometry") |>
+  mutate(hqt_gradient_class = "Valley Lowland")
 ```
 
 Define habitat suitability functions

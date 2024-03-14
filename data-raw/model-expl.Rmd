@@ -244,6 +244,9 @@ si_rec <- recipe(data=training(td_split),
   # step_pca(all_numeric_predictors(), -flow_norm_cfs, num_comp = 4) |>
   # try interacting with all numeric predictors
   step_interact(terms = ~ flow_norm_cfs:all_predictors()) |>
+  # add quadratic??
+  # step_poly(flow_norm_cfs, keep_original_cols=T) |>
+  # step_interact(terms = ~ flow_norm_cfs_poly_2:all_predictors()) |>
   # let all effects vary with class
   #step_interact(terms = ~hqt_gradient_class:all_numeric_predictors())
   step_naomit(all_predictors()) |>
@@ -356,6 +359,9 @@ sd_rec <- recipe(data=training(td_split),
   #step_interact(terms = ~ flow_cfs:da_ppt_mean_mm) #|>
   # let all effects vary with class
   #step_interact(terms = ~hqt_gradient_class:all_numeric_predictors())
+  # add quadratic??
+  # step_poly(flow_cfs, keep_original_cols=T) |>
+  # step_interact(terms = ~ flow_cfs_poly_2:all_predictors()) |>
   step_dummy(hqt_gradient_class) |>
   step_dummy(hyd_cls) |>
   # PCA before interaction with flow 
@@ -851,6 +857,18 @@ dsm_flows <- bind_rows(dsm_habitat_floodplain, dsm_habitat_instream) |>
   ungroup() |>
   arrange(river, flow_cfs)
 
+mainstems_comid |> 
+  st_zm() |> 
+  filter(comid %in% mainstems_comid$comid) |>
+  ggplot() + 
+  geom_sf(aes(color=river)) + 
+  theme(legend.key.height = unit(12, "point"))
+```
+
+```{r dsmhabitat-val}
+mod <- rfr_sd$fit$fit
+#mod <- lm_sd$fit$fit
+
 pd_dsmhabitat <- flowline_attributes |> 
   # select the variables that are used in the model and drop NAs
   select(comid, any_of(sd_rec$var_info$variable)) |> 
@@ -863,22 +881,13 @@ pd_dsmhabitat <- flowline_attributes |>
   filter(comid %in% mainstems_comid$comid) |>
   drop_na() #
 
-mainstems_comid |> 
-  st_zm() |> 
-  filter(comid %in% pd_dsmhabitat$comid) |>
-  ggplot() + 
-  geom_sf(aes(color=river)) + 
-  theme(legend.key.height = unit(12, "point"))
-```
-
-```{r dsmhabitat-val}
 pd_dsmhabitat_pred <- 
   sd_rec |> 
   prep(training(td_split)) |> 
   bake(pd_dsmhabitat) |> 
   bind_cols(pd_dsmhabitat |> transmute(comid, flow_cfs_orig=flow_cfs)) |>
   drop_na() %>% # need to use magrittr pipe for this purpose
-  mutate(log_wua_per_lf_pred = predict(rfr_sd$fit$fit, new_data=.)[[".pred"]]) |>
+  mutate(log_wua_per_lf_pred = predict(mod, new_data=.)[[".pred"]]) |>
   transmute(comid, flow_cfs=flow_cfs_orig, log_wua_per_lf_pred) |>
   mutate(wua_per_lf_pred = exp(log_wua_per_lf_pred)) |>
   select(comid, 
@@ -945,6 +954,67 @@ pd_rf_by_mainstem |>
   scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   theme(legend.position="top", legend.title=element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
+```
+
+```{r dsmhabitat-si-val}
+mod <- rfr_si$fit$fit
+#mod <- lm_si$fit$fit
+
+pd_dsmhabitat <- flowline_attributes |> 
+  select(comid, any_of(si_rec$var_info$variable), erom_q_ma_cfs, nf_bfl_dry_cfs, nf_bfl_wet_cfs) |> 
+  inner_join(select(mainstems_comid, comid, river)) |>
+  expand_grid(flow_cfs = interp_flows) |>
+  arrange(comid, flow_cfs) |>
+  filter(comid %in% mainstems_comid$comid) |>
+  mutate(flow_norm_cfs = flow_cfs / erom_q_ma_cfs,
+       nf_bfl_dry_cfs_norm = nf_bfl_dry_cfs/erom_q_ma_cfs, 
+       nf_bfl_wet_cfs_norm = nf_bfl_wet_cfs/erom_q_ma_cfs) |>
+  drop_na()
+
+pd_dsmhabitat_pred <- 
+  si_rec |> 
+  prep(training(td_split)) |> 
+  bake(pd_dsmhabitat) |> 
+  bind_cols(select(pd_dsmhabitat, comid, flow_cfs)) |>
+  drop_na() %>% # need to use magrittr pipe for this purpose
+  mutate(hsi_pred = predict(mod, new_data=.)[[".pred"]]) |>
+  inner_join(flowline_attributes |> transmute(comid, length_ft = reach_length_km * 3280.84, width_ft = bf_width_m/3.2808), by=join_by(comid)) |>   
+  mutate(wua_per_lf_pred = hsi_pred * width_ft * length_ft / length_ft ) |> 
+  select(comid, flow_norm_cfs, hsi_pred, flow_cfs, wua_per_lf_pred)
+
+pd_rf_by_mainstem <-
+  mainstems_comid |> 
+  st_drop_geometry() |>
+  inner_join(pd_dsmhabitat_pred, by=join_by(comid), relationship="many-to-many") |>
+  group_by(river, flow_cfs) |>
+  summarize(tot_wua_per_lf_pred = sum(coalesce(wua_per_lf_pred,0)),
+            tot_length_ft = sum(coalesce(length_ft,0))) |>
+  mutate(tot_wua_ft2 = tot_wua_per_lf_pred * tot_length_ft,
+         tot_wua_ac = tot_wua_ft2 / 43560,
+         avg_wua_ft2_per_lf = tot_wua_ft2 / tot_length_ft,
+         avg_wua_ft2_per_1000ft = 1000 * avg_wua_ft2_per_lf) 
+
+pd_rf_by_mainstem |>
+  ggplot() + 
+  geom_line(aes(x = flow_cfs, y = tot_wua_ac, color = river)) + #, color=species, linetype=habitat)) + 
+  facet_wrap(~river, scales="free_y") + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_y_continuous() + 
+  theme(legend.position="none", 
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  xlab("Flow (cfs)") + ylab("Total WUA (ac)")
+
+pd_rf_by_mainstem |>
+  ggplot() + 
+  geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color = river)) + #, color=species, linetype=habitat)) + 
+  facet_wrap(~river, scales="free_y") + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_y_continuous() + 
+  theme(legend.position="none", 
         panel.grid.minor = element_blank(),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")

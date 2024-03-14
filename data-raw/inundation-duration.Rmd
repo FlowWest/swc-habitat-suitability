@@ -168,9 +168,11 @@ calculate_exceedence <- function(q_gauge, q_crit) {
   exceedence_intervals |>
     summarize(n_inundations = n(),
               avg_days_inundated = mean(duration_days),
+              avg_days_inundated_sdev = sd(duration_days),
               avg_durhsi_vl = mean(durhsi_vl),
               avg_durhsi_vf = mean(durhsi_vf),
               tot_days_inundated = sum(duration_days),
+              frac_days_inundated = sum(duration_days) / n_days,
               tot_days_weighted_vl = sum(duration_days * durhsi_vl),
               tot_days_weighted_vf = sum(duration_days * durhsi_vf)) |>
     mutate(avg_daily_durhsi_vl = tot_days_weighted_vl / n_days,
@@ -220,9 +222,24 @@ durhsi_by_model_q_wy <-
 
 durhsi_by_model_q |> ggplot() +
   facet_wrap(~river, ncol=1) + 
+  #geom_ribbon(aes(x = model_q, 
+  #                ymin = pmax(avg_days_inundated - avg_days_inundated_sdev,0), 
+  #                ymax = avg_days_inundated + avg_days_inundated_sdev)) +
+  #geom_errorbar(aes(x = model_q, 
+  #                  ymin = pmax(avg_days_inundated - avg_days_inundated_sdev,0), 
+  #                  ymax = avg_days_inundated + avg_days_inundated_sdev)) +
   geom_line(aes(x = model_q, y = avg_days_inundated)) + 
+  #geom_text(aes(x = model_q, y = avg_days_inundated, label = n_inundations), size=2) +
   scale_x_log10(labels = scales::label_comma()) +
-  scale_y_continuous(limits = c(0,36), breaks = c(0,6,12,18,24,30,36), minor_breaks=NULL) 
+  scale_y_continuous(limits = c(0,36), breaks = c(0,6,12,18,24,30,36), minor_breaks=NULL) +
+  xlab("Flow (cfs)") + ylab("Avg length of continuous period exceeding flow (days)") + ggtitle("Inundation Duration")
+
+durhsi_by_model_q |> ggplot() +
+  facet_wrap(~river, ncol=1) + 
+  geom_line(aes(x = model_q, y = frac_days_inundated)) + 
+  scale_x_log10(labels = scales::label_comma()) +
+  scale_y_continuous(limits = c(0,1), minor_breaks=NULL) +
+  xlab("Flow (cfs)") + ylab("Percent of days exceeding flow (Nov-Jun)") + ggtitle("Inundation Frequency")
 ```
 
 ```{r}

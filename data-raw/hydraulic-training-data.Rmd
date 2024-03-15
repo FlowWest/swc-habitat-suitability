@@ -465,6 +465,8 @@ vel_r <- terra::rast(filenames$velocity)
 terra::set.names(vel_r, filenames$flow_cfs)
 vel_r_packed <- terra::wrap(vel_r)
 
+cell_area_ft2 <- dep_r |> terra::res() |> prod()
+
 deer_comids <- 
   st_read("/vsizip/hydraulic_model_data/deercreek_hecras2d_2018/model_perim_split_comid_generalized.shp.zip", as_tibble=T) |>
   janitor::clean_names() |> filter(comid>0)
@@ -475,24 +477,24 @@ raster_hsi <- function(g, q, crs="EPSG:6416"){
   vel_r_unpacked <- terra::unwrap(vel_r_packed)  
   d <- dep_r_unpacked[[as.character(q)]] |> terra::crop(comid) 
   v <- vel_r_unpacked[[as.character(q)]] |> terra::crop(comid) 
-  ext <- (d>0)
+  # total inundated area
+  ext <- (d > 0)
+  area_tot <- terra::global(ext, "sum", na.rm=TRUE)[[1]] * cell_area_ft2
   # LYR version
   hsi <- (d>0.5 & d<=5.2) & (v>0 & v<=4.0)
-  area_wua <- terra::global(hsi, "sum", na.rm=TRUE)[[1]]
-  area_tot <- terra::global(ext, "sum", na.rm=TRUE)[[1]]
+  area_wua <- terra::global(hsi, "sum", na.rm=TRUE)[[1]] * cell_area_ft2
   area_pct <- area_wua / area_tot
   # HQT version
   hsi_hqt <- (d>1 & d<=3.28) & (v>0 & v<=1.5)
-  area_wua_hqt <- terra::global(hsi_hqt, "sum", na.rm=TRUE)[[1]]
-  area_tot_hqt <- terra::global(ext, "sum", na.rm=TRUE)[[1]]
-  area_pct_hqt <- area_wua_hqt / area_tot_hqt
+  area_wua_hqt <- terra::global(hsi_hqt, "sum", na.rm=TRUE)[[1]] * cell_area_ft2
+  area_pct_hqt <- area_wua_hqt / area_tot
   # versions adding the duration HSI
   dhsi <- terra::unwrap(dhsi_packed) |> terra::crop(comid)
   hsi_d <- hsi * dhsi
   hsi_hqt_d <- hsi_hqt * dhsi
-  area_wua_d <- terra::global(hsi_d, "sum", na.rm=TRUE)[[1]]
+  area_wua_d <- terra::global(hsi_d, "sum", na.rm=TRUE)[[1]] * cell_area_ft2
   area_pct_d <- area_wua_d / area_tot
-  area_wua_hqt_d <- terra::global(hsi_hqt_d, "sum", na.rm=TRUE)[[1]]
+  area_wua_hqt_d <- terra::global(hsi_hqt_d, "sum", na.rm=TRUE)[[1]] * cell_area_ft2
   area_pct_hqt_d <- area_wua_hqt_d / area_tot_hqt
   return(list("area_tot"=area_tot, 
               "area_wua"=area_wua, 

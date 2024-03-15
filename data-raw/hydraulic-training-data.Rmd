@@ -781,15 +781,15 @@ fsa_combined <-
       transmute(dataset = "Stanislaus River",
                 comid,
                 flow_cfs,
-                area_tot_ft2 = area_m2 / 3.281^2,
-                area_wua_ft2 = wua_simp / 3.281^2,
+                area_tot_ft2 = area_m2 * 3.281^2,
+                area_wua_ft2 = wua_simp * 3.281^2,
                 hsi_frac = pcthab_simp,
-                area_wua_ft2_hqt = wua_shqt / 3.281^2,
+                area_wua_ft2_hqt = wua_shqt * 3.281^2,
                 hsi_frac_hqt = pcthab_shqt,
                 # duration versions
-                area_dwua_ft2 = wua_simp_dur / 3.281^2,
+                area_dwua_ft2 = wua_simp_dur * 3.281^2,
                 dhsi_frac = pcthab_simp_dur,
-                area_dwua_ft2_hqt = wua_shqt_dur / 3.281^2,
+                area_dwua_ft2_hqt = wua_shqt_dur * 3.281^2,
                 dhsi_frac_hqt = pcthab_shqt_dur),
     fsa_yuba |> 
       st_drop_geometry() |>
@@ -811,4 +811,20 @@ fsa_combined <-
   glimpse()
 
 fsa_combined |> saveRDS("../data/fsa_combined.Rds")
+```
+
+Preview training set
+
+```{r}
+fsa_combined |> 
+  left_join(flowline_attributes, by=join_by(comid)) |>
+  mutate(flow_norm_cfs = flow_cfs / erom_q_ma_cfs,
+         reach_length_ft = reach_length_km * 3280.84,
+         inundated_ft2_per_lf = area_tot_ft2 / reach_length_ft,
+         wua_ft2_per_lf = area_wua_ft2 / reach_length_ft) |>
+  ggplot() + 
+  geom_line(aes(x = flow_cfs, y = inundated_ft2_per_lf, group=comid), alpha=0.5) + 
+  facet_wrap(~dataset, ncol=1, scales="free_y") + 
+  scale_x_continuous(labels=scales::label_comma(), limits=c(0,15000)) + 
+  scale_y_continuous(labels=scales::label_comma()) + theme(panel.grid.minor = element_blank())
 ```

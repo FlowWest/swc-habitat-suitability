@@ -1,5 +1,5 @@
 ---
-title: "Exploratory Modeling"
+title: "Statistical Modeling to Predict Flow-to-Suitable-Area Curves"
 author: "[Skyler Lewis](mailto:slewis@flowwest.com)"
 date: "`r Sys.Date()`"
 output: 
@@ -32,35 +32,55 @@ knitr::opts_chunk$set(eval=TRUE, fig.width=6.5, fig.height=4, dpi=300)
 theme_set(theme_minimal())
 ```
 
-```{r import}
+## Import and Preprocess Training Data
+
+```{r import, message=FALSE, warning=FALSE}
+# flowline geometries
 flowlines <- readRDS("../data/flowline_geometries.Rds") |>
   st_transform("ESRI:102039")
 
+# predictor variables by ComID
 flowline_attributes <- readRDS("../data/flowline_attributes.Rds")
 
+# response variables by ComID and Flow 
 flow_to_suitable_area <- readRDS("../data/fsa_combined.Rds")
 
 # Optionally, swap out the original HSI ranges with the version using the HQT depth/velocity cutoffs
-if(FALSE){
+# (TRUE) to use HQT depth/velocity ranges
+if(TRUE){
   flow_to_suitable_area <- 
     flow_to_suitable_area |>
     transmute(dataset, comid, flow_cfs, area_tot_ft2,
               area_wua_ft2 = area_wua_ft2_hqt,
               hsi_frac = hsi_frac_hqt)
 }
-  
-# Limit to flow ranges covered by all training data, and interpolate gaps
-interp_flows <- seq(300,15000,100)
-if(TRUE){
-  flow_to_suitable_area <- 
+```
+
+```{r eval=FALSE, include=FALSE}
+# TEST: Optionally, calculate the HSI fraction as the WUA per bankfull area, rather than WUA per inundated area
+# Then the division can be reliably reversed post-prediction
+if(FALSE){
+  flow_to_suitable_area <-
     flow_to_suitable_area |>
-    group_by(dataset, comid) |>
-    complete(flow_cfs = interp_flows) |>
-    arrange(dataset, comid, flow_cfs) |>
-    mutate(across(c(area_tot_ft2, area_wua_ft2, hsi_frac), function(var) zoo::na.approx(var, x = flow_cfs, na.rm=F))) |>
-    filter(flow_cfs %in% interp_flows) |>
-    filter(!is.na(hsi_frac))
+    inner_join(flowline_attributes |> transmute(comid,
+                                                chan_width_ft = chan_width_m / 0.3048, 
+                                                reach_length_ft = reach_length_km * 3280.84)) |>
+    mutate(active_channel_area_ft2 = reach_length_ft * chan_width_ft,
+           hsi_frac = area_wua_ft2 / active_channel_area_ft2) 
 }
+```
+
+```{r import-step2}
+# Limit to a specified flow range and interpolate gaps
+interp_flows <- seq(300,15000,100)
+flow_to_suitable_area <- 
+  flow_to_suitable_area |>
+  group_by(dataset, comid) |>
+  complete(flow_cfs = interp_flows) |>
+  arrange(dataset, comid, flow_cfs) |>
+  mutate(across(c(area_tot_ft2, area_wua_ft2, hsi_frac), function(var) zoo::na.approx(var, x = flow_cfs, na.rm=F))) |>
+  filter(flow_cfs %in% interp_flows) |>
+  filter(!is.na(hsi_frac))
 
 train_data <- flowlines |> st_drop_geometry() |>
   left_join(flowline_attributes, by=join_by("comid"), relationship="one-to-one") |>
@@ -76,7 +96,7 @@ flowlines |> st_zm() |>
   ggplot() + geom_sf(aes(color = hqt_gradient_class)) + theme(legend.title=element_blank())
 ```
 
-## Exploration and PCA of training data
+### Exploration and PCA
 
 ```{r pca}
 df <- flowline_attributes |>
@@ -116,16 +136,19 @@ factoextra::fviz_pca_var(pca, axes=c(2,3), col.var = "cos2", repel = TRUE)
 # flowlines |> GGally::ggpairs()
 ```
 
-## Set up training data
+## Training Data Setup
 
 ```{r td}
 td <- train_data |>
   mutate(flow_norm_cfs = flow_cfs / erom_q_ma_cfs) |> # flow as a percent of mean annual flow
   mutate(wua_per_lf = area_wua_ft2 / (reach_length_km*3280.84),
-         log_wua_per_lf = log(wua_per_lf)) |> # transect-wise habitat area per linear foot
+         log_wua_per_lf = log(wua_per_lf), # transect-wise habitat area per linear foot
+         wua_per_lf_norm = wua_per_lf / erom_q_ma_cfs,
+         log_wua_per_lf_norm = log(wua_per_lf_norm), # transect-wise habitat area per linear foot
+         ) |> 
   transmute(dataset, comid, 
          # suitable habitat area normalized by reach length
-         hsi_frac, wua_per_lf, log_wua_per_lf,
+         hsi_frac, wua_per_lf, log_wua_per_lf, wua_per_lf_norm, log_wua_per_lf_norm,
          # flow cfs normalized by mean annual flow
          flow_cfs, flow_norm_cfs,
          # predictors of flow (as would be found in a regional regression)
@@ -152,13 +175,15 @@ td <- train_data |>
   drop_na() |> glimpse()
 ```
 
+Calculate the ranges of the predictor variables
+
 ```{r td-ranges}
-td |> 
-  group_by(dataset) |>
-  select_if(is.numeric) |>
-  pivot_longer(cols = hsi_frac:last_col()) |>
-  group_by(dataset, name) |>
-  summarize(min = min(value), max=max(value))
+# td |> 
+#   group_by(dataset) |>
+#   select_if(is.numeric) |>
+#   pivot_longer(cols = hsi_frac:last_col()) |>
+#   group_by(dataset, name) |>
+#   summarize(min = min(value), max=max(value))
 
 domain <- td |> 
   select_if(is.numeric) |>
@@ -170,164 +195,23 @@ domain <- td |>
   select(name, value) |> deframe()
 ```
 
-```{r td-gridplot}
-interp_flows_plot <- seq(700,5000,100)
-td |> 
-  # interpolate so that we are comparing like flows with like
-  group_by(dataset, comid) |>
-  complete(flow_cfs = interp_flows_plot) |>
-  arrange(dataset, comid, flow_cfs) |>
-  mutate(across(hsi_frac:last_col(), function(var) zoo::na.approx(var, x = flow_cfs))) |>
-  filter(flow_cfs %in% interp_flows_plot) |>
-  ungroup() |>
-  # summarize by quantile of each variable
-  mutate(across(slope:last_col(), function(x) factor(cut(x, breaks=5, labels=F)))) |>
-  pivot_longer(cols=slope:last_col(), names_to="varname", values_to="qtile") |>
-  mutate(qtile = factor(qtile, levels=c(1,2,3,4,5))) |>
-  group_by(flow_cfs, varname, qtile) |> summarize(wua_per_lf=mean(wua_per_lf)) |> ungroup() |>
-  ggplot() + geom_line(aes(x=flow_cfs, y=wua_per_lf, color=qtile)) + facet_wrap(~varname) + scale_color_viridis_d() + scale_y_log10() + scale_x_log10()
-```
+Split into training and testing datasets
 
-## Split into training and testing datasets
 ```{r td-split}
 set.seed(47)
 td_split <- group_initial_split(td |> mutate(strata=paste(hyd_cls, dataset)), strata=strata, group=comid)
 
+# select some example reaches to use for validation
 test_comids <- testing(td_split) |> group_by(dataset, hyd_cls, comid) |> summarize() |> group_by(dataset, hyd_cls) |> filter(row_number()<=6) |> pull(comid)
-test_comids
 ```
 
-## Modeling
-
-### Linear regression
-
-```{r lm-spec}
-lm_spec <- linear_reg() 
-```
-
-First set up recipes (sets of predictor and response variables), then train and predict
-
-#### Scale-independent (%HSI versus dimensionless flow)
-
-Scale-independent model version predicts the percent suitable habitat area using normalized flow, and without using any direct correlates of watershed size.
-
-Technically this should not use linear regression as it is a proportion between zero and one, it should be using beta regression via the betareg package.
-
-```{r lm-si, message=FALSE}
-si_rec <- recipe(data=training(td_split), 
-      formula=hsi_frac ~ 
-        # flow as percent of mean annual flow
-        flow_norm_cfs + 
-        # channel characteristics: gradient and sinuosity
-        slope + sinuosity + 
-        # flow and channel characteristics, hydrologically predicted
-        erom_v_ma_fps + bf_depth_m + bf_w_d_ratio + 
-        # misc characteristics of the catchment
-        da_k_erodibility + da_avg_slope + mean_ndvi +
-        # misc characteristics of the locality
-        loc_bfi + loc_pct_clay + loc_pct_sand + loc_permeability + loc_bedrock_depth + loc_ppt_mean_mm +
-        # channel confinement
-        mtpi30_min + vb_bf_w_ratio + frac_leveed_longitudinal +
-        # baseflow as percent of mean annual flow
-        nf_bfl_dry_cfs_norm + nf_bfl_wet_cfs_norm + 
-        # aquatic
-        bio_aq_rank_sw + species + species_fish + 
-        # fixed effects
-        hqt_gradient_class + hyd_cls
-        ) |>
-  step_log(all_numeric_predictors(), -mtpi30_min, -mean_ndvi, -bio_aq_rank_sw, -vb_bf_w_ratio, -frac_leveed_longitudinal) |>
-  # let effect of flow vary with gradient
-  # step_interact(terms = ~ flow_norm_cfs:slope) #|>
-  step_dummy(hqt_gradient_class) |>
-  step_dummy(hyd_cls) |>
-  # PCA before interactions with flow
-  # step_pca(all_numeric_predictors(), -flow_norm_cfs, num_comp = 4) |>
-  # try interacting with all numeric predictors
-  step_interact(terms = ~ flow_norm_cfs:all_predictors()) |>
-  # add quadratic??
-  # step_poly(flow_norm_cfs, keep_original_cols=T) |>
-  # step_interact(terms = ~ flow_norm_cfs_poly_2:all_predictors()) |>
-  # let all effects vary with class
-  #step_interact(terms = ~hqt_gradient_class:all_numeric_predictors())
-  step_naomit(all_predictors()) |>
-  step_zv(all_predictors()) |>
-  step_normalize(all_numeric_predictors()) #, -flow_cfs)
-
-lm_si <- workflow() |>
-  add_recipe(si_rec) |>
-  add_model(lm_spec) |>
-  fit(data=training(td_split))
-
-lm_si |> glance()
-lm_si |> tidy()
-lm_si$fit$fit |> dotwhisker::dwplot()
-
-lm_si_res <- testing(td_split) |>
-  mutate(hsi_frac_pred = predict(lm_si, testing(td_split))[[".pred"]]) |>
-  select(comid, hsi_frac, hsi_frac_pred, flow_norm_cfs) |>
-  # crude constraint to between 0 and 1; better to use betareg
-  mutate(hsi_frac_pred=pmax(pmin(hsi_frac_pred,1),0))
-
-lm_si_res |>
-  arrange(comid, flow_norm_cfs) |>
-  ggplot() + geom_path(aes(x=hsi_frac, y=hsi_frac_pred, color=flow_norm_cfs, group=comid), linewidth=2) + 
-  coord_fixed() + geom_abline() + scale_color_viridis_c(trans="log10", name="Frac. of MAF") + 
-  ggtitle("Scale-independent model, linear regression") +
-  xlab("HSI (Frac. of Channel Area) (Actual)") + ylab("HSI (Frac. of Channel Area) (Predicted)")
-
-lm_si_res |> 
-  left_join(select(flowline_attributes, comid, erom_q_ma_cfs)) |>
-  mutate(flow_cfs = flow_norm_cfs * erom_q_ma_cfs) |>
-  filter(flow_cfs %in% c(300,500,1000,1500,3000,5000,10000,15000)) |>
-  ggplot() + geom_point(aes(x=hsi_frac, y=hsi_frac_pred, color=flow_cfs)) + 
-  facet_wrap(~flow_cfs, ncol = 4) +
-  coord_fixed() + geom_abline() + scale_color_viridis_c(name = "Flow (cfs)") + 
-  ggtitle("Scale-independent model, linear regression") +
-  xlab("HSI (Frac. of Channel Area) (Actual)") + ylab("HSI (Frac. of Channel Area) (Predicted)")
-
-lm_si_res |> filter(comid %in% test_comids) |>
-  left_join(transmute(flowline_attributes, comid, erom_q_ma_cfs)) |> #, chan_width_ft=chan_width_m/0.3048)) |>
-  ggplot(aes(x=flow_norm_cfs*erom_q_ma_cfs, group=1)) + facet_wrap(~comid) + 
-  geom_line(aes(y=hsi_frac_pred*100, color="predicted", group=1)) + geom_line(aes(y=hsi_frac*100, color="actual", group=1)) + 
-  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (% of Total Area)")
-```
-
-```{r lm-si-coeffs, fig.width=6.5, fig.height=6.5, dpi=300}
-lm_si |>
-  tidy() |>
-  mutate(ixn_class = if_else(str_detect(term, "flow_norm_cfs_x_"), "term_flow_norm_cfs_x_", "term") |> 
-                     factor(levels = c("term", "term_flow_norm_cfs_x_"), labels = c("Constant Effect", "Interaction with Flow (cfs)")),
-         term_root = str_replace(term, "flow_norm_cfs_x_", ""),
-         coeff_dir = if_else(estimate>0, "Positive", "Negative"),
-         ci_lower = estimate - qt(0.975, df = glance(lm_si)$df) * std.error,
-         ci_upper = estimate + qt(0.975, df = glance(lm_si)$df) * std.error,
-         estimate_abs = abs(estimate),
-         ci_lower_abs = ci_lower * if_else(coeff_dir=="Negative",-1,1),
-         ci_upper_abs = ci_upper * if_else(coeff_dir=="Negative",-1,1),
-         is_significant = sign(ci_lower)==sign(ci_upper)
-         ) |>
-  filter(term!="flow_norm_cfs" & term!="(Intercept)") |>
-  ggplot(aes(y = term_root, color = coeff_dir)) +
-  facet_wrap(~ixn_class, ncol = 2) + 
-  geom_errorbarh(aes(xmin = ci_lower_abs, xmax=ci_upper_abs)) + #pmax(0,ci_lower_abs), xmax = pmax(0,ci_upper_abs))) +
-  geom_point(aes(x = estimate_abs, fill = is_significant), shape=21) +
-  theme(legend.position="top",
-        panel.grid.minor = element_blank(),
-        panel.border = element_rect(fill = NA, color = "black"), 
-        legend.direction = "vertical") +
-  scale_y_discrete(limits=rev) + 
-  scale_fill_manual(name = "Significant (95%)", values = c("FALSE" = "white", "TRUE" = "black")) +
-  scale_color_manual(name = "Direction of Effect", values = c("Negative" = "goldenrod", "Positive" = "darkcyan")) +
-  xlab("Coefficient Magnitude") + ylab("")
-``` 
-
-#### Scale-dependent (WUA-per-linear-ft versus flow)
+## Scale Dependent Model: WUA-per-linear-ft versus flow
 
 Scale-dependent model version predicts the WUA per linear foot, using absolute flow values as well as watershed scale parameters.
 
-* interact flow and mean annual flow; flow and area/elev/ppt; to add scale dependence to the flow effect
+Straightforward but highly sensitive to the ranges of flow data available in training datasets.
 
-```{r lm-sd, message=FALSE}
+```{r recipe-sd, message=FALSE}
 sd_rec <- recipe(data=training(td_split), 
       formula = log_wua_per_lf ~ 
         # flow (cfs)
@@ -352,25 +236,17 @@ sd_rec <- recipe(data=training(td_split),
         hqt_gradient_class + hyd_cls
         ) |>
   step_log(all_numeric_predictors(), -mtpi30_min, -mean_ndvi, -vb_bf_w_ratio, -frac_leveed_longitudinal) |>
-  #step_interact(terms = ~ flow_cfs:erom_q_ma_cfs) |>
   step_interact(terms = ~ slope:da_area_sq_km) |>
-  #step_interact(terms = ~ flow_cfs:da_area_sq_km) |>
-  #step_interact(terms = ~ flow_cfs:da_elev_mean) |>
-  #step_interact(terms = ~ flow_cfs:da_ppt_mean_mm) #|>
-  # let all effects vary with class
-  #step_interact(terms = ~hqt_gradient_class:all_numeric_predictors())
-  # add quadratic??
-  # step_poly(flow_cfs, keep_original_cols=T) |>
-  # step_interact(terms = ~ flow_cfs_poly_2:all_predictors()) |>
   step_dummy(hqt_gradient_class) |>
   step_dummy(hyd_cls) |>
-  # PCA before interaction with flow 
-  # step_pca(all_numeric_predictors(), -flow_cfs, num_comp = 4) |>
-  # intract all terms with flow
   step_interact(terms = ~flow_cfs:all_predictors()) |>
   step_naomit(all_predictors()) |>
   step_zv(all_predictors()) |>
-  step_normalize(all_numeric_predictors())#, -flow_cfs)
+  step_normalize(all_numeric_predictors())
+```
+
+```{r lm-sd}
+lm_spec <- linear_reg() 
 
 lm_sd <- workflow() |>
   add_recipe(sd_rec) |>
@@ -379,12 +255,15 @@ lm_sd <- workflow() |>
 
 lm_sd |> glance()
 lm_sd |> tidy()
-lm_sd$fit$fit |> dotwhisker::dwplot()
 
-lm_sd_res <-
-testing(td_split) |>
-  mutate(log_wua_per_lf_pred = predict(lm_sd, testing(td_split))[[".pred"]]) |>
-  transmute(comid, wua_per_lf=exp(log_wua_per_lf), wua_per_lf_pred=exp(log_wua_per_lf_pred), flow_cfs) 
+lm_sd_res <- testing(td_split) |>
+  transmute(comid, flow_cfs,
+            # actuals
+            log_wua_per_lf, 
+            wua_per_lf = exp(log_wua_per_lf),
+            # predicted
+            log_wua_per_lf_pred = predict(lm_sd, testing(td_split))[[".pred"]],
+            wua_per_lf_pred=exp(log_wua_per_lf_pred))
 
 lm_sd_res |>
   arrange(comid, flow_cfs) |>
@@ -437,68 +316,155 @@ lm_sd |>
   xlab("Coefficient Magnitude") + ylab("")
 ``` 
 
-### Linear regression with regularized (lasso) feature selection 
+```{r rfr-sd-tune, eval=FALSE}
+rfr_spec <- rand_forest(mode = "regression", trees = tune())
+rfr_grid <- tibble(trees = 2^seq(0, 12, 1))
 
-#### Scale-independent (%HSI versus dimensionless flow)
+rfr_sd_tune <- 
+  workflow() |>
+  add_recipe(sd_rec) |>
+  add_model(rfr_spec) |>
+  tune_grid(resamples = folds,
+            grid = rfr_grid,
+            metrics = val_metrics)
+rfr_sd_tune |>
+  collect_metrics() |>
+  ggplot(aes(x = trees, y = mean, color = .metric)) +
+  geom_errorbar(aes(ymin = mean - std_err,
+                    ymax = mean + std_err),
+                width = 0.05) +
+  geom_line() +
+  facet_wrap(. ~ .metric, ncol = 1, scales="free") +
+  theme(legend.position = "none") + scale_x_log10()
+```
 
-```{r lasso-si, message=FALSE}
-drop_vars <- workflow() |>
+```{r rfr-sd, message=FALSE}
+rfr_spec <- rand_forest(mode = "regression", trees = 2^8)
+
+rfr_sd <- workflow() |>
+  add_recipe(sd_rec) |>
+  add_model(rfr_spec) |>
+  fit(data=training(td_split))
+
+rfr_sd$fit$fit |> print()
+
+rfr_sd_res <- testing(td_split) |>
+  transmute(comid, flow_cfs,
+            # actuals
+            log_wua_per_lf, 
+            wua_per_lf = exp(log_wua_per_lf),
+            # predicted
+            log_wua_per_lf_pred = predict(rfr_sd, testing(td_split))[[".pred"]],
+            wua_per_lf_pred=exp(log_wua_per_lf_pred))
+
+rfr_sd_res |>
+  arrange(comid, flow_cfs) |>
+  ggplot() + geom_path(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs, group=comid), linewidth=2) + 
+  scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c(name="Flow (cfs)")   + 
+  ggtitle("Scale-dependent model, random forest regression") +
+  xlab("WUA per LF (Actual)") + ylab("WUA per LF (Predicted)")
+
+rfr_sd_res |>
+  filter(flow_cfs %in% c(300,500,1000,1500,3000,5000,10000,15000)) |>
+  ggplot() + geom_point(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs)) + 
+  facet_wrap(~flow_cfs, ncol = 4) +
+  scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c(name="Flow (cfs)") + 
+  ggtitle("Scale-dependent model, random forest regression") +
+  xlab("WUA per LF (Actual)") + ylab("WUA per LF (Predicted)")
+
+rfr_sd_res |> filter(comid %in% test_comids) |>
+  ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
+  geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
+  scale_y_log10() + xlab("Flow (cfs)") + ylab("Suitable Habitat Area per LF Channel (ft)") 
+```
+
+
+## Scale Independent Model: %HSI versus flow (normalized by MAF)
+
+Scale-independent model version predicts the percent suitable habitat area using normalized flow, and without using any direct correlates of watershed size.
+
+**To actually apply these results, we need to also have an estimate of total inundated area, which can be then multiplied with the predicted %HSI.**
+
+Technically this should not use linear regression as it is a proportion between zero and one, it should more properly be using beta regression via the betareg package.
+
+```{r recipe-si, message=FALSE}
+si_rec <- recipe(data=training(td_split), 
+      formula=hsi_frac ~ 
+        # flow as percent of mean annual flow
+        flow_norm_cfs + 
+        # channel characteristics: gradient and sinuosity
+        slope + sinuosity + 
+        # flow and channel characteristics, hydrologically predicted
+        erom_v_ma_fps + bf_depth_m + bf_w_d_ratio + 
+        # misc characteristics of the catchment
+        da_k_erodibility + da_avg_slope + mean_ndvi +
+        # misc characteristics of the locality
+        loc_bfi + loc_pct_clay + loc_pct_sand + loc_permeability + loc_bedrock_depth + loc_ppt_mean_mm +
+        # channel confinement
+        mtpi30_min + vb_bf_w_ratio + frac_leveed_longitudinal +
+        # baseflow as percent of mean annual flow
+        nf_bfl_dry_cfs_norm + nf_bfl_wet_cfs_norm + 
+        # aquatic
+        bio_aq_rank_sw + species + species_fish + 
+        # fixed effects
+        hqt_gradient_class + hyd_cls
+        ) |>
+  step_log(all_numeric_predictors(), -mtpi30_min, -mean_ndvi, -bio_aq_rank_sw, -vb_bf_w_ratio, -frac_leveed_longitudinal) |>
+  step_dummy(hqt_gradient_class) |>
+  step_dummy(hyd_cls) |>
+  step_interact(terms = ~ flow_norm_cfs:all_predictors()) |>
+  step_naomit(all_predictors()) |>
+  step_zv(all_predictors()) |>
+  step_normalize(all_numeric_predictors()) 
+```
+
+```{r lm-si, message=FALSE}
+lm_spec <- linear_reg() 
+
+lm_si <- workflow() |>
   add_recipe(si_rec) |>
-  add_model(linear_reg(penalty = 0.005, mixture = 1) |> set_engine("glmnet")) |>
-  fit(data=training(td_split)) |>
-  tidy() |> 
-  filter(estimate==0) |> 
-  pull(term)
-
-lasso_si <- workflow() |>
-  add_recipe(si_rec |> step_rm(all_of(drop_vars))) |>
   add_model(lm_spec) |>
   fit(data=training(td_split))
 
-lasso_si |> glance()
-lasso_si |> tidy()
-lasso_si$fit$fit |> dotwhisker::dwplot()
+lm_si |> glance()
+lm_si |> tidy()
 
-lasso_si_res <- 
-testing(td_split) |>
-  mutate(hsi_frac_pred = predict(lasso_si, testing(td_split))[[".pred"]]) |>
-  select(comid, hsi_frac, hsi_frac_pred, flow_norm_cfs) |>
+lm_si_res <- testing(td_split) |>
+  transmute(comid, flow_cfs, flow_norm_cfs, erom_q_ma_cfs, hsi_frac,
+            hsi_frac_pred = predict(lm_si, testing(td_split))[[".pred"]]) |>
   # crude constraint to between 0 and 1; better to use betareg
   mutate(hsi_frac_pred=pmax(pmin(hsi_frac_pred,1),0))
 
-lasso_si_res |>
+lm_si_res |>
   arrange(comid, flow_norm_cfs) |>
   ggplot() + geom_path(aes(x=hsi_frac, y=hsi_frac_pred, color=flow_norm_cfs, group=comid), linewidth=2) + 
   coord_fixed() + geom_abline() + scale_color_viridis_c(trans="log10", name="Frac. of MAF") + 
-  ggtitle("Scale-independent model, linear regression w/ lasso feature selection") +
+  ggtitle("Scale-independent model, linear regression") +
   xlab("HSI (Frac. of Channel Area) (Actual)") + ylab("HSI (Frac. of Channel Area) (Predicted)")
 
-lasso_si_res |> 
-  left_join(select(flowline_attributes, comid, erom_q_ma_cfs)) |>
-  mutate(flow_cfs = flow_norm_cfs * erom_q_ma_cfs) |>
+lm_si_res |> 
   filter(flow_cfs %in% c(300,500,1000,1500,3000,5000,10000,15000)) |>
   ggplot() + geom_point(aes(x=hsi_frac, y=hsi_frac_pred, color=flow_cfs)) + 
   facet_wrap(~flow_cfs, ncol = 4) +
   coord_fixed() + geom_abline() + scale_color_viridis_c(name = "Flow (cfs)") + 
-  ggtitle("Scale-independent model, linear regression w/ lasso feature selection") +
+  ggtitle("Scale-independent model, linear regression") +
   xlab("HSI (Frac. of Channel Area) (Actual)") + ylab("HSI (Frac. of Channel Area) (Predicted)")
 
-lasso_si_res |> filter(comid %in% test_comids) |>
-  left_join(transmute(flowline_attributes, comid, erom_q_ma_cfs)) |> #, chan_width_ft=chan_width_m/0.3048)) |>
-  ggplot(aes(x=flow_norm_cfs*erom_q_ma_cfs, group=1)) + facet_wrap(~comid) + 
+lm_si_res |> filter(comid %in% test_comids) |>
+  ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=hsi_frac_pred*100, color="predicted", group=1)) + geom_line(aes(y=hsi_frac*100, color="actual", group=1)) + 
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (% of Total Area)")
 ```
 
-```{r lasso-si-coeffs, fig.width=6.5, fig.height=6.5, dpi=300}
-lasso_si |>
+```{r lm-si-coeffs, fig.width=6.5, fig.height=6.5, dpi=300}
+lm_si |>
   tidy() |>
   mutate(ixn_class = if_else(str_detect(term, "flow_norm_cfs_x_"), "term_flow_norm_cfs_x_", "term") |> 
                      factor(levels = c("term", "term_flow_norm_cfs_x_"), labels = c("Constant Effect", "Interaction with Flow (cfs)")),
          term_root = str_replace(term, "flow_norm_cfs_x_", ""),
          coeff_dir = if_else(estimate>0, "Positive", "Negative"),
-         ci_lower = estimate - qt(0.975, df = glance(lasso_si)$df) * std.error,
-         ci_upper = estimate + qt(0.975, df = glance(lasso_si)$df) * std.error,
+         ci_lower = estimate - qt(0.975, df = glance(lm_si)$df) * std.error,
+         ci_upper = estimate + qt(0.975, df = glance(lm_si)$df) * std.error,
          estimate_abs = abs(estimate),
          ci_lower_abs = ci_lower * if_else(coeff_dir=="Negative",-1,1),
          ci_upper_abs = ci_upper * if_else(coeff_dir=="Negative",-1,1),
@@ -518,90 +484,6 @@ lasso_si |>
   scale_color_manual(name = "Direction of Effect", values = c("Negative" = "goldenrod", "Positive" = "darkcyan")) +
   xlab("Coefficient Magnitude") + ylab("")
 ``` 
-
-#### Scale-dependent (WUA-per-linear-ft versus flow)
-
-```{r lasso-sd, message=FALSE}
-drop_vars <- workflow() |>
-  add_recipe(sd_rec) |>
-  add_model(linear_reg(penalty = 0.005, mixture = 1) |> set_engine("glmnet")) |>
-  fit(data=training(td_split)) |>
-  tidy() |> 
-  filter(estimate==0) |> 
-  pull(term)
-
-lasso_sd <- workflow() |>
-  add_recipe(sd_rec |>
-               step_rm(all_of(drop_vars))) |>
-  add_model(lm_spec) |>
-  fit(data=training(td_split))
-
-lasso_sd |> glance()
-lasso_sd |> tidy()
-lasso_sd$fit$fit |> dotwhisker::dwplot()
-
-lasso_sd_res <- 
-testing(td_split) |>
-  mutate(log_wua_per_lf_pred = predict(lasso_sd, testing(td_split))[[".pred"]]) |>
-  transmute(comid, wua_per_lf=exp(log_wua_per_lf), wua_per_lf_pred=exp(log_wua_per_lf_pred), flow_cfs) 
-
-lasso_sd_res |>
-  arrange(comid, flow_cfs) |>
-  ggplot() + geom_path(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs, group=comid), linewidth=2) + 
-  scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c(name="Flow (cfs)")   + 
-  ggtitle("Scale-dependent model, linear regression w/ lasso feature selection") +
-  xlab("WUA per LF (Actual)") + ylab("WUA per LF (Predicted)")
-
-lasso_sd_res |>
-  filter(flow_cfs %in% c(300,500,1000,1500,3000,5000,10000,15000)) |>
-  ggplot() + geom_point(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs)) + 
-  facet_wrap(~flow_cfs, ncol = 4) +
-  scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c(name="Flow (cfs)") + 
-  ggtitle("Scale-dependent model, linear regression w/ lasso feature selection") +
-  xlab("WUA per LF (Actual)") + ylab("WUA per LF (Predicted)")
-
-lasso_sd_res |> filter(comid %in% test_comids) |>
-  ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
-  geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
-  scale_y_log10() + xlab("Flow (cfs)") + ylab("Suitable Habitat Area per LF Channel (ft)")
-```
-```{r lasso-sd-coeffs, fig.width=6.5, fig.height=6.5, dpi=300}
-lasso_sd |>
-  tidy() |>
-  mutate(ixn_class = if_else(str_detect(term, "flow_cfs_x_"), "term_flow_cfs_x_", "term") |> 
-                     factor(levels = c("term", "term_flow_cfs_x_"), labels = c("Constant Effect", "Interaction with Flow (cfs)")),
-         term_root = str_replace(term, "flow_cfs_x_", ""),
-         coeff_dir = if_else(estimate>0, "Positive", "Negative"),
-         ci_lower = estimate - qt(0.975, df = glance(lasso_sd)$df) * std.error,
-         ci_upper = estimate + qt(0.975, df = glance(lasso_sd)$df) * std.error,
-         estimate_abs = abs(estimate),
-         ci_lower_abs = ci_lower * if_else(coeff_dir=="Negative",-1,1),
-         ci_upper_abs = ci_upper * if_else(coeff_dir=="Negative",-1,1),
-         is_significant = sign(ci_lower)==sign(ci_upper)
-         ) |>
-  filter(term!="flow_cfs" & term!="(Intercept)") |>
-  ggplot(aes(y = term_root, color = coeff_dir)) +
-  facet_wrap(~ixn_class, ncol = 2) + 
-  geom_errorbarh(aes(xmin = ci_lower_abs, xmax=ci_upper_abs)) + #pmax(0,ci_lower_abs), xmax = pmax(0,ci_upper_abs))) +
-  geom_point(aes(x = estimate_abs, fill = is_significant), shape=21) +
-  theme(legend.position="top",
-        panel.grid.minor = element_blank(),
-        panel.border = element_rect(fill = NA, color = "black"), 
-        legend.direction = "vertical") +
-  scale_y_discrete(limits=rev) + 
-  scale_fill_manual(name = "Significant (95%)", values = c("FALSE" = "white", "TRUE" = "black")) +
-  scale_color_manual(name = "Direction of Effect", values = c("Negative" = "goldenrod", "Positive" = "darkcyan")) +
-  xlab("Coefficient Magnitude") + ylab("")
-``` 
-
-### Random Forest Regrssion
-
-```{r rfr-spec}
-#install.packages("ranger")
-#rfr_spec <- rand_forest(mode = "regression", trees = 2^12)
-```
-
-#### Scale-independent (%HSI versus dimensionless flow)
 
 ```{r rfr-si-tune, eval=FALSE} 
 # set up cross validation
@@ -640,10 +522,9 @@ rfr_si <- workflow() |>
 
 rfr_si$fit$fit |> print()
 
-rfr_si_res <- 
-testing(td_split) |>
-  mutate(hsi_frac_pred = predict(rfr_si, testing(td_split))[[".pred"]]) |>
-  select(comid, hsi_frac, hsi_frac_pred, flow_norm_cfs) |>
+rfr_si_res <- testing(td_split) |>
+  transmute(comid, flow_cfs, flow_norm_cfs, erom_q_ma_cfs, hsi_frac,
+            hsi_frac_pred = predict(rfr_si, testing(td_split))[[".pred"]]) |>
   # crude constraint to between 0 and 1; better to use betareg
   mutate(hsi_frac_pred=pmax(pmin(hsi_frac_pred,1),0))
 
@@ -655,8 +536,6 @@ rfr_si_res |>
   xlab("HSI (Frac. of Channel Area) (Actual)") + ylab("HSI (Frac. of Channel Area) (Predicted)")
 
 rfr_si_res |> 
-  left_join(select(flowline_attributes, comid, erom_q_ma_cfs)) |>
-  mutate(flow_cfs = flow_norm_cfs * erom_q_ma_cfs) |>
   filter(flow_cfs %in% c(300,500,1000,1500,3000,5000,10000,15000)) |>
   ggplot() + geom_point(aes(x=hsi_frac, y=hsi_frac_pred, color=flow_cfs)) + 
   facet_wrap(~flow_cfs, ncol = 4) +
@@ -665,73 +544,163 @@ rfr_si_res |>
   xlab("HSI (Frac. of Channel Area) (Actual)") + ylab("HSI (Frac. of Channel Area) (Predicted)")
 
 rfr_si_res |> filter(comid %in% test_comids) |>
-  left_join(transmute(flowline_attributes, comid, erom_q_ma_cfs)) |> #, chan_width_ft=chan_width_m/0.3048)) |>
-  ggplot(aes(x=flow_norm_cfs*erom_q_ma_cfs, group=1)) + facet_wrap(~comid) + 
+  ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=hsi_frac_pred*100, color="predicted", group=1)) + geom_line(aes(y=hsi_frac*100, color="actual", group=1)) + 
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (% of Total Area)")
 ```
 
-#### Scale-dependent (WUA-per-linear-ft versus flow)
+## Alternative Scale Independent Model: WUA-per-linear-ft (normalized by MAF) versus flow (normalized by MAF)
 
-```{r rfr-sd-tune, eval=FALSE}
-rfr_spec <- rand_forest(mode = "regression", trees = tune())
-rfr_grid <- tibble(trees = 2^seq(0, 12, 1))
+A potential compromise between the previous two models that scales the results by mean annual flow, then unscales them after prediction.
 
-rfr_sd_tune <- 
-  workflow() |>
-  add_recipe(sd_rec) |>
-  add_model(rfr_spec) |>
-  tune_grid(resamples = folds,
-            grid = rfr_grid,
-            metrics = val_metrics)
-rfr_sd_tune |>
-  collect_metrics() |>
-  ggplot(aes(x = trees, y = mean, color = .metric)) +
-  geom_errorbar(aes(ymin = mean - std_err,
-                    ymax = mean + std_err),
-                width = 0.05) +
-  geom_line() +
-  facet_wrap(. ~ .metric, ncol = 1, scales="free") +
-  theme(legend.position = "none") + scale_x_log10()
+```{r recipe-si2, message=FALSE}
+si2_rec <- recipe(data=training(td_split), 
+      formula=log_wua_per_lf_norm ~ 
+        # flow as percent of mean annual flow
+        flow_norm_cfs + 
+        # channel characteristics: gradient and sinuosity
+        slope + sinuosity + 
+        # flow and channel characteristics, hydrologically predicted
+        erom_v_ma_fps + bf_depth_m + bf_w_d_ratio + 
+        # misc characteristics of the catchment
+        da_k_erodibility + da_avg_slope + mean_ndvi +
+        # misc characteristics of the locality
+        loc_bfi + loc_pct_clay + loc_pct_sand + loc_permeability + loc_bedrock_depth + loc_ppt_mean_mm +
+        # channel confinement
+        mtpi30_min + vb_bf_w_ratio + frac_leveed_longitudinal +
+        # baseflow as percent of mean annual flow
+        nf_bfl_dry_cfs_norm + nf_bfl_wet_cfs_norm + 
+        # aquatic
+        bio_aq_rank_sw + species + species_fish + 
+        # fixed effects
+        hqt_gradient_class + hyd_cls
+        ) |>
+  step_log(all_numeric_predictors(), -mtpi30_min, -mean_ndvi, -bio_aq_rank_sw, -vb_bf_w_ratio, -frac_leveed_longitudinal) |>
+  step_dummy(hqt_gradient_class) |>
+  step_dummy(hyd_cls) |>
+  step_interact(terms = ~ flow_norm_cfs:all_predictors()) |>
+  step_naomit(all_predictors()) |>
+  step_zv(all_predictors()) |>
+  step_normalize(all_numeric_predictors())
 ```
 
-```{r rfr-sd, message=FALSE}
-rfr_spec <- rand_forest(mode = "regression", trees = 2^8)
+```{r lm-si2, message=FALSE}
+lm_spec <- linear_reg() 
 
-rfr_sd <- workflow() |>
-  add_recipe(sd_rec) |>
-  add_model(rfr_spec) |>
+lm_si2 <- workflow() |>
+  add_recipe(si2_rec) |>
+  add_model(lm_spec) |>
   fit(data=training(td_split))
 
-rfr_sd$fit$fit |> print()
+lm_si2 |> glance()
+lm_si2 |> tidy()
 
-rfr_sd_res <-
-testing(td_split) |>
-  mutate(log_wua_per_lf_pred = predict(rfr_sd, testing(td_split))[[".pred"]]) |>
-  transmute(comid, wua_per_lf=exp(log_wua_per_lf), wua_per_lf_pred=exp(log_wua_per_lf_pred), flow_cfs) 
+lm_si2_res <- testing(td_split) |>
+  transmute(comid, flow_norm_cfs, flow_cfs, erom_q_ma_cfs,
+            # actuals
+            log_wua_per_lf_norm,
+            wua_per_lf_norm = exp(log_wua_per_lf_norm), 
+            wua_per_lf = wua_per_lf_norm * erom_q_ma_cfs,
+            # predicted
+            log_wua_per_lf_norm_pred = predict(lm_si2, testing(td_split))[[".pred"]],
+            wua_per_lf_norm_pred = exp(log_wua_per_lf_norm_pred),
+            wua_per_lf_pred = wua_per_lf_norm_pred * erom_q_ma_cfs)
 
-rfr_sd_res |>
-  arrange(comid, flow_cfs) |>
+lm_si2_res |>
+  arrange(comid, flow_norm_cfs) |>
   ggplot() + geom_path(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs, group=comid), linewidth=2) + 
-  scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c(name="Flow (cfs)")   + 
-  ggtitle("Scale-dependent model, random forest regression") +
-  xlab("WUA per LF (Actual)") + ylab("WUA per LF (Predicted)")
+  coord_fixed() + geom_abline() + scale_color_viridis_c(trans="log10", name="Frac. of MAF") + 
+  ggtitle("Scale-independent model, linear regression") +
+  xlab("Suitable Habitat Area (ft2) per LF (Actual)") + ylab("Suitable Habitat Area (ft2) per LF (Predicted)")
 
-rfr_sd_res |>
+lm_si2_res |> 
   filter(flow_cfs %in% c(300,500,1000,1500,3000,5000,10000,15000)) |>
   ggplot() + geom_point(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs)) + 
   facet_wrap(~flow_cfs, ncol = 4) +
-  scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c(name="Flow (cfs)") + 
-  ggtitle("Scale-dependent model, random forest regression") +
-  xlab("WUA per LF (Actual)") + ylab("WUA per LF (Predicted)")
+  coord_fixed() + geom_abline() + scale_color_viridis_c(name = "Flow (cfs)") + 
+  ggtitle("Scale-independent model, linear regression") +
+  xlab("Suitable Habitat Area (ft2) per LF (Actual)") + ylab("Suitable Habitat Area (ft2) per LF (Predicted)")
 
-rfr_sd_res |> filter(comid %in% test_comids) |>
+lm_si2_res |> filter(comid %in% test_comids) |>
   ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
-  geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
-  scale_y_log10() + xlab("Flow (cfs)") + ylab("Suitable Habitat Area per LF Channel (ft)") 
+  geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + 
+  geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2) per LF")
 ```
 
-## Random Forest model prediction output
+```{r lm-si2-coeffs, fig.width=6.5, fig.height=6.5, dpi=300}
+lm_si2 |>
+  tidy() |>
+  mutate(ixn_class = if_else(str_detect(term, "flow_norm_cfs_x_"), "term_flow_norm_cfs_x_", "term") |> 
+                     factor(levels = c("term", "term_flow_norm_cfs_x_"), labels = c("Constant Effect", "Interaction with Flow (cfs)")),
+         term_root = str_replace(term, "flow_norm_cfs_x_", ""),
+         coeff_dir = if_else(estimate>0, "Positive", "Negative"),
+         ci_lower = estimate - qt(0.975, df = glance(lm_si)$df) * std.error,
+         ci_upper = estimate + qt(0.975, df = glance(lm_si)$df) * std.error,
+         estimate_abs = abs(estimate),
+         ci_lower_abs = ci_lower * if_else(coeff_dir=="Negative",-1,1),
+         ci_upper_abs = ci_upper * if_else(coeff_dir=="Negative",-1,1),
+         is_significant = sign(ci_lower)==sign(ci_upper)
+         ) |>
+  filter(term!="flow_norm_cfs" & term!="(Intercept)") |>
+  ggplot(aes(y = term_root, color = coeff_dir)) +
+  facet_wrap(~ixn_class, ncol = 2) + 
+  geom_errorbarh(aes(xmin = ci_lower_abs, xmax=ci_upper_abs)) + #pmax(0,ci_lower_abs), xmax = pmax(0,ci_upper_abs))) +
+  geom_point(aes(x = estimate_abs, fill = is_significant), shape=21) +
+  theme(legend.position="top",
+        panel.grid.minor = element_blank(),
+        panel.border = element_rect(fill = NA, color = "black"), 
+        legend.direction = "vertical") +
+  scale_y_discrete(limits=rev) + 
+  scale_fill_manual(name = "Significant (95%)", values = c("FALSE" = "white", "TRUE" = "black")) +
+  scale_color_manual(name = "Direction of Effect", values = c("Negative" = "goldenrod", "Positive" = "darkcyan")) +
+  xlab("Coefficient Magnitude") + ylab("")
+``` 
+
+```{r rfr-si2, message=FALSE}
+rfr_spec <- rand_forest(mode = "regression", trees = 2^8)
+
+rfr_si2 <- workflow() |>
+  add_recipe(si2_rec) |>
+  add_model(rfr_spec) |>
+  fit(data=training(td_split))
+
+rfr_si2$fit$fit |> print()
+
+rfr_si2_res <- testing(td_split) |>
+  transmute(comid, flow_norm_cfs, flow_cfs, erom_q_ma_cfs,
+            # actuals
+            log_wua_per_lf_norm,
+            wua_per_lf_norm = exp(log_wua_per_lf_norm), 
+            wua_per_lf = wua_per_lf_norm * erom_q_ma_cfs,
+            # predicted
+            log_wua_per_lf_norm_pred = predict(rfr_si2, testing(td_split))[[".pred"]],
+            wua_per_lf_norm_pred = exp(log_wua_per_lf_norm_pred),
+            wua_per_lf_pred = wua_per_lf_norm_pred * erom_q_ma_cfs)
+
+rfr_si2_res |>
+  arrange(comid, flow_norm_cfs) |>
+  ggplot() + geom_path(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs, group=comid), linewidth=2) + 
+  coord_fixed() + geom_abline() + scale_color_viridis_c(trans="log10", name="Frac. of MAF") + 
+  ggtitle("Scale-independent model 2, random forest regression") +
+  xlab("Suitable Habitat Area (ft2) per LF (Actual)") + ylab("Suitable Habitat Area (ft2) per LF (Predicted)")
+
+rfr_si2_res |> 
+  filter(flow_cfs %in% c(300,500,1000,1500,3000,5000,10000,15000)) |>
+  ggplot() + geom_point(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs)) + 
+  facet_wrap(~flow_cfs, ncol = 4) +
+  coord_fixed() + geom_abline() + scale_color_viridis_c(name = "Flow (cfs)") + 
+  ggtitle("Scale-independent model 2, random forest regression") +
+  xlab("Suitable Habitat Area ft2) per LF (Actual)") + ylab("Suitable Habitat Area ft2) per LF (Predicted)")
+
+rfr_si2_res |> filter(comid %in% test_comids) |>
+  ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
+  geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + 
+  geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2) per LF")
+```
+
+## Prediction and Validation
 
 ```{r prediction-data}
 # assemble prediction dataset
@@ -751,18 +720,6 @@ pd <- flowline_attributes |>
   mutate(flow_norm_cfs = coalesce(flow_cfs/erom_q_ma_cfs,0)) |> # flow as a percent of mean annual flow
   arrange(comid, flow_cfs) |>
   glimpse()
-
-# # get min/max ranges from the training data
-# ranges <- td |> select(all_of(names(pd))) |> 
-#   reframe(across(everything(), function(x) (range(x)))) 
-# # filter the prediction data for just those falling within the training data
-# pd_idx <- pd |> 
-#   select(comid, all_of(names(ranges))) |>
-#   mutate(across(-comid, function(x) x>ranges[[cur_column()]][[1]] & x<=ranges[[cur_column()]][[2]])) |>
-#   filter(if_all(-comid)) |>
-#   pull(comid)
-# # update pd to exclude the out-of-range data
-# pd <- pd |> filter(comid %in% pd_idx) |> glimpse()
 ```
 
 ```{r prediction-output}
@@ -770,23 +727,48 @@ sd_pred <-
   sd_rec |> 
   prep(training(td_split)) |> 
   bake(pd) |> 
-  bind_cols(pd |> transmute(comid, flow_cfs_orig=flow_cfs)) |>
+  bind_cols(pd |> transmute(comid, 
+                            flow_cfs_orig = flow_cfs)) |>
   drop_na() %>% # need to use magrittr pipe for this purpose
   mutate(log_wua_per_lf_pred = predict(rfr_sd$fit$fit, new_data=.)[[".pred"]]) |>
-  transmute(comid, flow_cfs=flow_cfs_orig, log_wua_per_lf_pred) |>
-  mutate(wua_per_lf_pred = exp(log_wua_per_lf_pred)) |>
+  transmute(comid, 
+            flow_cfs = flow_cfs_orig, 
+            log_wua_per_lf_pred,
+            wua_per_lf_pred = exp(log_wua_per_lf_pred)) |>
   glimpse()
 
 si_pred <- 
   si_rec |> 
   prep(training(td_split)) |> 
   bake(pd) |> 
-  bind_cols(pd |> transmute(comid, flow_norm_cfs_orig=flow_norm_cfs)) |>
+  bind_cols(pd |> transmute(comid, 
+                            flow_norm_cfs_orig = flow_norm_cfs,
+                            erom_q_ma_cfs_orig = erom_q_ma_cfs)) |>
   drop_na() %>% # need to use magrittr pipe for this purpose
   mutate(hsi_frac_pred = predict(rfr_si$fit$fit, new_data=.)[[".pred"]]) |>
-  transmute(comid, flow_norm_cfs=flow_norm_cfs_orig, hsi_frac_pred) |>
+  transmute(comid, 
+            flow_norm_cfs = flow_norm_cfs_orig, 
+            hsi_frac_pred) |>
   left_join(flowline_attributes |> transmute(comid, bf_width_ft = bf_width_m/0.3048), by=join_by(comid)) |>
   mutate(wua_per_lf_pred = hsi_frac_pred * bf_width_ft) |>
+  glimpse()
+
+si2_pred <- 
+  si2_rec |> 
+  prep(training(td_split)) |> 
+  bake(pd) |> 
+  # bring in unbaked variables
+  bind_cols(pd |> transmute(comid, 
+                            flow_norm_cfs_orig = flow_norm_cfs, 
+                            erom_q_ma_cfs_orig = erom_q_ma_cfs)) |>
+  drop_na() %>% # need to use magrittr pipe for this purpose
+  mutate(log_wua_per_lf_norm_pred = predict(rfr_si2$fit$fit, new_data=.)[[".pred"]]) |>
+  transmute(comid, 
+            flow_norm_cfs = flow_norm_cfs_orig, 
+            erom_q_ma_cfs = erom_q_ma_cfs_orig,
+            log_wua_per_lf_norm_pred) |>
+  mutate(wua_per_lf_norm_pred = exp(log_wua_per_lf_norm_pred),
+         wua_per_lf_pred = wua_per_lf_norm_pred * erom_q_ma_cfs) |>
   glimpse()
 ```
 
@@ -865,14 +847,13 @@ mainstems_comid |>
   theme(legend.key.height = unit(12, "point"))
 ```
 
-```{r dsmhabitat-val}
+```{r dsmhabitat-sd-val}
 mod <- rfr_sd$fit$fit
-#mod <- lm_sd$fit$fit
 
 pd_dsmhabitat <- flowline_attributes |> 
   # select the variables that are used in the model and drop NAs
   select(comid, any_of(sd_rec$var_info$variable)) |> 
-  inner_join(select(mainstems_comid, comid, river)) |>
+  inner_join(select(mainstems_comid, comid, river), by=join_by(comid)) |>
   # left join dsm_flows to bring in the exact flows used in DSMhabitat:
   # left_join(dsm_flows, by=join_by(river), relationship="many-to-many") |>
   # or use expand_grid to bring in the modeled flows instead:
@@ -896,14 +877,16 @@ pd_dsmhabitat_pred <-
 pd_rf_by_mainstem <-
   mainstems_comid |> 
   st_drop_geometry() |>
-  inner_join(pd_dsmhabitat_pred, by=join_by(comid), relationship="many-to-many") |>
+  inner_join(pd_dsmhabitat_pred, by=join_by(comid), relationship="one-to-many") |>
+  mutate(length_ft = coalesce(length_ft,0),
+         wua_per_lf_pred = coalesce(wua_per_lf_pred,0),
+         wua_ft2_pred = wua_per_lf_pred * length_ft) |>
   group_by(river, flow_cfs) |>
-  summarize(tot_wua_per_lf_pred = sum(coalesce(wua_per_lf_pred,0)),
-            tot_length_ft = sum(coalesce(length_ft,0))) |>
-  mutate(tot_wua_ft2 = tot_wua_per_lf_pred * tot_length_ft,
-         tot_wua_ac = tot_wua_ft2 / 43560,
-         avg_wua_ft2_per_lf = tot_wua_ft2 / tot_length_ft,
-         avg_wua_ft2_per_1000ft = 1000 * avg_wua_ft2_per_lf) 
+  summarize(tot_length_ft = sum(length_ft),
+            tot_wua_ft2 = sum(wua_ft2_pred),
+            tot_wua_ac = tot_wua_ft2 / 43560,
+            avg_wua_ft2_per_lf = tot_wua_ft2 / tot_length_ft,
+            avg_wua_ft2_per_1000ft = 1000 * avg_wua_ft2_per_lf)
 
 pd_rf_by_mainstem |>
   ggplot() + 
@@ -928,13 +911,13 @@ pd_rf_by_mainstem |>
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
 ```
 
-```{r dsmhabitat-watershed-comp-floodplain}
+```{r dsmhabitat-sd-watershed-comps}
 pd_rf_by_mainstem |> 
-  inner_join(dsm_habitat_floodplain, by=join_by(river==river, flow_cfs==flow_cfs)) |> 
+  #inner_join(dsm_habitat_floodplain, by=join_by(river==river, flow_cfs==flow_cfs)) |> 
   #filter(river == "American River") |> 
   ggplot() +
   geom_line(aes(x = flow_cfs, y = tot_wua_ac, color='modeled')) + 
-  geom_line(aes(x = flow_cfs, y = FR_floodplain_acres_suitable, color = 'DSMhabitat')) +  
+  geom_line(data=dsm_habitat_floodplain, aes(x = flow_cfs, y = FR_floodplain_acres_suitable, color = 'DSMhabitat')) +  
   facet_wrap(~river) + #, scales="free_y") + 
   scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
@@ -942,14 +925,12 @@ pd_rf_by_mainstem |>
         panel.grid.minor = element_blank(),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   xlab("Flow (cfs)") + ylab("Total WUA (ac)")
-```
 
-```{r dsmhabitat-watershed-comp-instream}
 pd_rf_by_mainstem |> 
-  inner_join(dsm_habitat_instream, by=join_by(river==river, flow_cfs==flow_cfs)) |> 
+  #inner_join(dsm_habitat_instream, by=join_by(river==river, flow_cfs==flow_cfs)) |> 
   ggplot() +
-  geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_1000ft, color='modeled')) + 
-  geom_line(aes(x = flow_cfs, y = FR_juv_wua, color = 'DSMhabitat')) +  
+  geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color='modeled')) + 
+  geom_line(data=dsm_habitat_instream, aes(x = flow_cfs, y = FR_juv_wua/1000, color = 'DSMhabitat')) +  
   facet_wrap(~river) + #, scales="free_y") + 
   scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
@@ -965,7 +946,7 @@ mod <- rfr_si$fit$fit
 
 pd_dsmhabitat <- flowline_attributes |> 
   select(comid, any_of(si_rec$var_info$variable), erom_q_ma_cfs, nf_bfl_dry_cfs, nf_bfl_wet_cfs) |> 
-  inner_join(select(mainstems_comid, comid, river)) |>
+  inner_join(select(mainstems_comid, comid, river), by=join_by(comid)) |>
   expand_grid(flow_cfs = interp_flows) |>
   arrange(comid, flow_cfs) |>
   filter(comid %in% mainstems_comid$comid) |>
@@ -988,14 +969,16 @@ pd_dsmhabitat_pred <-
 pd_rf_by_mainstem <-
   mainstems_comid |> 
   st_drop_geometry() |>
-  inner_join(pd_dsmhabitat_pred, by=join_by(comid), relationship="many-to-many") |>
+  inner_join(pd_dsmhabitat_pred, by=join_by(comid), relationship="one-to-many") |>
+  mutate(length_ft = coalesce(length_ft,0),
+         wua_per_lf_pred = coalesce(wua_per_lf_pred,0),
+         wua_ft2_pred = wua_per_lf_pred * length_ft) |>
   group_by(river, flow_cfs) |>
-  summarize(tot_wua_per_lf_pred = sum(coalesce(wua_per_lf_pred,0)),
-            tot_length_ft = sum(coalesce(length_ft,0))) |>
-  mutate(tot_wua_ft2 = tot_wua_per_lf_pred * tot_length_ft,
-         tot_wua_ac = tot_wua_ft2 / 43560,
-         avg_wua_ft2_per_lf = tot_wua_ft2 / tot_length_ft,
-         avg_wua_ft2_per_1000ft = 1000 * avg_wua_ft2_per_lf) 
+  summarize(tot_length_ft = sum(length_ft),
+            tot_wua_ft2 = sum(wua_ft2_pred),
+            tot_wua_ac = tot_wua_ft2 / 43560,
+            avg_wua_ft2_per_lf = tot_wua_ft2 / tot_length_ft,
+            avg_wua_ft2_per_1000ft = 1000 * avg_wua_ft2_per_lf)
 
 pd_rf_by_mainstem |>
   ggplot() + 
@@ -1020,141 +1003,64 @@ pd_rf_by_mainstem |>
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
 ```
 
-===
+```{r dsmhabitat-si2-val}
+mod <- rfr_si2$fit$fit
+#mod <- lm_si$fit$fit
 
-```{r}
-knitr::knit_exit()
-```
-
-## TESTS
-
-### Cross Validation
-
-```{r}
-# test cross validation on the linear model
-lm_sd |> fit_resamples(resamples=folds, metrics=val_metrics) |> collect_metrics()
-
-# run the same cross validation against all models
-enframe(list("lm"=lm_sd, "lasso"=lasso_sd, "rfr"=rfr_sd), value="model") |> 
-  mutate(result = map(model, function(x) {x |> 
-      fit_resamples(resamples=folds, metrics=metric_set(rsq)) |> 
-      collect_metrics()
-    })) |> unnest(result)
-
-```
-
-### Check for overfit
-
-```{r}
-# check to make sure not overfitting
-
-# rfr_sd |> predict(training(td_split)) |> bind_cols(training(td_split)) |> val_metrics(truth = wua_per_lf, estimate=.pred)
-# rfr_sd |> predict(testing(td_split)) |> bind_cols(testing(td_split)) |> val_metrics(truth = wua_per_lf, estimate=.pred)
-bind_rows(list(training=bind_cols(predict(rfr_sd, training(td_split)), training(td_split)), 
-               testing=bind_cols(predict(rfr_sd, testing(td_split)), testing(td_split)))
-          , .id="id") |>
-  group_by(id)  |> 
-  val_metrics(truth = wua_per_lf, estimate=.pred)
-
-bind_rows(list(training=bind_cols(predict(rfr_si, training(td_split)), training(td_split)), 
-               testing=bind_cols(predict(rfr_si, testing(td_split)), testing(td_split)))
-          , .id="id") |>
-  group_by(id)  |> 
-  val_metrics(truth = hsi_frac, estimate=.pred)
-```
-
-```{r}
-```
-
-### Series interpolated (panel) regression
-
-```{r}
-# interpolate series so there is a value fo every 100 flows
-td_series <- td |>
-  group_by(comid) |>
+pd_dsmhabitat <- flowline_attributes |> 
+  select(comid, any_of(si2_rec$var_info$variable), erom_q_ma_cfs, nf_bfl_dry_cfs, nf_bfl_wet_cfs) |> 
+  inner_join(select(mainstems_comid, comid, river), by=join_by(comid)) |>
+  expand_grid(flow_cfs = interp_flows) |>
   arrange(comid, flow_cfs) |>
-  complete(flow_cfs = seq(from = min(flow_cfs), to = max(flow_cfs), by = 100)) |>
-  mutate(across(hsi_frac:last_col(), function(var) zoo::na.approx(var, x = flow_cfs))) |>
-  filter(flow_cfs%%100==0) |> ungroup()
+  filter(comid %in% mainstems_comid$comid) |>
+  mutate(flow_norm_cfs = flow_cfs / erom_q_ma_cfs,
+       nf_bfl_dry_cfs_norm = nf_bfl_dry_cfs/erom_q_ma_cfs, 
+       nf_bfl_wet_cfs_norm = nf_bfl_wet_cfs/erom_q_ma_cfs) |>
+  drop_na()
 
-sd_series_rec <- recipe(data=td_series, 
-      formula = log_wua_per_lf ~ 
-        # flow (cfs)
-        flow_cfs + 
-        # predictors of flow (catchment area, elevation, and MAP) -- attributes for gradient and upstream drainage area are interrelated
-        slope + da_area_sq_km + da_elev_mean + da_ppt_mean_mm +
-        # baseflow/peak flow statistics
-        nf_bfl_dry_cfs + nf_bfl_wet_cfs + erom_q_ma_cfs + #log(peak_q2_cfs)  + log(peak_q5_cfs) + log(peak_q10_cfs) +
-        # flow and channel characteristics, hydrologically predicted
-        erom_v_ma_fps + bf_depth_m + bf_w_d_ratio + 
-        # misc characteristics of the catchment
-        da_k_erodibility + da_avg_slope + mean_ndvi +
-        # misc characteristics of the locality
-        loc_bfi + loc_pct_clay + loc_pct_sand + loc_permeability + loc_bedrock_depth + loc_ppt_mean_mm +
-        # channel confinement characteristics
-        mtpi30_min + #log(vb_width_transect) + log(vb_bf_w_ratio) +
-        # channel sinuosity
-        sinuosity
-        ) |>
-  step_log(all_numeric_predictors(), -mtpi30_min) |>
-  step_interact(terms = ~ flow_cfs:erom_q_ma_cfs) |>
-  step_interact(terms = ~ slope:da_area_sq_km) |>
-  step_interact(terms = ~ flow_cfs:da_area_sq_km) |>
-  step_interact(terms = ~ flow_cfs:da_elev_mean) |>
-  step_interact(terms = ~ flow_cfs:da_ppt_mean_mm) |>
-  step_lag(flow_cfs) |>
-  step_interact(terms = ~ flow_cfs:lag_1_flow_cfs) 
-  #step_interact(terms = ~ lag_1_flow_cfs:all_numeric_predictors())
+pd_dsmhabitat_pred <- 
+  si2_rec |> 
+  prep(training(td_split)) |> 
+  bake(pd_dsmhabitat) |> 
+  bind_cols(select(pd_dsmhabitat, comid, flow_cfs_actual=flow_cfs, erom_q_ma_cfs_actual=erom_q_ma_cfs)) |>
+  drop_na() %>% # need to use magrittr pipe for this purpose
+  mutate(log_wua_per_lf_norm_pred = predict(mod, new_data=.)[[".pred"]]) |>
+  mutate(wua_per_lf_pred = exp(log_wua_per_lf_norm_pred) * erom_q_ma_cfs_actual) |> 
+  select(comid, flow_norm_cfs, wua_per_lf_pred, flow_cfs=flow_cfs_actual, wua_per_lf_pred)
 
-lm_sd_series <- workflow() |>
-  add_recipe(sd_series_rec) |>
-  add_model(lm_spec) |>
-  fit(data=td_series)
+pd_rf_by_mainstem <-
+  mainstems_comid |> 
+  st_drop_geometry() |>
+  inner_join(pd_dsmhabitat_pred, by=join_by(comid), relationship="one-to-many") |>
+  mutate(length_ft = coalesce(length_ft,0),
+         wua_per_lf_pred = coalesce(wua_per_lf_pred,0),
+         wua_ft2_pred = wua_per_lf_pred * length_ft) |>
+  group_by(river, flow_cfs) |>
+  summarize(tot_length_ft = sum(length_ft),
+            tot_wua_ft2 = sum(wua_ft2_pred),
+            tot_wua_ac = tot_wua_ft2 / 43560,
+            avg_wua_ft2_per_lf = tot_wua_ft2 / tot_length_ft,
+            avg_wua_ft2_per_1000ft = 1000 * avg_wua_ft2_per_lf)
+  
+pd_rf_by_mainstem |>
+  ggplot() + 
+  geom_line(aes(x = flow_cfs, y = tot_wua_ac, color = river)) + #, color=species, linetype=habitat)) + 
+  facet_wrap(~river, scales="free_y") + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_y_continuous() + 
+  theme(legend.position="none", 
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  xlab("Flow (cfs)") + ylab("Total WUA (ac)")
 
-lm_sd_series |> glance()
-lm_sd_series |> tidy()
-
-td_series |>
-  mutate(log_wua_per_lf_pred = predict(lm_sd_series, td_series)[[".pred"]]) |>
-  transmute(wua_per_lf=exp(log_wua_per_lf), wua_per_lf_pred=exp(log_wua_per_lf_pred), flow_cfs) |>
-  ggplot() + geom_point(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs)) + 
-  scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c() + 
-  ggtitle("Series interpolated scale-dependent model, linear regression")
+pd_rf_by_mainstem |>
+  ggplot() + 
+  geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color = river)) + #, color=species, linetype=habitat)) + 
+  facet_wrap(~river, scales="free_y") + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_y_continuous() + 
+  theme(legend.position="none", 
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
 ```
-
-### Use regression to predict FSA curve shape
-
-* model flow-to-suitable area curve shape with exponential function
-* use spatial predictors to predict the value of this exponent
-
-```{r}
-exponents <- 
-  td |> 
-  group_by(comid) |>
-  group_modify(~ broom::tidy(lm(log(wua_per_lf) ~ 0 + log(flow_cfs), data = .x))) 
-                                    
-td_exp <- 
-  flowlines |> st_drop_geometry() |>
-  left_join(readRDS("../data/flowline_attributes.Rds"), by=join_by("comid"), relationship="one-to-one") |>
-  inner_join(exponents |> select(comid, fsa_exponent=estimate), by=join_by(comid)) |>
-  select(comid, fsa_exponent,
-       # predictors of flow (as would be found in a regional regression)
-       slope, da_area_sq_km, da_elev_mean, da_ppt_mean_mm, 
-       # baseflow and peakflow statistics
-       nf_bfl_dry_cfs, nf_bfl_wet_cfs, erom_q_ma_cfs, peak_q2_cfs, peak_q5_cfs, peak_q10_cfs,
-       # flow and channel characteristics, hydrologically predicted
-       bf_depth_m, bf_w_d_ratio, erom_v_ma_fps,
-       # misc characteristics of the catchment
-       da_avg_slope, da_k_erodibility, mean_ndvi,
-       # misc characteristics of the locality
-       loc_bfi, loc_pct_clay, loc_pct_sand, loc_permeability, loc_bedrock_depth, loc_ppt_mean_mm,
-       # channel confinement characteristics
-       mtpi30_min, #vb_width_transect, vb_bf_w_ratio, 
-       # channel sinuosity
-       sinuosity,
-       )
-
-```
-
-
-

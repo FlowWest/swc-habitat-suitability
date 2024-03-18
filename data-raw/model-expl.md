@@ -1671,9 +1671,14 @@ dsm_habitat_combined <- mainstems |>
   group_by(river) |>
   arrange(river, flow_cfs) |>
   mutate(FR_juv_wua = zoo::na.approx(FR_juv_wua, flow_cfs, na.rm=F),
-         FR_floodplain_acres_suitable = zoo::na.approx(FR_floodplain_acres_suitable, flow_cfs, na.rm=F),
-         combined_wua_per_lf = coalesce(FR_juv_wua/1000,0) + coalesce(FR_floodplain_acres_suitable,0)*43560/length_ft,
-         combined_suitable_ac = coalesce(FR_juv_wua/1000,0)*length_ft/43560 + coalesce(FR_floodplain_acres_suitable,0)) |>
+         FR_floodplain_acres_suitable = zoo::na.approx(FR_floodplain_acres_suitable, flow_cfs, na.rm=F)) |>
+  transmute(river, flow_cfs, 
+            instream_wua_per_lf = coalesce(FR_juv_wua/1000,0),
+            instream_suitable_ac = coalesce(FR_juv_wua/1000,0)*length_ft/43560,
+            floodplain_wua_per_lf = coalesce(FR_floodplain_acres_suitable,0)*43560/length_ft,
+            floodplain_suitable_ac = coalesce(FR_floodplain_acres_suitable,0),
+            combined_wua_per_lf = instream_wua_per_lf + floodplain_wua_per_lf,
+            combined_suitable_ac =  instream_suitable_ac + floodplain_suitable_ac) |>
   ungroup()
 ```
 
@@ -1683,6 +1688,21 @@ dsm_habitat_combined <- mainstems |>
     ## ℹ In group 20: `river = "Stanislaus River"`.
     ## Caused by warning in `regularize.values()`:
     ## ! collapsing to unique 'x' values
+
+``` r
+dsm_habitat_wua_per_lf <- dsm_habitat_combined |>
+  select(river, flow_cfs, instream_wua_per_lf, floodplain_wua_per_lf) |>
+  pivot_longer(cols=c(instream_wua_per_lf, floodplain_wua_per_lf)) |>
+  mutate(name = str_replace(name, "_wua_per_lf", " DSMhabitat"),
+         value = if_else(value>0, value, NA))
+
+dsm_habitat_suitable_ac <- dsm_habitat_combined |>
+  select(river, flow_cfs, instream_suitable_ac, floodplain_suitable_ac) |>
+  pivot_longer(cols=c(instream_suitable_ac, floodplain_suitable_ac))  |>
+  mutate(value = if_else(value>0, value, NA)) |>
+  mutate(name = str_replace(name, "_suitable_ac", " DSMhabitat"),
+         value = if_else(value>0, value, NA))
+```
 
 ### One-step model, scale-dependent: WUA/LF vs flow
 
@@ -1768,7 +1788,7 @@ pd_rf_by_mainstem |>
   #filter(river == "American River") |> 
   ggplot() +
   geom_line(aes(x = flow_cfs, y = tot_wua_ac, color='modeled')) + 
-  geom_line(data=dsm_habitat_combined, aes(x = flow_cfs, y = combined_suitable_ac, color = 'DSMhabitat')) +  
+  geom_line(data=dsm_habitat_suitable_ac, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
   scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
@@ -1780,7 +1800,7 @@ pd_rf_by_mainstem |>
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
 
-    ## Warning: Transformation introduced infinite values in continuous y-axis
+    ## Warning: Removed 25 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-sd-val-3.png)<!-- -->
 
@@ -1789,7 +1809,7 @@ pd_rf_by_mainstem |>
   #inner_join(dsm_habitat_instream, by=join_by(river==river, flow_cfs==flow_cfs)) |> 
   ggplot() +
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color='modeled')) + 
-  geom_line(data=dsm_habitat_combined, aes(x = flow_cfs, y = combined_wua_per_lf, color = 'DSMhabitat')) +  
+  geom_line(data=dsm_habitat_wua_per_lf, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
   scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
@@ -1800,7 +1820,7 @@ pd_rf_by_mainstem |>
 ```
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
-    ## Transformation introduced infinite values in continuous y-axis
+    ## Removed 25 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-sd-val-4.png)<!-- -->
 
@@ -1916,7 +1936,7 @@ pd_rf_by_mainstem |>
   #filter(river == "American River") |> 
   ggplot() +
   geom_line(aes(x = flow_cfs, y = tot_wua_ac, color='modeled')) + 
-  geom_line(data=dsm_habitat_combined, aes(x = flow_cfs, y = combined_suitable_ac, color = 'DSMhabitat')) +  
+  geom_line(data=dsm_habitat_suitable_ac, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
   scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
@@ -1928,7 +1948,7 @@ pd_rf_by_mainstem |>
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
 
-    ## Warning: Transformation introduced infinite values in continuous y-axis
+    ## Warning: Removed 25 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si-val-3.png)<!-- -->
 
@@ -1937,7 +1957,7 @@ pd_rf_by_mainstem |>
   #inner_join(dsm_habitat_instream, by=join_by(river==river, flow_cfs==flow_cfs)) |> 
   ggplot() +
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color='modeled')) + 
-  geom_line(data=dsm_habitat_combined, aes(x = flow_cfs, y = combined_wua_per_lf, color = 'DSMhabitat')) +  
+  geom_line(data=dsm_habitat_wua_per_lf, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
   scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
@@ -1948,7 +1968,7 @@ pd_rf_by_mainstem |>
 ```
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
-    ## Transformation introduced infinite values in continuous y-axis
+    ## Removed 25 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si-val-4.png)<!-- -->
 
@@ -2037,7 +2057,7 @@ pd_rf_by_mainstem |>
   #filter(river == "American River") |> 
   ggplot() +
   geom_line(aes(x = flow_cfs, y = tot_wua_ac, color='modeled')) + 
-  geom_line(data=dsm_habitat_combined, aes(x = flow_cfs, y = combined_suitable_ac, color = 'DSMhabitat')) +  
+  geom_line(data=dsm_habitat_suitable_ac, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
   scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
@@ -2049,7 +2069,7 @@ pd_rf_by_mainstem |>
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
 
-    ## Warning: Transformation introduced infinite values in continuous y-axis
+    ## Warning: Removed 25 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si2-val-3.png)<!-- -->
 
@@ -2058,7 +2078,7 @@ pd_rf_by_mainstem |>
   #inner_join(dsm_habitat_instream, by=join_by(river==river, flow_cfs==flow_cfs)) |> 
   ggplot() +
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color='modeled')) + 
-  geom_line(data=dsm_habitat_combined, aes(x = flow_cfs, y = combined_wua_per_lf, color = 'DSMhabitat')) +  
+  geom_line(data=dsm_habitat_wua_per_lf, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
   scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
@@ -2069,6 +2089,6 @@ pd_rf_by_mainstem |>
 ```
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
-    ## Transformation introduced infinite values in continuous y-axis
+    ## Removed 25 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si2-val-4.png)<!-- -->

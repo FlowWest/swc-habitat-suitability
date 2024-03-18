@@ -40,7 +40,6 @@ drive_file_by_id <- function(id=character(), dir="temp", vsizip=FALSE) {
 }
 
 set.seed(47)
-
 ```
 
 ```{r import, message=FALSE, warning=FALSE}
@@ -188,6 +187,8 @@ stan_material <-
   select(vid, material_id) |>
   left_join(stan_material_n)
 
+#stan_thiessen |> left_join(st_drop_geometry(stan_material)) |> st_write("temp/stanislaus_thiessen_material.shp")
+
 # alternate approach with spatial join yields the same result
 # stan_material <- 
 #   read_csv("hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_MaterialID.csv.gz") |>
@@ -223,6 +224,7 @@ stan_result <-
   left_join(stan_elev, by=join_by(vid)) |> 
   left_join(stan_material, by=join_by(vid)) |>
   mutate(
+    inundated = depth_ft > 0,
     cover_hs = 1, # cover habitat suitability should be added here
     hsi_simp = dvhsi(depth_ft, velocity_fps, method=0) * cover_hs,
     hsi_frac = dvhsi(depth_ft, velocity_fps, method=1) * cover_hs,
@@ -231,6 +233,34 @@ stan_result <-
   ) |>
   glimpse()
 
+# filter for just the mesh cells that are contiguously inundated - WIP
+if(FALSE){
+  stan_contiguous_inundation <- stan_thiessen |> #head(10000) |>
+    inner_join(stan_result |> filter(inundated) |> select(vid, discharge_cfs)) |>
+    group_by(discharge_cfs) |> 
+    summarize() |>
+    st_union(by_feature = TRUE) |>
+    st_cast("POLYGON") |>
+    mutate(inundation_area = st_area(geometry)) |>
+    group_by(discharge_cfs) |>
+    filter(inundation_area == max(inundation_area))
+  
+  stan_contiguity_filter <- 
+    lapply(names(stan_result_filenames), function(q) {
+      stan_thiessen |>
+      st_filter(stan_contiguous_inundation |> filter(discharge_cfs==q)) |>
+      pull(vid)})
+  names(stan_contiguity_filter) <- names(stan_result_filenames)
+  
+  stan_contiguity <- stan_result |> 
+    mutate(contiguous = map2(vid, discharge_cfs, function(x, y) x %in% stan_contiguity_filter[as.character(y)])) |>
+    select(vid, discharge_cfs, contiguous)
+  
+  # stan_result <- stan_result |>
+  #   group_by(discharge_cfs) |>
+  #   filter(vid %in% stan_contiguity_filter[[as.character(discharge_cfs)]]) |>
+  #   ungroup()
+}
 ```
 
 ```{r fig.width=15, fig.height=10, dpi=300, eval=FALSE, include=FALSE}
@@ -268,6 +298,22 @@ stan_durhsi_by_vid <- stan_result |>
   glimpse()
 ```
 
+```{r stan-bfc}
+# baseflow channel is eliminated from the in-stream result
+stan_baseflow_channel <- stan_thiessen |>
+  filter(vid %in% (stan_result |> filter(inundated & discharge_cfs==500) |> pull(vid))) |>
+  summarize() |>
+  st_union() |>
+  st_sf() |>
+  mutate(bfc = TRUE)
+
+# # bankfull channel is the boundary between in-stream and floodplain
+# stan_bankfull_channel <- stan_thiessen |>
+#   filter(vid %in% stan_result |> filter(inundated & discharge_cfs==1250) |> pull(vid)) |>
+#   summarize() |>
+#   st_union()
+```
+
 Import polygons created for each COMID reach, and calculate suitable area for each
 
 Proof of concept, first comid, 500 cfs:
@@ -295,15 +341,17 @@ stan_calc_hsi <- function(g, q){
     left_join(stan_durhsi_by_vid, by=join_by(vid)) |>
     mutate(avg_durhsi = coalesce(avg_durhsi, 0)) |>
     st_intersection(g) |>
-    mutate(area_m2 = if_else(depth_ft>0, units::drop_units(st_area(geometry)), 0),
-           wua_simp = hsi_simp * area_m2,
-           wua_frac = hsi_frac * area_m2,
-           wua_sjrm = hsi_sjrm * area_m2,
-           wua_shqt = hsi_shqt * area_m2,
-           wua_simp_dur = hsi_simp * area_m2 * avg_durhsi,
-           wua_frac_dur = hsi_frac * area_m2 * avg_durhsi,
-           wua_sjrm_dur = hsi_sjrm * area_m2 * avg_durhsi,
-           wua_shqt_dur = hsi_shqt * area_m2 * avg_durhsi) |>
+    st_join(stan_baseflow_channel) |>
+    mutate(bfc_mask = if_else(bfc, 0, 1),
+           area_m2 = if_else(depth_ft>0, units::drop_units(st_area(geometry)), 0),
+           wua_simp = hsi_simp * area_m2 * bfc_mask,
+           wua_frac = hsi_frac * area_m2 * bfc_mask,
+           wua_sjrm = hsi_sjrm * area_m2 * bfc_mask,
+           wua_shqt = hsi_shqt * area_m2 * bfc_mask,
+           wua_simp_dur = hsi_simp * area_m2 * bfc_mask * avg_durhsi,
+           wua_frac_dur = hsi_frac * area_m2 * bfc_mask * avg_durhsi,
+           wua_sjrm_dur = hsi_sjrm * area_m2 * bfc_mask * avg_durhsi,
+           wua_shqt_dur = hsi_shqt * area_m2 * bfc_mask * avg_durhsi) |>
     summarize(area_m2 = sum(area_m2),
               wua_simp = sum(wua_simp),
               wua_frac = sum(wua_frac),
@@ -456,6 +504,28 @@ dhsi_packed <- terra::wrap(deer_dhsi)
 deer_dhsi_components
 ```
 
+```{r deer-baseflow}
+deer_min_extent <- terra::ifel(terra::rast(depth_rasters[["100"]]) > 0, 1, NA)
+
+terra::activeCat(deer_lcc, layer=1) <- "Value"
+deer_lcc_channel <- 
+  terra::ifel(deer_lcc %in% c(21, 27, 28, 29, 30, 31), 1, NA) |>
+  terra::crop(deer_min_extent, extend=T, ext=T)
+deer_lcc_channel |> set.ext(ext(deer_min_extent))
+deer_lcc_channel |> set.crs(crs(deer_min_extent))
+
+deer_bfc <- deer_min_extent * deer_lcc_channel
+deer_bfc_mask <- terra::ifel(is.na(deer_bfc), 1, NA)
+deer_bfc_mask_packed <- terra::wrap(deer_bfc_mask)
+
+#drive_file_by_id("1-mhKVsC6cwPZRSg9G_zszVxsRLZa4Cbt") |>
+# archive::archive_extract(dir="temp") 
+#deer_bfc <- terra::rast("temp/deer_ck_bfc.tif") |> terra::crop(terra::rast(depth_rasters[["100"]]), extend=T, ext=T)
+#terra::extend(deer_bfc)
+
+deer_bfc |> plot()
+```
+
 ```{r deer-calc-hsi}
 dep_r <- terra::rast(filenames$depth)
 terra::set.names(dep_r, filenames$flow_cfs)
@@ -471,21 +541,22 @@ deer_comids <-
   st_read("/vsizip/hydraulic_model_data/deercreek_hecras2d_2018/model_perim_split_comid_generalized.shp.zip", as_tibble=T) |>
   janitor::clean_names() |> filter(comid>0)
 
-raster_hsi <- function(g, q, crs="EPSG:6416"){
+raster_hsi <- function(g, q, crs){
   comid <- terra::vect(st_sfc(g, crs=crs))
   dep_r_unpacked <- terra::unwrap(dep_r_packed)
   vel_r_unpacked <- terra::unwrap(vel_r_packed)  
   d <- dep_r_unpacked[[as.character(q)]] |> terra::crop(comid) 
   v <- vel_r_unpacked[[as.character(q)]] |> terra::crop(comid) 
+  bfc_mask <- terra::unwrap(deer_bfc_mask_packed) |> terra::crop(comid)
   # total inundated area
   ext <- (d > 0)
   area_tot <- terra::global(ext, "sum", na.rm=TRUE)[[1]] * cell_area_ft2
   # LYR version
-  hsi <- (d>0.5 & d<=5.2) & (v>0 & v<=4.0)
+  hsi <- (d>0.5 & d<=5.2) & (v>0 & v<=4.0) * bfc_mask
   area_wua <- terra::global(hsi, "sum", na.rm=TRUE)[[1]] * cell_area_ft2
   area_pct <- area_wua / area_tot
   # HQT version
-  hsi_hqt <- (d>1 & d<=3.28) & (v>0 & v<=1.5)
+  hsi_hqt <- (d>1 & d<=3.28) & (v>0 & v<=1.5) * bfc_mask
   area_wua_hqt <- terra::global(hsi_hqt, "sum", na.rm=TRUE)[[1]] * cell_area_ft2
   area_pct_hqt <- area_wua_hqt / area_tot
   # versions adding the duration HSI
@@ -508,17 +579,10 @@ raster_hsi <- function(g, q, crs="EPSG:6416"){
               "area_pct_hqt_d"=area_pct_hqt_d))
 }
 
-# getting a memory error doing this all at once:
-# deer_hsi_result <- 
-#   deer_comids |> 
-#   expand_grid(flow_cfs=filenames$flow_cfs) |>
-#   mutate(result = pmap(list(geometry, flow_cfs), raster_hsi)) |>
-#   unnest_wider(result)
-
 run_for_flow <- function(q){
   message(paste0("calculating HSI for q=",q))
   deer_comids |> 
-    mutate(result = map(geometry, function(g) raster_hsi(g, q))) |>
+    mutate(result = map(geometry, function(g) raster_hsi(g, q, crs="EPSG:6416"))) |>
     unnest_wider(result) |> 
     st_drop_geometry() |>
     mutate(flow_cfs=q)
@@ -619,6 +683,7 @@ yuba_result <-
   mutate(across(everything(), function(x) if_else(x==-999,NA,x))) |>
   mutate(
     cover_hs = 1, # cover habitat suitability should be added here
+    inundated = depth_ft > 0,
     hsi_simp = dvhsi(depth_ft, velocity_fps, method=0) * cover_hs,
     hsi_frac = dvhsi(depth_ft, velocity_fps, method=1) * cover_hs,
     hsi_sjrm = dvhsi(depth_ft, velocity_fps, method=2) * cover_hs,
@@ -636,24 +701,35 @@ yuba_result <-
 ```
 
 ```{r yuba-import-durhsi}
-# first determine which vids are valley lowland vs foothill
-yuba_vid_lowland <- yuba_thiessen |>
-  mutate(lowland = st_intersects(geometry, st_transform(valley_lowland, st_crs(yuba_thiessen)))) |>
-  select(vid, lowland)
+yuba_durhsi_by_vid <- function(t) {
 
-# for each grid cell, what is the first flow at which the cell is inundated? 
-yuba_durhsi_by_vid <- yuba_result |>
-  filter(depth_ft>0) |>
-  group_by(vid) |>
-  summarize(first_inundating_flow = min(discharge_cfs)) |>
-  left_join(durhsi_by_first_inundating_flow |> 
-              filter(river=="Lower Yuba River"), 
-            by=join_by(first_inundating_flow == model_q),
-            relationship="many-to-one") |>
-  left_join(yuba_vid_lowland, by=join_by(vid), relationship="one-to-one") |>
-  mutate(avg_durhsi = if_else(lowland, avg_durhsi_vl, avg_durhsi_vf)) |>
-  select(vid, first_inundating_flow, avg_durhsi) |>
-  glimpse()
+  # first determine which vids are valley lowland vs foothill
+  yuba_vid_lowland <- t |>
+    mutate(lowland = st_intersects(geometry, st_transform(valley_lowland, st_crs(t)))) |>
+    select(vid, lowland)
+  
+  # for each grid cell, what is the first flow at which the cell is inundated? 
+  yuba_result |>
+    filter(depth_ft>0) |>
+    group_by(vid) |>
+    summarize(first_inundating_flow = min(discharge_cfs)) |>
+    left_join(durhsi_by_first_inundating_flow |> 
+                filter(river=="Lower Yuba River"), 
+              by=join_by(first_inundating_flow == model_q),
+              relationship="many-to-one") |>
+    left_join(yuba_vid_lowland, by=join_by(vid), relationship="one-to-one") |>
+    mutate(avg_durhsi = if_else(lowland, avg_durhsi_vl, avg_durhsi_vf)) |>
+    select(vid, first_inundating_flow, avg_durhsi)
+
+}
+```
+
+```{r yuba-baseflow-channel}
+yuba_bfc <- drive_file_by_id("1vX1NHgNLLt3BSMZX-dlRsxpLq7VoYqOP", vsizip=T) |>
+  st_read(as_tibble=T) |>
+  mutate(bfc = TRUE)
+
+yuba_bfc |> ggplot() + geom_sf(aes(color=bfc))
 ```
 
 ```{r yuba-calc-hsi}
@@ -670,18 +746,20 @@ yuba_calc_comid_hsi <- function(g, q, t){
   message(q)
   t |>
     left_join(filter(yuba_result, discharge_cfs==q), by=join_by(vid)) |> 
-    left_join(yuba_durhsi_by_vid, by=join_by(vid)) |>
+    left_join(yuba_durhsi_by_vid(t), by=join_by(vid)) |>
     mutate(avg_durhsi = coalesce(avg_durhsi, 0)) |>
     st_intersection(g) |>
-    mutate(area_ft2 = if_else(depth_ft>0, units::drop_units(st_area(geometry)), 0),
-           wua_simp = hsi_simp * area_ft2,
-           wua_frac = hsi_frac * area_ft2,
-           wua_sjrm = hsi_sjrm * area_ft2,
-           wua_shqt = hsi_shqt * area_ft2,
-           wua_simp_dur = hsi_simp * area_ft2 * avg_durhsi,
-           wua_frac_dur = hsi_frac * area_ft2 * avg_durhsi,
-           wua_sjrm_dur = hsi_sjrm * area_ft2 * avg_durhsi,
-           wua_shqt_dur = hsi_shqt * area_ft2 * avg_durhsi) |>
+    st_join(yuba_bfc) |>
+    mutate(bfc_mask = if_else(bfc, 0, 1),
+           area_ft2 = if_else(depth_ft>0, units::drop_units(st_area(geometry)), 0),
+           wua_simp = hsi_simp * area_ft2 * bfc_mask,
+           wua_frac = hsi_frac * area_ft2 * bfc_mask,
+           wua_sjrm = hsi_sjrm * area_ft2 * bfc_mask,
+           wua_shqt = hsi_shqt * area_ft2 * bfc_mask,
+           wua_simp_dur = hsi_simp * area_ft2 * bfc_mask * avg_durhsi,
+           wua_frac_dur = hsi_frac * area_ft2 * bfc_mask * avg_durhsi,
+           wua_sjrm_dur = hsi_sjrm * area_ft2 * bfc_mask * avg_durhsi,
+           wua_shqt_dur = hsi_shqt * area_ft2 * bfc_mask * avg_durhsi) |>
     summarize(area_ft2 = sum(area_ft2),
               wua_simp = sum(wua_simp),
               wua_frac = sum(wua_frac),
@@ -721,7 +799,7 @@ yuba_calc_reach_hsis <- function(r) {
     select(vid) |>
     arrange(vid)
   
-  yuba_comid |>
+    yuba_comid |>
     filter(reach_lyr==r) |>
     #expand_grid(flow_cfs = flows) |>
     inner_join(r_q_combos, by=join_by(reach_lyr==reach), relationship="many-to-many") |>

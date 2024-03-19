@@ -480,8 +480,6 @@ terra::rast(list(deer_dhsi_components$vf, deer_dhsi_components$vl)) |> plot(rang
 
 deer_dhsi_components$di |> plot(main="Average Length of Continuous Inundation (days)")
 
-deer_dhsi |> plot(main="Duration HSI Factor")
-
 cls_vl <- valley_lowland |> 
   st_transform(st_crs(first_inundating_flow)) |> 
   st_crop(st_bbox(first_inundating_flow)) |> 
@@ -492,8 +490,6 @@ deer_dhsi <- terra::ifel(cls_vl==1, deer_dhsi_components$vl, deer_dhsi_component
 deer_dhsi |> plot(main="Duration HSI Factor")
 
 dhsi_packed <- terra::wrap(deer_dhsi)
-
-deer_dhsi_components
 ```
 
 ```{r deer-baseflow}
@@ -502,7 +498,7 @@ deer_min_extent <- terra::ifel(terra::rast(depth_rasters[["100"]]) > 0, 1, NA)
 terra::activeCat(deer_lcc, layer=1) <- "Value"
 deer_lcc_channel <- 
   terra::ifel(deer_lcc %in% c(21, 27, 28, 29, 30, 31), 1, NA) |>
-  terra::crop(deer_min_extent, extend=T, ext=T)
+  terra::crop(deer_min_extent, extend=T)#, ext=T)
 deer_lcc_channel |> set.ext(ext(deer_min_extent))
 deer_lcc_channel |> set.crs(crs(deer_min_extent))
 
@@ -558,11 +554,10 @@ raster_hsi <- function(g, q, crs){
   area_wua_d <- terra::global(hsi_d, "sum", na.rm=TRUE)[[1]] * cell_area_ft2
   area_pct_d <- area_wua_d / area_tot
   area_wua_hqt_d <- terra::global(hsi_hqt_d, "sum", na.rm=TRUE)[[1]] * cell_area_ft2
-  area_pct_hqt_d <- area_wua_hqt_d / area_tot_hqt
+  area_pct_hqt_d <- area_wua_hqt_d / area_tot
   return(list("area_tot"=area_tot, 
               "area_wua"=area_wua, 
               "area_pct"=area_pct,
-              "area_tot_hqt"=area_tot_hqt, 
               "area_wua_hqt"=area_wua_hqt, 
               "area_pct_hqt"=area_pct_hqt,
               "area_wua_d"=area_wua_d, 
@@ -579,6 +574,8 @@ run_for_flow <- function(q){
     st_drop_geometry() |>
     mutate(flow_cfs=q)
 }
+
+options(future.globals.maxSize = 8000 * 1024^2)
 
 if(!file.exists("../data/fsa_deercreek.Rds")) {
   tic("calculate deer fsa")
@@ -693,7 +690,8 @@ yuba_result <-
 ```
 
 ```{r yuba-import-durhsi}
-yuba_domain <- 
+yuba_domain <- bind_rows(lapply(yuba_gdrive_ids$domain, 
+                                function(x) st_read(drive_file_by_id(x))))
 
 yuba_valley_lowland <- valley_lowland |> 
   st_crop(ext(st_transform(yuba_domain, st_crs(valley_lowland)))) |>
@@ -703,8 +701,10 @@ yuba_durhsi_by_vid <- function(t) {
 
   # first determine which vids are valley lowland vs foothill
   yuba_vid_lowland <- t |>
-    mutate(lowland = st_intersects(geometry, yuba_valley_lowland)) |>
-    select(vid, lowland)
+    mutate(lowland = st_intersects(geometry, yuba_valley_lowland, sparse=F)[,1]) |>
+    select(vid, lowland) |>
+    unnest(lowland) |>
+    st_drop_geometry()
   
   # for each grid cell, what is the first flow at which the cell is inundated? 
   yuba_result |>

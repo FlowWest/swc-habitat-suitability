@@ -278,10 +278,16 @@ stan_vertices |> left_join(stan_material) |>
 ```
 
 ```{r stan-import-durhsi}
+stan_valley_lowland <- valley_lowland |> 
+  st_crop(ext(st_transform(stan_domain, st_crs(valley_lowland)))) |>
+  st_transform(st_crs(stan_domain))
+
 # first determine which vids are valley lowland vs foothill
 stan_vid_lowland <- stan_thiessen |>
-  mutate(lowland = st_intersects(geometry, st_transform(valley_lowland, st_crs(stan_thiessen)))) |>
-  select(vid, lowland)
+  mutate(lowland = st_intersects(geometry, stan_valley_lowland, sparse=F)[,1]) |>
+  select(vid, lowland) |>
+  unnest(lowland) |>
+  st_drop_geometry()
 
 # for each grid cell, get the first flow at which the cell is inundated, and the avg DurHSI for that flow
 stan_durhsi_by_vid <- stan_result |>
@@ -292,7 +298,7 @@ stan_durhsi_by_vid <- stan_result |>
               filter(river=="Stanislaus River"), 
             by=join_by(first_inundating_flow == model_q),
             relationship="many-to-one") |>
-  left_join(stan_vid_lowland, by=join_by(vid), relationship="one-to-one") |>
+  left_join(stan_vid_lowland, by=join_by(vid)) |>
   mutate(avg_durhsi = if_else(lowland, avg_durhsi_vl, avg_durhsi_vf)) |>
   select(vid, first_inundating_flow, avg_durhsi) |>
   glimpse()
@@ -316,21 +322,6 @@ stan_baseflow_channel <- stan_thiessen |>
 
 Import polygons created for each COMID reach, and calculate suitable area for each
 
-Proof of concept, first comid, 500 cfs:
-```{r stan-test}
-test <- stan_thiessen |> 
-  left_join(filter(stan_result, discharge_cfs==500), by=join_by(vid)) |>
-  st_intersection(stan_comid[1]) |>
-    mutate(area_m2 = units::drop_units(st_area(geometry)),
-           wua_simp = hsi_simp * area_m2,
-           wua_frac = hsi_frac * area_m2,
-           wua_sjrm = hsi_sjrm * area_m2,
-           wua_shqt = hsi_shqt * area_m2) |>
-  glimpse()
-
-#test |> ggplot() + geom_sf(aes(fill=hsi_simp), color=NA)
-```
-
 Batch process, saving flow-to-suitable-area (fsa) by comid to file
 
 ```{r stan-calc-hsi}
@@ -342,7 +333,7 @@ stan_calc_hsi <- function(g, q){
     mutate(avg_durhsi = coalesce(avg_durhsi, 0)) |>
     st_intersection(g) |>
     st_join(stan_baseflow_channel) |>
-    mutate(bfc_mask = if_else(bfc, 0, 1),
+    mutate(bfc_mask = if_else(is.na(bfc), 1, 0),
            area_m2 = if_else(depth_ft>0, units::drop_units(st_area(geometry)), 0),
            wua_simp = hsi_simp * area_m2 * bfc_mask,
            wua_frac = hsi_frac * area_m2 * bfc_mask,
@@ -388,6 +379,7 @@ if(!file.exists("../data/fsa_stanislaus.Rds")) {
 }
 
 #stan_hsi |> ggplot() + geom_sf(aes(fill=pcthab_simp), color=NA) + facet_wrap(~discharge_cfs)
+#stan_calc_hsi(g=stan_comid$geometry[54],q=5000)
 ```
 
 ```{r stan-plot-hsi, fig.width=6.5, fig.height=4, dpi=300}
@@ -701,11 +693,17 @@ yuba_result <-
 ```
 
 ```{r yuba-import-durhsi}
+yuba_domain <- 
+
+yuba_valley_lowland <- valley_lowland |> 
+  st_crop(ext(st_transform(yuba_domain, st_crs(valley_lowland)))) |>
+  st_transform(st_crs(yuba_domain))
+
 yuba_durhsi_by_vid <- function(t) {
 
   # first determine which vids are valley lowland vs foothill
   yuba_vid_lowland <- t |>
-    mutate(lowland = st_intersects(geometry, st_transform(valley_lowland, st_crs(t)))) |>
+    mutate(lowland = st_intersects(geometry, yuba_valley_lowland)) |>
     select(vid, lowland)
   
   # for each grid cell, what is the first flow at which the cell is inundated? 
@@ -750,7 +748,7 @@ yuba_calc_comid_hsi <- function(g, q, t){
     mutate(avg_durhsi = coalesce(avg_durhsi, 0)) |>
     st_intersection(g) |>
     st_join(yuba_bfc) |>
-    mutate(bfc_mask = if_else(bfc, 0, 1),
+    mutate(bfc_mask = if_else(is.na(bfc), 1, 0),
            area_ft2 = if_else(depth_ft>0, units::drop_units(st_area(geometry)), 0),
            wua_simp = hsi_simp * area_ft2 * bfc_mask,
            wua_frac = hsi_frac * area_ft2 * bfc_mask,

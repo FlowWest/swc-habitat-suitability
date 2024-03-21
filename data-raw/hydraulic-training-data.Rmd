@@ -689,37 +689,70 @@ yuba_result <-
 }
 ```
 
-```{r yuba-import-durhsi}
+```{r yuba-import-thiessen}
 yuba_domain <- bind_rows(lapply(yuba_gdrive_ids$domain, 
                                 function(x) st_read(drive_file_by_id(x))))
 
+yuba_vertices_files <- yuba_gdrive_ids$vertices |>
+  setNames(yuba_gdrive_ids$reach)
+
+yuba_thiessen_files <- yuba_gdrive_ids$thiessen |>
+  setNames(yuba_gdrive_ids$reach)
+
+yuba_get_thiessen <- function(reach) {
+  vertices <- yuba_vertices_files[[reach]] |>
+    drive_file_by_id() |> 
+    st_read(as_tibble=T) |>
+    mutate(vid=row_number()) |> 
+    select(vid)
+  message()
+  
+  thiessen <- yuba_thiessen_files[[reach]] |>
+    drive_file_by_id() |> 
+    st_read(as_tibble=T) |>
+    st_join(vertices, join=st_nearest_feature, left=FALSE) |>
+    select(vid) |>
+    group_by(vid) |> 
+    arrange(desc(st_area(geometry))) |> 
+    filter(row_number()==1) |>
+    ungroup() |>
+    #summarize() |>
+    arrange(vid)
+  
+  return(thiessen)
+}
+
+yuba_thiessen <- yuba_gdrive_ids$reach |>
+  setNames(yuba_gdrive_ids$reach) |>
+  future_lapply(yuba_get_thiessen, future.seed=TRUE) |>
+  bind_rows(.id="reach")
+
+```
+
+```{r yuba-import-durhsi}
 yuba_valley_lowland <- valley_lowland |> 
   st_crop(ext(st_transform(yuba_domain, st_crs(valley_lowland)))) |>
   st_transform(st_crs(yuba_domain))
 
-yuba_durhsi_by_vid <- function(t) {
-
-  # first determine which vids are valley lowland vs foothill
-  yuba_vid_lowland <- t |>
-    mutate(lowland = st_intersects(geometry, yuba_valley_lowland, sparse=F)[,1]) |>
-    select(vid, lowland) |>
-    unnest(lowland) |>
-    st_drop_geometry()
+# first determine which vids are valley lowland vs foothill
+yuba_vid_lowland <- yuba_thiessen |> 
+  mutate(lowland = st_intersects(geometry, yuba_valley_lowland, sparse=F)[,1]) |>
+  select(reach, vid, lowland) |>
+  unnest(lowland) |>
+  st_drop_geometry()
   
-  # for each grid cell, what is the first flow at which the cell is inundated? 
-  yuba_result |>
-    filter(depth_ft>0) |>
-    group_by(vid) |>
-    summarize(first_inundating_flow = min(discharge_cfs)) |>
-    left_join(durhsi_by_first_inundating_flow |> 
-                filter(river=="Lower Yuba River"), 
-              by=join_by(first_inundating_flow == model_q),
-              relationship="many-to-one") |>
-    left_join(yuba_vid_lowland, by=join_by(vid), relationship="one-to-one") |>
-    mutate(avg_durhsi = if_else(lowland, avg_durhsi_vl, avg_durhsi_vf)) |>
-    select(vid, first_inundating_flow, avg_durhsi)
-
-}
+# for each grid cell, what is the first flow at which the cell is inundated? 
+yuba_durhsi_by_vid <- yuba_result |>
+  filter(depth_ft>0) |>
+  group_by(reach, vid) |>
+  summarize(first_inundating_flow = min(discharge_cfs)) |>
+  left_join(durhsi_by_first_inundating_flow |> 
+              filter(river=="Lower Yuba River"), 
+            by=join_by(first_inundating_flow == model_q),
+            relationship="many-to-one") |> # issue: yuba_thiessen reach/vid combos not unique, causing join to fail
+  left_join(yuba_vid_lowland, by=join_by(reach, vid), relationship="one-to-one") |>
+  mutate(avg_durhsi = if_else(lowland, avg_durhsi_vl, avg_durhsi_vf)) |>
+  select(reach, vid, first_inundating_flow, avg_durhsi)
 ```
 
 ```{r yuba-baseflow-channel}
@@ -738,13 +771,15 @@ message(object.size(yuba_result))
 options(future.globals.maxSize = 8000 * 1024^2)
 
 yuba_comid <- drive_file_by_id("1-xSi142jtNZKQS9-VgXZT1yzTfH1KjyR", vsizip=T) |>
-  st_read(as_tibble=T) |> st_zm() |> janitor::clean_names()
+  st_read(as_tibble=T) |> 
+  st_zm() |> 
+  janitor::clean_names()
 
-yuba_calc_comid_hsi <- function(g, q, t){
+yuba_calc_comid_hsi <- function(g, q, r){
   message(q)
-  t |>
-    left_join(filter(yuba_result, discharge_cfs==q), by=join_by(vid)) |> 
-    left_join(yuba_durhsi_by_vid(t), by=join_by(vid)) |>
+  yuba_thiessen |>
+    left_join(filter(yuba_result, discharge_cfs==q & reach==r), by=join_by(vid)) |> 
+    left_join(filter(yuba_durhsi_by_vid, reach==r), by=join_by(vid)) |>
     mutate(avg_durhsi = coalesce(avg_durhsi, 0)) |>
     st_intersection(g) |>
     st_join(yuba_bfc) |>
@@ -778,43 +813,54 @@ yuba_calc_comid_hsi <- function(g, q, t){
     st_drop_geometry()
 }
 
-r_q_combos <- yuba_result |> rename(flow_cfs = discharge_cfs) |> group_by(reach, flow_cfs) |> summarize() |> ungroup()
+# r_q_combos <- yuba_result |> rename(flow_cfs = discharge_cfs) |> group_by(reach, flow_cfs) |> summarize() |> ungroup()
 
-yuba_calc_reach_hsis <- function(r) {
-  message(r)
-  ids <- yuba_gdrive_ids |> filter(reach==r)
-  
-  # vertices
-  v <- drive_file_by_id(ids[["vertices"]], vsizip=T) |>
-    st_read(as_tibble=T) |> 
-    mutate(vid=row_number()) |> 
-    select(vid)
-  
-  # thiessen
-  t <- drive_file_by_id(ids[["thiessen"]], vsizip=T) |>
-    st_read(as_tibble=T) |> 
-    st_join(v, join=st_nearest_feature) |>
-    select(vid) |>
-    arrange(vid)
-  
-    yuba_comid |>
-    filter(reach_lyr==r) |>
-    #expand_grid(flow_cfs = flows) |>
-    inner_join(r_q_combos, by=join_by(reach_lyr==reach), relationship="many-to-many") |>
-    mutate(result = future_map2(geometry, flow_cfs, function(g, q) yuba_calc_comid_hsi(st_sfc(g, crs=st_crs(yuba_comid)), q, t))) |>
-    unnest_wider(result) |>
-    st_as_sf() |>
-    glimpse()
-
-}
+# yuba_calc_reach_hsis <- function(r) {
+#   message(r)
+#   ids <- yuba_gdrive_ids |> filter(reach==r)
+#   
+#   # vertices
+#   v <- drive_file_by_id(ids[["vertices"]], vsizip=T) |>
+#     st_read(as_tibble=T) |> 
+#     mutate(vid=row_number()) |> 
+#     select(vid)
+#   
+#   # thiessen
+#   t <- drive_file_by_id(ids[["thiessen"]], vsizip=T) |>
+#     st_read(as_tibble=T) |> 
+#     st_join(v, join=st_nearest_feature) |>
+#     select(vid) |>
+#     arrange(vid)
+#   
+#     yuba_comid |>
+#     filter(reach_lyr==r) |>
+#     #expand_grid(flow_cfs = flows) |>
+#     inner_join(r_q_combos, by=join_by(reach_lyr==reach), relationship="many-to-many") |>
+#     mutate(result = future_map2(geometry, flow_cfs, function(g, q) yuba_calc_comid_hsi(st_sfc(g, crs=st_crs(yuba_comid)), q, t))) |>
+#     unnest_wider(result) |>
+#     st_as_sf() |>
+#     glimpse()
+# 
+# }
 
 if(!file.exists("../data/fsa_yuba.Rds")) {
   
   tic("calculate yuba fsa")
-  fsa_yuba <-
-    yuba_gdrive_ids$reach |>
-    lapply(yuba_calc_reach_hsis) |> # don't use future_lapply here because yuba_calc_reach_hsis is already parallelized
-    bind_rows()
+  #fsa_yuba <-
+  #  yuba_gdrive_ids$reach |>
+  #  lapply(yuba_calc_reach_hsis) |> # don't use future_lapply here because yuba_calc_reach_hsis is already parallelized
+  #  bind_rows()
+  
+  fsa_yuba <- yuba_comid |>
+    #filter(reach_lyr==r) |>
+    #inner_join(r_q_combos, by=join_by(reach_lyr==reach), relationship="many-to-many") |>
+    expand_grid(flow_cfs = flows) |>
+    mutate(result = future_pmap(list(geometry, flow_cfs, reach), 
+                                function(g, q, r) yuba_calc_comid_hsi(st_sfc(g, crs=st_crs(yuba_comid)), q, r))) |>
+    unnest_wider(result) |>
+    st_as_sf() |>
+    glimpse()
+  
   toc()
     
   fsa_yuba |> saveRDS("../data/fsa_yuba.Rds")
@@ -824,6 +870,8 @@ if(!file.exists("../data/fsa_yuba.Rds")) {
   fsa_yuba <- readRDS("../data/fsa_yuba.Rds") |> glimpse()
   
 }
+
+yuba_calc_reach_hsis("HR")
 ```
 
 ```{r yuba-plot-hsi, fig.width=6.5, fig.height=4, dpi=300}

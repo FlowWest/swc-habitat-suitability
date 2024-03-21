@@ -778,8 +778,8 @@ yuba_comid <- drive_file_by_id("1-xSi142jtNZKQS9-VgXZT1yzTfH1KjyR", vsizip=T) |>
 yuba_calc_comid_hsi <- function(g, q, r){
   message(q)
   yuba_thiessen |>
-    left_join(filter(yuba_result, discharge_cfs==q & reach==r), by=join_by(vid)) |> 
-    left_join(filter(yuba_durhsi_by_vid, reach==r), by=join_by(vid)) |>
+    left_join(filter(yuba_result, discharge_cfs==q & reach==r), by=join_by(reach, vid)) |> 
+    left_join(filter(yuba_durhsi_by_vid, reach==r), by=join_by(reach, vid)) |>
     mutate(avg_durhsi = coalesce(avg_durhsi, 0)) |>
     st_intersection(g) |>
     st_join(yuba_bfc) |>
@@ -852,6 +852,7 @@ if(!file.exists("../data/fsa_yuba.Rds")) {
   #  bind_rows()
   
   fsa_yuba <- yuba_comid |>
+    rename(reach = reach_lyr) |>
     #filter(reach_lyr==r) |>
     #inner_join(r_q_combos, by=join_by(reach_lyr==reach), relationship="many-to-many") |>
     expand_grid(flow_cfs = flows) |>

@@ -306,18 +306,49 @@ stan_durhsi_by_vid <- stan_result |>
 
 ```{r stan-bfc}
 # baseflow channel is eliminated from the in-stream result
-stan_baseflow_channel <- stan_thiessen |>
+stan_500cfs_channel <- stan_thiessen |>
   filter(vid %in% (stan_result |> filter(inundated & discharge_cfs==500) |> pull(vid))) |>
   summarize() |>
   st_union() |>
   st_sf() |>
   mutate(bfc = TRUE)
 
-# # bankfull channel is the boundary between in-stream and floodplain
-# stan_bankfull_channel <- stan_thiessen |>
-#   filter(vid %in% stan_result |> filter(inundated & discharge_cfs==1250) |> pull(vid)) |>
-#   summarize() |>
-#   st_union()
+stan_width_summary <- stan_thiessen |>
+  st_join(stan_comid, join=st_nearest_feature) |>
+  mutate(area_m2 = st_area(geometry) |> units::drop_units()) |>
+  st_drop_geometry() |>
+  left_join(stan_result, by=join_by(vid)) |>
+  filter(inundated) |>
+  left_join(flowline_attributes, by=join_by(comid), relationship="many-to-one") |>
+  mutate(length_m = lengthkm * 1000) |>
+  group_by(discharge_cfs, comid) |>
+  summarize(tot_inund_area_m2 = sum(area_m2),
+            avg_inund_width_m = sum(area_m2) / mean(length_m)) 
+
+stan_width_summary |>
+  ggplot(aes(y = avg_inund_width_m, x = discharge_cfs)) + 
+  geom_point() + geom_smooth(method="lm", fullrange=TRUE) + 
+  scale_x_log10(limits=c(300,NA)) + scale_y_log10() + annotation_logticks()
+
+# power series model parameters such that avg_inund_width_m = coeff * discharge_cfs^power 
+stan_width_summary_log_coef <- 
+  lm(data = stan_width_summary,
+     formula = log(avg_inund_width_m) ~ log(discharge_cfs)) |>
+  summary() |> 
+  coef()
+coeff <- exp(stan_width_summary_log_coef[[1,1]])
+power <- stan_width_summary_log_coef[[2,1]]
+
+# natural flows: observed median dry season baseflow for Stanislaus River USGS gage 11303000 at COMID 2819818 is 306 cfs
+stan_bfc_width <- coeff * 306^power
+
+# lowest stan model flow is 500 
+stan_500cfs_width <- coeff * 500^power
+
+# so need to shrink the delineated baseflow channel by the difference
+# stan_500cfs_width - stan_bfc_width
+stan_baseflow_channel <- stan_500cfs_channel |> 
+  st_buffer(0.5 * (stan_bfc_width - stan_500cfs_width))
 ```
 
 Import polygons created for each COMID reach, and calculate suitable area for each
@@ -493,6 +524,9 @@ dhsi_packed <- terra::wrap(deer_dhsi)
 ```
 
 ```{r deer-baseflow}
+# using 100 cfs result as baseflow channel: 
+# Natural Flows Database obserfved median dry season baseflow for USGS gage 11383500 at COMID 8020924 is 95 cfs
+
 deer_min_extent <- terra::ifel(terra::rast(depth_rasters[["100"]]) > 0, 1, NA)
 
 terra::activeCat(deer_lcc, layer=1) <- "Value"
@@ -756,6 +790,13 @@ yuba_durhsi_by_vid <- yuba_result |>
 ```
 
 ```{r yuba-baseflow-channel}
+# Natural Flows Database: median dry-season baseflow for USGS gage 11421000 at COMID 7981844 is 636 cfs
+# However, reaches that are all or partly above Deer Creek should use lower, est. 500 cfs
+# use 622 cfs result as baseflow channel for DGR and FR
+# use 450 cfs result as baseflow channel for HR and TBR
+# use 700 cfs result for EDR reach since that's the lowest available
+# combined and selected for only contiguous areas in ArcGIS
+
 yuba_bfc <- drive_file_by_id("1vX1NHgNLLt3BSMZX-dlRsxpLq7VoYqOP", vsizip=T) |>
   st_read(as_tibble=T) |>
   mutate(bfc = TRUE)

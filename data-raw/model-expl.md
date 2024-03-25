@@ -1,7 +1,7 @@
 Statistical Modeling to Predict Flow-to-Suitable-Area Curves
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-03-18
+2024-03-25
 
 - [Import and Preprocess Training
   Data](#import-and-preprocess-training-data)
@@ -10,13 +10,13 @@ Statistical Modeling to Predict Flow-to-Suitable-Area Curves
 - [Model Training](#model-training)
   - [Scale Dependent Model: WUA-per-linear-ft versus
     flow](#scale-dependent-model-wua-per-linear-ft-versus-flow)
-  - [Scale Dependent Model: TOTAL Inundated Area per linear ft versus
-    flow:](#scale-dependent-model-total-inundated-area-per-linear-ft-versus-flow)
+  - [Scale Dependent Model 2: TOTAL Inundated Area per linear ft versus
+    flow:](#scale-dependent-model-2-total-inundated-area-per-linear-ft-versus-flow)
   - [Scale Independent Model: %HSI versus flow (normalized by
     MAF)](#scale-independent-model-hsi-versus-flow-normalized-by-maf)
-  - [Scale Independent Model: WUA-per-linear-ft (normalized by MAF)
+  - [Scale Independent Model 2: WUA-per-linear-ft (normalized by MAF)
     versus flow (normalized by
-    MAF)](#scale-independent-model-wua-per-linear-ft-normalized-by-maf-versus-flow-normalized-by-maf)
+    MAF)](#scale-independent-model-2-wua-per-linear-ft-normalized-by-maf-versus-flow-normalized-by-maf)
 - [Prediction and Validation](#prediction-and-validation)
   - [One-step model, scale-dependent: WUA/LF vs
     flow](#one-step-model-scale-dependent-wualf-vs-flow)
@@ -670,7 +670,7 @@ rfr_sd_res |> filter(comid %in% test_comids) |>
 
 ![](model-expl_files/figure-gfm/rfr-sd-3.png)<!-- -->
 
-### Scale Dependent Model: TOTAL Inundated Area per linear ft versus flow:
+### Scale Dependent Model 2: TOTAL Inundated Area per linear ft versus flow:
 
 To generate the inundation area estimates that are needed to interpret
 the scale-independent %HSI model outputs
@@ -1151,7 +1151,7 @@ rfr_si_res |> filter(comid %in% test_comids) |>
 
 ![](model-expl_files/figure-gfm/rfr-si-3.png)<!-- -->
 
-### Scale Independent Model: WUA-per-linear-ft (normalized by MAF) versus flow (normalized by MAF)
+### Scale Independent Model 2: WUA-per-linear-ft (normalized by MAF) versus flow (normalized by MAF)
 
 A potential compromise between the previous two models that scales the
 results by mean annual flow, then unscales them after prediction.
@@ -1740,7 +1740,26 @@ pd_rf_by_mainstem <-
   inner_join(pd_sd_dsmhabitat_pred, by=join_by(comid), relationship="one-to-many") |>
   mutate(length_ft = coalesce(length_ft,0),
          wua_per_lf_pred = coalesce(wua_per_lf_pred,0),
-         wua_ft2_pred = wua_per_lf_pred * length_ft) |>
+         wua_ft2_pred = wua_per_lf_pred * length_ft) 
+
+pd_rf_by_mainstem |>
+  ggplot(aes(x = flow_cfs, y = wua_per_lf_pred, color = hqt_gradient_class)) + 
+  geom_line(aes(group = comid), alpha=0.5) + geom_smooth(method="loess", se=F) +
+  facet_wrap(~river, scales="free_y") + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_y_continuous() + 
+  theme(legend.position="top", 
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
+```
+
+    ## `geom_smooth()` using formula = 'y ~ x'
+
+![](model-expl_files/figure-gfm/dsmhabitat-sd-val-1.png)<!-- -->
+
+``` r
+pd_rf_by_mainstem_summary <- pd_rf_by_mainstem |>
   group_by(river, flow_cfs) |>
   summarize(tot_length_ft = sum(length_ft),
             tot_wua_ft2 = sum(wua_ft2_pred),
@@ -1753,7 +1772,7 @@ pd_rf_by_mainstem <-
     ## `.groups` argument.
 
 ``` r
-pd_rf_by_mainstem |>
+pd_rf_by_mainstem_summary |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = tot_wua_ac, color = river)) + #, color=species, linetype=habitat)) + 
   facet_wrap(~river, scales="free_y") + 
@@ -1765,10 +1784,10 @@ pd_rf_by_mainstem |>
   xlab("Flow (cfs)") + ylab("Total WUA (ac)")
 ```
 
-![](model-expl_files/figure-gfm/dsmhabitat-sd-val-1.png)<!-- -->
+![](model-expl_files/figure-gfm/dsmhabitat-sd-val-2.png)<!-- -->
 
 ``` r
-pd_rf_by_mainstem |>
+pd_rf_by_mainstem_summary |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color = river)) + #, color=species, linetype=habitat)) + 
   facet_wrap(~river, scales="free_y") + 
@@ -1780,10 +1799,10 @@ pd_rf_by_mainstem |>
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
 ```
 
-![](model-expl_files/figure-gfm/dsmhabitat-sd-val-2.png)<!-- -->
+![](model-expl_files/figure-gfm/dsmhabitat-sd-val-3.png)<!-- -->
 
 ``` r
-pd_rf_by_mainstem |> 
+pd_rf_by_mainstem_summary |> 
   #inner_join(dsm_habitat_floodplain, by=join_by(river==river, flow_cfs==flow_cfs)) |> 
   #filter(river == "American River") |> 
   ggplot() +
@@ -1802,10 +1821,10 @@ pd_rf_by_mainstem |>
 
     ## Warning: Removed 25 rows containing missing values (`geom_line()`).
 
-![](model-expl_files/figure-gfm/dsmhabitat-sd-val-3.png)<!-- -->
+![](model-expl_files/figure-gfm/dsmhabitat-sd-val-4.png)<!-- -->
 
 ``` r
-pd_rf_by_mainstem |> 
+pd_rf_by_mainstem_summary |> 
   #inner_join(dsm_habitat_instream, by=join_by(river==river, flow_cfs==flow_cfs)) |> 
   ggplot() +
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color='modeled')) + 
@@ -1822,7 +1841,7 @@ pd_rf_by_mainstem |>
     ## Warning: Transformation introduced infinite values in continuous x-axis
     ## Removed 25 rows containing missing values (`geom_line()`).
 
-![](model-expl_files/figure-gfm/dsmhabitat-sd-val-4.png)<!-- -->
+![](model-expl_files/figure-gfm/dsmhabitat-sd-val-5.png)<!-- -->
 
 ### Two-step model: (%HSI vs normalized flow) \* (Total Area/LF vs flow)
 
@@ -1888,7 +1907,26 @@ pd_rf_by_mainstem <-
   inner_join(pd_si_dsmhabitat_pred, by=join_by(comid), relationship="one-to-many") |>
   mutate(length_ft = coalesce(length_ft,0),
          wua_per_lf_pred = coalesce(wua_per_lf_pred,0),
-         wua_ft2_pred = wua_per_lf_pred * length_ft) |>
+         wua_ft2_pred = wua_per_lf_pred * length_ft) 
+
+pd_rf_by_mainstem |>
+  ggplot(aes(x = flow_cfs, y = wua_per_lf_pred, color = hqt_gradient_class)) + 
+  geom_line(aes(group = comid), alpha=0.5) + geom_smooth(method="loess", se=F) +
+  facet_wrap(~river, scales="free_y") + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_y_continuous() + 
+  theme(legend.position="top", 
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
+```
+
+    ## `geom_smooth()` using formula = 'y ~ x'
+
+![](model-expl_files/figure-gfm/dsmhabitat-si-val-1.png)<!-- -->
+
+``` r
+pd_rf_by_mainstem_summary <- pd_rf_by_mainstem |>
   group_by(river, flow_cfs) |>
   summarize(tot_length_ft = sum(length_ft),
             tot_wua_ft2 = sum(wua_ft2_pred),
@@ -1901,7 +1939,7 @@ pd_rf_by_mainstem <-
     ## `.groups` argument.
 
 ``` r
-pd_rf_by_mainstem |>
+pd_rf_by_mainstem_summary |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = tot_wua_ac, color = river)) + #, color=species, linetype=habitat)) + 
   facet_wrap(~river, scales="free_y") + 
@@ -1913,10 +1951,10 @@ pd_rf_by_mainstem |>
   xlab("Flow (cfs)") + ylab("Total WUA (ac)")
 ```
 
-![](model-expl_files/figure-gfm/dsmhabitat-si-val-1.png)<!-- -->
+![](model-expl_files/figure-gfm/dsmhabitat-si-val-2.png)<!-- -->
 
 ``` r
-pd_rf_by_mainstem |>
+pd_rf_by_mainstem_summary |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color = river)) + #, color=species, linetype=habitat)) + 
   facet_wrap(~river, scales="free_y") + 
@@ -1928,10 +1966,10 @@ pd_rf_by_mainstem |>
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
 ```
 
-![](model-expl_files/figure-gfm/dsmhabitat-si-val-2.png)<!-- -->
+![](model-expl_files/figure-gfm/dsmhabitat-si-val-3.png)<!-- -->
 
 ``` r
-pd_rf_by_mainstem |> 
+pd_rf_by_mainstem_summary |> 
   #inner_join(dsm_habitat_floodplain, by=join_by(river==river, flow_cfs==flow_cfs)) |> 
   #filter(river == "American River") |> 
   ggplot() +
@@ -1950,10 +1988,10 @@ pd_rf_by_mainstem |>
 
     ## Warning: Removed 25 rows containing missing values (`geom_line()`).
 
-![](model-expl_files/figure-gfm/dsmhabitat-si-val-3.png)<!-- -->
+![](model-expl_files/figure-gfm/dsmhabitat-si-val-4.png)<!-- -->
 
 ``` r
-pd_rf_by_mainstem |> 
+pd_rf_by_mainstem_summary |> 
   #inner_join(dsm_habitat_instream, by=join_by(river==river, flow_cfs==flow_cfs)) |> 
   ggplot() +
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color='modeled')) + 
@@ -1970,12 +2008,12 @@ pd_rf_by_mainstem |>
     ## Warning: Transformation introduced infinite values in continuous x-axis
     ## Removed 25 rows containing missing values (`geom_line()`).
 
-![](model-expl_files/figure-gfm/dsmhabitat-si-val-4.png)<!-- -->
+![](model-expl_files/figure-gfm/dsmhabitat-si-val-5.png)<!-- -->
 
 ### One-step model, scale-independent: WUA/LF vs normalized flow
 
 ``` r
-pd_dsmhabitat <- flowline_attributes |> 
+pd_si2 <- flowline_attributes |> 
   select(comid, any_of(si2_rec$var_info$variable), erom_q_ma_cfs, nf_bfl_dry_cfs, nf_bfl_wet_cfs) |> 
   inner_join(select(mainstems_comid, comid, river), by=join_by(comid)) |>
   expand_grid(flow_cfs = interp_flows) |>
@@ -1986,11 +2024,11 @@ pd_dsmhabitat <- flowline_attributes |>
        nf_bfl_wet_cfs_norm = nf_bfl_wet_cfs/erom_q_ma_cfs) |>
   drop_na()
 
-pd_dsmhabitat_pred <- 
+pd_si2_dsmhabitat_pred <- 
   si2_rec |> 
   prep(training(td_split)) |> 
-  bake(pd_dsmhabitat) |> 
-  bind_cols(select(pd_dsmhabitat, comid, flow_cfs_actual=flow_cfs, erom_q_ma_cfs_actual=erom_q_ma_cfs)) |>
+  bake(pd_si2) |> 
+  bind_cols(select(pd_si2, comid, flow_cfs_actual=flow_cfs, erom_q_ma_cfs_actual=erom_q_ma_cfs)) |>
   drop_na() %>% # need to use magrittr pipe for this purpose
   mutate(log_wua_per_lf_norm_pred = predict(rfr_si2$fit$fit, new_data=.)[[".pred"]]) |>
   mutate(wua_per_lf_pred = exp(log_wua_per_lf_norm_pred) * erom_q_ma_cfs_actual) |> 
@@ -2006,10 +2044,29 @@ pd_dsmhabitat_pred <-
 pd_rf_by_mainstem <-
   mainstems_comid |> 
   st_drop_geometry() |>
-  inner_join(pd_dsmhabitat_pred, by=join_by(comid), relationship="one-to-many") |>
+  inner_join(pd_si2_dsmhabitat_pred, by=join_by(comid), relationship="one-to-many") |>
   mutate(length_ft = coalesce(length_ft,0),
          wua_per_lf_pred = coalesce(wua_per_lf_pred,0),
-         wua_ft2_pred = wua_per_lf_pred * length_ft) |>
+         wua_ft2_pred = wua_per_lf_pred * length_ft) 
+
+pd_rf_by_mainstem |>
+  ggplot(aes(x = flow_cfs, y = wua_per_lf_pred, color = hqt_gradient_class)) + 
+  geom_line(aes(group = comid), alpha=0.5) + geom_smooth(method="loess", se=F) +
+  facet_wrap(~river, scales="free_y") + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_y_continuous() + 
+  theme(legend.position="top", 
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
+```
+
+    ## `geom_smooth()` using formula = 'y ~ x'
+
+![](model-expl_files/figure-gfm/dsmhabitat-si2-val-1.png)<!-- -->
+
+``` r
+pd_rf_by_mainstem_summary <- pd_rf_by_mainstem |>
   group_by(river, flow_cfs) |>
   summarize(tot_length_ft = sum(length_ft),
             tot_wua_ft2 = sum(wua_ft2_pred),
@@ -2022,7 +2079,7 @@ pd_rf_by_mainstem <-
     ## `.groups` argument.
 
 ``` r
-pd_rf_by_mainstem |>
+pd_rf_by_mainstem_summary |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = tot_wua_ac, color = river)) + #, color=species, linetype=habitat)) + 
   facet_wrap(~river, scales="free_y") + 
@@ -2034,10 +2091,10 @@ pd_rf_by_mainstem |>
   xlab("Flow (cfs)") + ylab("Total WUA (ac)")
 ```
 
-![](model-expl_files/figure-gfm/dsmhabitat-si2-val-1.png)<!-- -->
+![](model-expl_files/figure-gfm/dsmhabitat-si2-val-2.png)<!-- -->
 
 ``` r
-pd_rf_by_mainstem |>
+pd_rf_by_mainstem_summary |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color = river)) + #, color=species, linetype=habitat)) + 
   facet_wrap(~river, scales="free_y") + 
@@ -2049,10 +2106,10 @@ pd_rf_by_mainstem |>
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
 ```
 
-![](model-expl_files/figure-gfm/dsmhabitat-si2-val-2.png)<!-- -->
+![](model-expl_files/figure-gfm/dsmhabitat-si2-val-3.png)<!-- -->
 
 ``` r
-pd_rf_by_mainstem |> 
+pd_rf_by_mainstem_summary |> 
   #inner_join(dsm_habitat_floodplain, by=join_by(river==river, flow_cfs==flow_cfs)) |> 
   #filter(river == "American River") |> 
   ggplot() +
@@ -2071,10 +2128,10 @@ pd_rf_by_mainstem |>
 
     ## Warning: Removed 25 rows containing missing values (`geom_line()`).
 
-![](model-expl_files/figure-gfm/dsmhabitat-si2-val-3.png)<!-- -->
+![](model-expl_files/figure-gfm/dsmhabitat-si2-val-4.png)<!-- -->
 
 ``` r
-pd_rf_by_mainstem |> 
+pd_rf_by_mainstem_summary |> 
   #inner_join(dsm_habitat_instream, by=join_by(river==river, flow_cfs==flow_cfs)) |> 
   ggplot() +
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color='modeled')) + 
@@ -2091,4 +2148,4 @@ pd_rf_by_mainstem |>
     ## Warning: Transformation introduced infinite values in continuous x-axis
     ## Removed 25 rows containing missing values (`geom_line()`).
 
-![](model-expl_files/figure-gfm/dsmhabitat-si2-val-4.png)<!-- -->
+![](model-expl_files/figure-gfm/dsmhabitat-si2-val-5.png)<!-- -->

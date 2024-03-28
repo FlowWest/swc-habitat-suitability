@@ -270,6 +270,135 @@ durhsi_by_model_q |> saveRDS("../data/durhsi_by_model_q.Rds")
 durhsi_by_model_q_wy |> saveRDS("../data/durhsi_by_model_q_wy.Rds")
 ```
 
+*Alternate method to apply this output:*
+
+* 
+
+```{r fractional-range-sum}
+linterp <- function(x, x1, x2, y1, y2){
+  y1 + ((x-x1)/(x2-x1)) * (y2-y1)
+}
+
+fractional_range_sum <- function(a, b, ind, val) {
+  if(b==0){
+    # if range is zero, return zero
+    return(0)
+  } else if(b < ind[[1]]) {
+    # if range is entirely below the first data element, just draw from that first element
+    return(linterp(b, 0, ind[[1]], 0, val[[1]]) - linterp(a, 0, ind[[1]], 0, val[[1]]))
+  } else {
+    v1 <- val[which(ind<=a)] 
+    v2 <- val[which(ind>a & ind<b)]
+    v3 <- val[which(ind>=b)]
+    i1 <- ind[which(ind<=a)]
+    i2 <- ind[which(ind>a & ind<b)]
+    i3 <- ind[which(ind>=b)]
+    res <- c(linterp(a, i1[[length(i1)]], i2[[1]], v1[[length(v1)]], v2[[1]]),
+             v2,
+             linterp(b, i2[[length(i2)]], i3[[1]], v2[[length(v2)]], v3[[1]]))
+    return(sum(res))
+  }
+}
+# if range overlaps the 
+```
+
+```{r}
+durhsi_by_model_q |> 
+  expand_grid(gradient_class = c("vf", "vl")) |>
+  ggplot() +
+  facet_grid(cols=vars(gradient_class), rows=vars(river)) + 
+  geom_line(aes(x = model_q, y = avg_days_inundated)) + 
+  scale_x_log10(labels = scales::label_comma()) +
+  scale_y_continuous(limits = c(0,36), breaks = c(0,6,12,18,24,30,36), minor_breaks=NULL) +
+  xlab("Flow (cfs)") + ylab("Avg length of continuous period exceeding flow (days)") + ggtitle("Inundation Duration") +
+  geom_hline(aes(yintercept = if_else(gradient_class=="vf", 0, 18))) +
+  geom_hline(aes(yintercept = if_else(gradient_class=="vf", 10, 25)))
+
+```
+
+```{r posthoc-duration-func}
+apply_durations_to_fsa_curve <- function(fsa, drc, fsa_q=q, fsa_wua=wua, drc_q=q, drc_dhsi=dhsi) {
+  full_join(fsa |> transmute(q={{fsa_q}}, wua={{fsa_wua}}),
+            drc |> transmute(q={{drc_q}}, dhsi={{drc_dhsi}}),
+            by = join_by(q)) |>
+    # fill in any gaps with linear interpolation
+    arrange(q) |>
+    mutate(wua = zoo::na.approx(wua, q, na.rm=F),
+           dhsi = zoo::na.approx(dhsi, q, na.rm=F)) |>
+    drop_na() |>
+    # start by computing the marginal WUA added at each step
+    mutate(marginal_wua = if_else(row_number()==1, wua, wua - lag(wua))) |>
+    # simple approach, just applying each flow's DHSI to whatever area is added or removed at that flow
+    mutate(marginal_durwua_simple = dhsi * marginal_wua,
+           durwua_simple = cumsum(marginal_durwua_simple)) |>
+    # more accurate approach: 
+    # WUA added at flow Q is given the DHSI of flow Q 
+    mutate(wua_added = if_else(marginal_wua > 0, marginal_wua, 0),
+           cumulative_wua_added = cumsum(wua_added),
+           marginal_durwua_added = if_else(marginal_wua > 0, dhsi * marginal_wua, 0)) |>
+    # WUA removed at flow Q is not given that flow's DHSI, but is rather removed from top (first in, first out) assuming that the low flow areas are reaching too-high D and V
+    mutate(wua_removed = (-1) * if_else(marginal_wua < 0, marginal_wua, 0), 
+           cumulative_wua_removed = cumsum(wua_removed),
+           wua_already_removed = cumulative_wua_removed - wua_removed) %>% # need to use magrittr pipe for this purpose
+    mutate(marginal_durwua_removed = pmap_dbl(list(wua_already_removed, cumulative_wua_removed, row_number()), 
+                                     function(a, b, i) fractional_range_sum(a, b, 
+                                                                            ind=.$cumulative_wua_added[1:i],
+                                                                            val=.$marginal_durwua_added[1:i]))) |>
+    # put the pieces together
+    mutate(marginal_durwua = marginal_durwua_added - marginal_durwua_removed,
+           durwua = cumsum(marginal_durwua)) 
+}
+```
+
+```{r posthoc-duration-func-test}
+# need a public facing function that takes an input daily hydrograph and outputs this rating curve
+duration_rating_curves <- durhsi_by_model_q |> 
+  select(river, model_q, avg_days_inundated) |>
+  mutate(durhsi_vl = case_when(avg_days_inundated == 0  ~ 0,
+                               avg_days_inundated < 18  ~ 2/3,
+                               avg_days_inundated < 25 ~ 1.00,
+                               avg_days_inundated >= 25 ~ 2/3),
+         durhsi_vf = case_when(avg_days_inundated < 0  ~ 0,
+                               avg_days_inundated < 10 ~ 1,
+                               avg_days_inundated >= 10 ~ 2/3)) 
+
+duration_rating_curves |>
+  filter(river=="Deer Creek") |>
+  ggplot() + geom_line(aes(x=model_q, y=avg_days_inundated)) + scale_x_log10() +
+  ggtitle("Duration Rating Curve")
+
+# an example flow to suitable area curve
+# monotonic test comid: 12075424
+# chaotic test comid: 12069362
+fsa <- fsa_combined |>
+  filter(dataset=="Deer Creek" & comid==12069362) 
+fsa |> ggplot() + geom_line(aes(x=flow_cfs, y=area_wua_ft2)) + scale_x_log10() + scale_y_log10() +
+  ggtitle("Flow-to-Suitable-Area Curve")
+
+apply_durations_to_fsa_curve(fsa, duration_rating_curves |> filter(river=="Deer Creek") , 
+                             # specify variable names
+                             fsa_q = flow_cfs, fsa_wua=area_wua_ft2,
+                             drc_q = model_q, drc_dhsi=durhsi_vf) |>
+  ggplot(aes(x=q)) + 
+  geom_line(aes(y=wua, color="WUA")) + 
+  geom_line(aes(y=durwua_simple, color="Duration-weighted WUA (simple approach)")) +
+  geom_line(aes(y=durwua, color="Duration-weighted WUA (first-in-first-out approach)")) +
+  ggtitle("Duration Criteria Applied to Flow-to-Suitable-Area Curve")
+```
+
+```{r posthoc-duration-func-apply}
+# apply to all --  need to split by foothill/lowland too
+inner_join(fsa_combined |> nest(.by=c(dataset, comid), .key="tbl_fsa"),
+           duration_rating_curves |> nest(.by=(river), .key="tbl_drc"),
+           by=join_by(dataset==river)) |>
+  mutate(map2(tbl_fsa, tbl_drc, 
+         function(f, d) apply_durations_to_fsa_curve(f, d, 
+                                                     # specify variable names
+                                                     fsa_q = flow_cfs, fsa_wua=area_wua_ft2,
+                                                     drc_q = model_q, drc_dhsi=durhsi_vf)))
+```
+
+
 ```{r}
 knitr::knit_exit()
 ```

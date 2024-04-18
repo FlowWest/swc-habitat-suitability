@@ -40,6 +40,8 @@ flowline_attributes <- readRDS("../data/flowline_attributes.Rds")
 flow_to_suitable_area <- readRDS("../data/fsa_combined.Rds")
 ```
 
+## Import Flow Time Series Data
+
 ```{r cdec-functions}
 # functions from interoperable flows
 
@@ -144,9 +146,12 @@ training_cdec_data |>
 
 ```
 
+## Approach 1: Average/typical inundation durations by flow
+
 ```{r exceedence-periods, message=FALSE, warning=FALSE}
 #  function to calculate exceedence by flow
-calculate_exceedence <- function(q_gauge, q_crit) {
+# based on statistics calculated on the exceedence event level
+calculate_exceedence_summary <- function(q_gauge, q_crit) {
   
   n_days <- length(q_gauge)
   
@@ -157,11 +162,12 @@ calculate_exceedence <- function(q_gauge, q_crit) {
     mutate(cumulative_exceedence = if_else(exceeds_q, seq_along(exceedence_event), 0)) |>
     filter(exceeds_q) |>
     summarize(duration_days = max(cumulative_exceedence)) |>
-    mutate(durhsi_vl = case_when(duration_days == 0  ~ 0,
+    mutate(#duration_days = pmin(duration_days, 365), 
+           durhsi_vl = case_when(duration_days == 0  ~ 0,
                                  duration_days < 18  ~ 2/3,
                                  duration_days < 25 ~ 1.00,
                                  duration_days >= 25 ~ 2/3),
-           durhsi_vf = case_when(duration_days < 0  ~ 0,
+           durhsi_vf = case_when(duration_days <= 0  ~ 0,
                                  duration_days < 10 ~ 1,
                                  duration_days >= 10 ~ 2/3)) 
     
@@ -182,19 +188,11 @@ calculate_exceedence <- function(q_gauge, q_crit) {
 }
 
 # example usage
-calculate_exceedence(filter(training_cdec_data, river=="Deer Creek" & water_year==2017)$q_gauge, 500)
+calculate_exceedence_summary(filter(training_cdec_data, river=="Deer Creek" & water_year==2017)$q_gauge, 500)
 
 ```
 
 ```{r calc-duration-hsi, message=FALSE, warning=FALSE}
-#training_cdec_data |>
-#  nest(gauge_ts = c(date, q_gauge)) |>
-#  expand_grid(model_q = seq(300,15000,100)) |>
-#  mutate(result = map2(gauge_ts, model_q, 
-#                       function(df, q) calculate_exceedence(df$q_gauge, q))) |>
-#  select(-gauge_ts) |>
-#  unnest_wider(result)
-
 durhsi_by_model_q <- 
   training_reach_gages |> 
   left_join(training_cdec_data, by=join_by(river), relationship="one-to-many") |>
@@ -202,34 +200,14 @@ durhsi_by_model_q <-
   nest(gauge_ts = c(date, q_gauge)) |>
   unnest(flows) |> rename(model_q = flows) |>
   mutate(result = map2(gauge_ts, model_q, 
-                       function(df, q) calculate_exceedence(df$q_gauge, q))) |>
-  select(-gauge_ts) |>
-  unnest_wider(result) |>
-  glimpse()
-
-durhsi_by_model_q_wy <- 
-  training_reach_gages |> 
-  expand_grid(water_year = seq(1998, 2023, 1)) |>
-  left_join(training_cdec_data, by=join_by(river, water_year), relationship="one-to-many") |>
-  select(river, water_year, flows, date, q_gauge) |>
-  nest(gauge_ts = c(date, q_gauge)) |>
-  unnest(flows) |> rename(model_q = flows) |>
-  mutate(result = map2(gauge_ts, model_q, 
-                       function(df, q) calculate_exceedence(df$q_gauge, q))) |>
+                       function(df, q) calculate_exceedence_summary(df$q_gauge, q))) |>
   select(-gauge_ts) |>
   unnest_wider(result) |>
   glimpse()
 
 durhsi_by_model_q |> ggplot() +
   facet_wrap(~river, ncol=1) + 
-  #geom_ribbon(aes(x = model_q, 
-  #                ymin = pmax(avg_days_inundated - avg_days_inundated_sdev,0), 
-  #                ymax = avg_days_inundated + avg_days_inundated_sdev)) +
-  #geom_errorbar(aes(x = model_q, 
-  #                  ymin = pmax(avg_days_inundated - avg_days_inundated_sdev,0), 
-  #                  ymax = avg_days_inundated + avg_days_inundated_sdev)) +
   geom_line(aes(x = model_q, y = avg_days_inundated)) + 
-  #geom_text(aes(x = model_q, y = avg_days_inundated, label = n_inundations), size=2) +
   scale_x_log10(labels = scales::label_comma()) +
   scale_y_continuous(limits = c(0,36), breaks = c(0,6,12,18,24,30,36), minor_breaks=NULL) +
   xlab("Flow (cfs)") + ylab("Avg length of continuous period exceeding flow (days)") + ggtitle("Inundation Duration")
@@ -240,6 +218,27 @@ durhsi_by_model_q |> ggplot() +
   scale_x_log10(labels = scales::label_comma()) +
   scale_y_continuous(limits = c(0,1), minor_breaks=NULL) +
   xlab("Flow (cfs)") + ylab("Percent of days exceeding flow (Nov-Jun)") + ggtitle("Inundation Frequency")
+```
+
+```{r calc-duration-hsi-by-wy, message=FALSE, warning=FALSE}
+durhsi_by_model_q_wy <- 
+  training_reach_gages |> 
+  expand_grid(water_year = seq(1998, 2023, 1)) |>
+  left_join(training_cdec_data, by=join_by(river, water_year), relationship="one-to-many") |>
+  select(river, water_year, flows, date, q_gauge) |>
+  nest(gauge_ts = c(date, q_gauge)) |>
+  unnest(flows) |> rename(model_q = flows) |>
+  mutate(result = map2(gauge_ts, model_q, 
+                       function(df, q) calculate_exceedence_summary(df$q_gauge, q))) |>
+  select(-gauge_ts) |>
+  unnest_wider(result) |>
+  glimpse()
+
+durhsi_by_model_q_wy |>
+  ggplot(aes(x=model_q, y=avg_days_inundated)) +
+  facet_wrap(~river, ncol=1) +
+  geom_line(aes(color=water_year, group=water_year)) +
+  scale_x_log10()
 ```
 
 ```{r}
@@ -270,55 +269,356 @@ durhsi_by_model_q |> saveRDS("../data/durhsi_by_model_q.Rds")
 durhsi_by_model_q_wy |> saveRDS("../data/durhsi_by_model_q_wy.Rds")
 ```
 
-```{r}
-knitr::knit_exit()
-```
+## Approach 2: Post-hoc application of a duration-vs-flow curve to a flow-to-suitable-area curve 
 
-scratch area below
+*Alternate method to apply this output after estimation:*
 
-```{r synthetic-reach-ts, eval=FALSE, include=FALSE}
-
-# associated gaged reaches with ungaged reaches
-training_reach_comids <- fsa_combined |>
-  group_by(dataset, comid) |>
-  summarize() |>
-  left_join(flowline_attributes |> 
-              transmute(comid, maf_reach = erom_q_ma_cfs, da_reach_sq_km = da_area_sq_km)) |>
-  left_join(training_reach_gages, by=join_by(dataset==river)) |>
-  filter(maf_reach>10) |>
-  mutate(maf_ratio = maf_reach / maf_gauge) # to scale flows use Q_reach = Q_gauge ^ maf_ratio
-
-synth_time_series <- function(x) {
-  
-  reach_attr <- training_reach_comids |>
-    filter(comid==x) |> 
-    as.list()  
-  
-  gauge_ts <- training_cdec_data |>
-    filter(river == reach_attr$dataset)
-  
-  reach_ts <- gauge_ts |>
-    mutate(q_reach = q_gauge ^ reach_attr$maf_ratio)
-  
-  return(reach_ts)
-  
+```{r fractional-range-sum}
+linterp <- function(x, x1, x2, y1, y2){
+  y1 + ((x-x1)/(x2-x1)) * (y2-y1)
 }
 
-# example usage
-synth_time_series(12069362) |> glimpse() 
-  
-synth_time_series(12069362)$q_reach |> calculate_exceedence(500)
+fractional_range_sum <- function(a, b, ind, val) {
+  message(paste(a, "cfs to", b, "cfs"))
+  if(b==0){
+    # if range is zero, return zero:
+    return(0)
+  } else if (a==b) {
+    # if length of range is zero, return zero:
+    return(0)
+  #} else if (length(ind[which(ind>a & ind<b)]) == 0) { # check this one
+  #  return(0)
+  } else if(b < ind[[1]]) {
+    # if query range is entirely below the index range:
+    return(linterp(b, 0, ind[[1]], 0, val[[1]]) - linterp(a, 0, ind[[1]], 0, val[[1]])) # is this correct or just zero
+  } else if(a <= ind[[1]] & b >= ind[[length(ind)]]) {
+    # if query range entirely encompasses the index range
+    return(val)
+  } else if(a < ind[[1]]) {
+    # if query range overlaps the start of the index range:
+    v2 <- val[which(ind>a & ind<b)] # within range
+    v3 <- val[which(ind>=b)] #  above range
+    i2 <- ind[which(ind>a & ind<b)] # within range
+    i3 <- ind[which(ind>=b)] #  above range
+    res <- c(linterp(b, 0, ind[[1]], 0, val[[1]]) - linterp(a, 0, ind[[1]], 0, val[[1]]), # is this correct or just zero
+             v2,
+             linterp(b, i2[[length(i2)]], i3[[1]], v2[[length(v2)]], v3[[1]]))
+    return(sum(res))
+  } else if(b > ind[[length(ind)]]) {
+    # if b > ind max, include no third term (v2 encompasses it)
+    v1 <- val[which(ind<=a)] #  below range
+    v2 <- val[which(ind>a & ind<b)] # within range
+    i1 <- ind[which(ind<=a)] #  below range
+    i2 <- ind[which(ind>a & ind<b)] # within range
+    message("i2[[1]]=", i2[[1]])
+    res <- c(linterp(a, i1[[length(i1)]], i2[[1]], v1[[length(v1)]], v2[[1]]),
+             v2) # or is there an interpolation
+    return(sum(res))
+  } else if(a > ind[[length(ind)]]) {
+    # if a > ind max, query range is entirely outside the index range 
+    return(0) # or is it an interpolation
+  } else {
+    # if query range is entirely within index range:
+    v1 <- val[which(ind<=a)] #  below range
+    v2 <- val[which(ind>a & ind<b)] # within range
+    v3 <- val[which(ind>=b)] #  above range
+    i1 <- ind[which(ind<=a)] #  below range
+    i2 <- ind[which(ind>a & ind<b)] # within range
+    i3 <- ind[which(ind>=b)] #  above range
+    message("i2[[1]]=", i2[[1]])
+    res <- c(linterp(a, i1[[length(i1)]], i2[[1]], v1[[length(v1)]], v2[[1]]),
+             v2,
+             linterp(b, i2[[length(i2)]], i3[[1]], v2[[length(v2)]], v3[[1]]))
+    return(sum(res))
+  }
+}
 
-# apply to all
-
-# training_reach_comids |>
-#   mutate(synth_ts_q = map(comid, function(x) synth_time_series(x)$q_reach)) |>
-#   unnest(flows) |> rename(model_q = flows) |>
-#   mutate(exceedence_stats = map2(synth_ts_q, model_q, calculate_exceedence)) |>
-#   unnest(exceedence_stats)
-
-training_reach_comids |>
-  mutate(synth_ts_q = map(comid, function(x) synth_time_series(x)$q_reach)) |>
-  glimpse()
 ```
 
+```{r}
+durhsi_by_model_q |> 
+  expand_grid(gradient_class = c("vf", "vl")) |>
+  ggplot() +
+  facet_grid(cols=vars(gradient_class), rows=vars(river)) + 
+  geom_line(aes(x = model_q, y = avg_days_inundated)) + 
+  scale_x_log10(labels = scales::label_comma()) +
+  scale_y_continuous(limits = c(0,36), breaks = c(0,6,12,18,24,30,36), minor_breaks=NULL) +
+  xlab("Flow (cfs)") + ylab("Avg length of continuous period exceeding flow (days)") + ggtitle("Inundation Duration") +
+  geom_hline(aes(yintercept = if_else(gradient_class=="vf", 0, 18))) +
+  geom_hline(aes(yintercept = if_else(gradient_class=="vf", 10, 25)))
+
+```
+
+```{r posthoc-duration-func}
+apply_durations_to_fsa_curve <- function(fsa, drc, fsa_q=q, fsa_wua=wua, drc_q=q, drc_dhsi=dhsi) {
+  full_join(fsa |> transmute(q={{fsa_q}}, wua={{fsa_wua}}),
+            drc |> transmute(q={{drc_q}}, dhsi={{drc_dhsi}}),
+            by = join_by(q)) |>
+    # fill in any gaps with linear interpolation
+    arrange(q) |>
+    mutate(wua = zoo::na.approx(wua, q, na.rm=F),
+           dhsi = zoo::na.approx(dhsi, q, na.rm=F)) |>
+    drop_na() |>
+    # start by computing the marginal WUA added at each step
+    mutate(marginal_wua = if_else(row_number()==1, wua, wua - lag(wua))) |>
+    # simple approach, just applying each flow's DHSI to whatever area is added or removed at that flow
+    mutate(marginal_durwua_simple = dhsi * marginal_wua,
+           durwua_simple = cumsum(marginal_durwua_simple)) |>
+    # more accurate approach: 
+    # WUA added at flow Q is given the DHSI of flow Q 
+    mutate(wua_added = if_else(marginal_wua > 0, marginal_wua, 0),
+           cumulative_wua_added = cumsum(wua_added),
+           marginal_durwua_added = if_else(marginal_wua > 0, dhsi * marginal_wua, 0)) |>
+    # WUA removed at flow Q is not given that flow's DHSI, but is rather removed from top (first in, first out) assuming that the low flow areas are reaching too-high D and V
+    mutate(wua_removed = (-1) * if_else(marginal_wua < 0, marginal_wua, 0), 
+           cumulative_wua_removed = cumsum(wua_removed),
+           wua_already_removed = cumulative_wua_removed - wua_removed) %>% # need to use magrittr pipe for this purpose
+    mutate(marginal_durwua_removed = pmap_dbl(list(wua_already_removed, cumulative_wua_removed, row_number()), 
+                                     function(a, b, i) fractional_range_sum(a, b, 
+                                                                            ind=.$cumulative_wua_added[1:i],
+                                                                            val=.$marginal_durwua_added[1:i]))) |>
+    # put the pieces together
+    mutate(marginal_durwua = marginal_durwua_added - marginal_durwua_removed,
+           durwua = cumsum(marginal_durwua)) 
+}
+
+# add error handling
+apply_durations_to_fsa_curve <- possibly(apply_durations_to_fsa_curve, otherwise=NA)
+```
+
+```{r posthoc-duration-func-test}
+# need a public facing function that takes an input daily hydrograph and outputs this rating curve
+duration_rating_curves <- durhsi_by_model_q |> 
+  select(river, model_q, avg_days_inundated) |>
+  mutate(durhsi_vl = case_when(avg_days_inundated == 0  ~ 0,
+                               avg_days_inundated < 18  ~ 2/3,
+                               avg_days_inundated < 25 ~ 1.00,
+                               avg_days_inundated >= 25 ~ 2/3),
+         durhsi_vf = case_when(avg_days_inundated <= 0  ~ 0,
+                               avg_days_inundated < 10 ~ 1,
+                               avg_days_inundated >= 10 ~ 2/3)) 
+
+duration_rating_curves |>
+  filter(river=="Deer Creek") |>
+  ggplot() + geom_line(aes(x=model_q, y=avg_days_inundated)) + scale_x_log10() +
+  ggtitle("Duration Rating Curve")
+
+# an example flow to suitable area curve
+# monotonic test comid: 12075424
+# chaotic test comid: 12069362
+fsa <- fsa_combined |>
+  filter(dataset=="Deer Creek" & comid==12069362) 
+fsa |> ggplot() + geom_line(aes(x=flow_cfs, y=area_wua_ft2)) + scale_x_log10() + scale_y_log10() +
+  ggtitle("Flow-to-Suitable-Area Curve")
+
+apply_durations_to_fsa_curve(fsa, duration_rating_curves |> filter(river=="Deer Creek") , 
+                             # specify variable names
+                             fsa_q = flow_cfs, fsa_wua=area_wua_ft2,
+                             drc_q = model_q, drc_dhsi=durhsi_vf)|>
+  ggplot(aes(x=q)) + 
+  geom_line(aes(y=wua, color="WUA")) + 
+  geom_line(aes(y=durwua_simple, color="Duration-weighted WUA (simple approach)")) +
+  geom_line(aes(y=durwua, color="Duration-weighted WUA (first-in-first-out approach)")) +
+  ggtitle("Duration Criteria Applied to Flow-to-Suitable-Area Curve")
+```
+
+```{r posthoc-duration-func-apply}
+# apply to all --  need to split by foothill/lowland too
+fsa_duration_posthoc <- inner_join(fsa_combined |> nest(.by=c(dataset, comid), .key="tbl_fsa"),
+           duration_rating_curves |> nest(.by=(river), .key="tbl_drc"),
+           by=join_by(dataset==river)) |>
+  mutate(result = map2(tbl_fsa, tbl_drc, 
+           function(f, d) apply_durations_to_fsa_curve(f, d, 
+                                                     # specify variable names
+                                                     fsa_q = flow_cfs, fsa_wua=area_wua_ft2,
+                                                     drc_q = model_q, drc_dhsi=durhsi_vf)),
+  ) 
+
+fsa_duration_posthoc |>
+  unnest(result) |>
+  ggplot(aes(x = q)) + 
+  facet_wrap(~dataset, ncol=1) +
+  geom_line(aes(y = wua, group=comid, color = "WUA")) +
+  geom_line(aes(y = durwua, group=comid, color = "WUA, duration-weighted")) + 
+  scale_x_log10(labels = scales::label_comma())
+```
+
+
+```{r wet-dry-normal}
+# Water type indices from  https://cdec.water.ca.gov/reportapp/javareports?name=WSIHIST
+water_year_types <- read_csv("water_year_type/water_year_type.csv") |>
+  mutate(wy_type = factor(wy_type, 
+                          levels=c("C", "D", "BN", "N", "AN", "W"), 
+                          labels=c("Critical", "Dry", "Below Normal", "Normal", "Above Normal", "Wet"))) |>
+  mutate(wy_group = factor(case_when(wy_type %in% c("Critical","Dry") ~ "Dry", 
+                                     wy_type %in% c("Below Normal", "Normal", "Above Normal") ~ "Normal", 
+                                     wy_type %in% c("Wet") ~ "Wet")))
+                                       
+#durhsi_by_model_q_wyt <- 
+#  training_reach_gages |> 
+#  expand_grid(water_year = seq(1998, 2023, 1)) |>
+#  left_join(training_cdec_data, by=join_by(river, water_year), relationship="one-to-many") |>
+#  inner_join(water_year_types, by=join_by(water_year)) |>
+#  select(river, wy_group, flows, date, q_gauge) |>
+#  nest(gauge_ts = c(date, q_gauge)) |>
+#  unnest(flows) |> rename(model_q = flows) |>
+#  mutate(result = map2(gauge_ts, model_q, 
+#                       function(df, q) calculate_exceedence_summary(df$q_gauge, q))) |>
+#  select(-gauge_ts) |>
+#  unnest_wider(result) |>
+#  glimpse()
+
+durhsi_by_model_q_wyt <- 
+  training_reach_gages |> 
+  expand_grid(water_year = seq(1998, 2023, 1)) |>
+  left_join(training_cdec_data, by=join_by(river, water_year), relationship="one-to-many") |>
+  mutate(location = case_when(
+     river=="Deer Creek" ~ "Sacramento Valley",
+     river=="Lower Yuba River" ~ "Sacramento Valley",
+     river=="Stanislaus River" ~ "San Joaquin Valley")) |>
+  inner_join(water_year_types, by=join_by(location, water_year), relationship="many-to-one") |>
+  select(river, wy_group, water_year, flows, date, q_gauge) |>
+  group_by(river, wy_group, water_year) |>
+  nest(gauge_ts = c(date, q_gauge)) |>
+  unnest(flows) |> rename(model_q = flows) |>
+  mutate(result = map2(gauge_ts, model_q, 
+                       function(df, q) possibly(calculate_exceedence_summary(df$q_gauge, q), otherwise=NA))) |>
+  select(-gauge_ts) |>
+  unnest_wider(result) |>
+  glimpse()
+
+durhsi_by_model_q_wyt |>
+  ggplot(aes(x=model_q, y=avg_days_inundated)) + #y=pmin(avg_days_inundated, 365))) +
+  facet_wrap(~river, ncol=1) +
+  geom_line(aes(color=wy_group)) + 
+  scale_x_log10()
+
+```
+
+```{r daily-flow-exceedence-functions, message=FALSE, warning=FALSE}
+calculate_daily_inundation_duration <- function(q_gauge, q_crit) {
+  tibble(q_gauge,
+         q_crit,
+         exceeds_q = q_gauge > q_crit,
+         exceedence_event = with(rle(exceeds_q), rep(seq_along(lengths), lengths))) |>
+  group_by(exceedence_event) |>
+  mutate(cumulative_exceedence = if_else(exceeds_q, seq_along(exceedence_event), 0)) |>
+  #filter(exceeds_q) |>
+  mutate(duration_days = max(cumulative_exceedence)) |> 
+  pull(duration_days)
+}
+
+dhsi <- function(duration_days, type) {
+  if (type=="vl") {
+    case_when(duration_days == 0  ~ 0,
+              duration_days < 18  ~ 2/3,
+              duration_days < 25 ~ 1.00,
+              duration_days >= 25 ~ 2/3)
+  } else if (type=="vf") {
+    case_when(duration_days <= 0  ~ 0,
+              duration_days < 10 ~ 1,
+              duration_days >= 10 ~ 2/3)
+  }
+}
+
+calculate_daily_inundation_duration(filter(training_cdec_data, river=="Deer Creek" & water_year==2017)$q_gauge, 500) |> dhsi("vf")
+```
+
+```{r message=FALSE}
+# duration-based HSI factors by flow threshold, by date
+drcs <-
+  # set up all combinations of date/flow and critical flow
+  training_reach_gages |> 
+  left_join(training_cdec_data, by=join_by(river), relationship="one-to-many") |>
+  select(river, flows, date, q_gauge) |>
+  unnest(flows) |> 
+  rename(q_crit = flows) |>
+  arrange(river, q_crit, date) |>
+  # calculate inundation durations
+  mutate(duration_days = calculate_daily_inundation_duration(q_gauge, q_crit)) |>
+  mutate(dhsi_vl = dhsi(duration_days, "vl"),
+         dhsi_vf = dhsi(duration_days, "vf")) |>
+  # add water year info
+  mutate(water_year = if_else(month(date)>=10, year(date)+1, year(date))) |>
+  mutate(location = case_when(
+     river=="Deer Creek" ~ "Sacramento Valley",
+     river=="Lower Yuba River" ~ "Sacramento Valley",
+     river=="Stanislaus River" ~ "San Joaquin Valley")) |>
+  inner_join(water_year_types, by=join_by(location, water_year), relationship="many-to-one") |>
+  #filter(year(date)==1997) |>
+  select(river, q_gauge, q_crit, date, duration_days, dhsi_vl, dhsi_vf) |>
+  pivot_longer(cols = c(dhsi_vl, dhsi_vf), names_to = "dhsi_metric", values_to = "dhsi_value") |>
+  nest(drc = c(q_crit, duration_days, dhsi_value))
+
+fsas <- fsa_combined |>
+  select(river = dataset, comid, flow_cfs, area_wua_ft2) |>
+  inner_join(flowline_attributes |> select(comid, hqt_gradient_class), by=join_by(comid)) |>
+  mutate(dhsi_metric = if_else(hqt_gradient_class=="Valley Lowland", "dhsi_vl", "dhsi_vf")) |>
+  nest(fsa = c(flow_cfs, area_wua_ft2))
+
+# monotonic test comid: 12075424
+# chaotic test comid: 12069362
+example_result <- 
+  inner_join(drcs, fsas, by=join_by(river, dhsi_metric), relationship="many-to-many") |>
+  arrange(river, comid, date) |>
+  filter(date >= ymd("2001-12-01") & date < ymd("2002-03-31") & comid==12075424) |> # filtering to these for testing purposes
+  mutate(fsa_duration = map2(fsa, drc, function(f, d) apply_durations_to_fsa_curve(f, d, fsa_q=flow_cfs, fsa_wua=area_wua_ft2, drc_q=q_crit, drc_dhsi=dhsi_value))) 
+
+example_result$fsa_duration[[1]] |> 
+  ggplot(aes(x=q)) + 
+  geom_line(aes(y=wua, color="Non-Temporal")) + 
+  geom_line(aes(y=durwua, color="Temporal")) + 
+  scale_x_log10() + 
+  geom_line(data=example_result$drc[[1]], aes(x=q_crit, y=duration_days*1000)) + 
+  scale_y_continuous(name="WUA (ft2)", sec.axis = sec_axis(name="Duration (days)", trans = ~./1000))
+
+example_result |>
+  mutate(wua = map2_dbl(fsa_duration, q_gauge, function(df, q_gauge) approx(x=df$q, y=df$wua, xout=q_gauge)$y),
+         durwua = map2_dbl(fsa_duration, q_gauge, function(df, q_gauge) approx(x=df$q, y=df$durwua, xout=q_gauge)$y),
+         durwua_simple = map2_dbl(fsa_duration, q_gauge, function(df, q_gauge) approx(x=df$q, y=df$durwua_simple, xout=q_gauge)$y)) |>
+  ggplot(aes(x=date)) + 
+  geom_line(aes(y=wua, color="Non-Temporal WUA")) + 
+  geom_line(aes(y=durwua, color="Temporal WUA")) + 
+  geom_line(aes(y=q_gauge*500, color="Flow")) + 
+  scale_y_continuous(name="WUA (ft2)", sec.axis=sec_axis(name="Flow (cfs)", trans = ~./500))
+  
+```
+
+```{r message=FALSE}
+# instead of one for each comid we can summarize for a whole reach
+
+fsas <- fsa_combined |> 
+  inner_join(flowline_attributes |> select(comid, hqt_gradient_class), by=join_by(comid)) |>
+  mutate(dhsi_metric = if_else(hqt_gradient_class=="Valley Lowland", "dhsi_vl", "dhsi_vf")) |>
+  group_by(dataset, flow_cfs, dhsi_metric) |> 
+  summarize(area_tot_ft2 = sum(area_tot_ft2), 
+            area_wua_ft2 = sum(area_wua_ft2), 
+            hsi_frac = sum(area_wua_ft2)/sum(area_tot_ft2)) |>
+  ungroup() |>
+  select(river = dataset, flow_cfs, area_wua_ft2, dhsi_metric) |>
+  nest(fsa = c(flow_cfs, area_wua_ft2))
+
+example_result <- 
+  inner_join(drcs, fsas, by=join_by(river, dhsi_metric), relationship="many-to-many") |>
+  arrange(river, date) |>
+  filter(date >= ymd("2001-12-01") & date < ymd("2002-03-31") & river=="Deer Creek") |> # filtering to these for testing purposes
+  mutate(fsa_duration = map2(fsa, drc, function(f, d) apply_durations_to_fsa_curve(f, d, fsa_q=flow_cfs, fsa_wua=area_wua_ft2, drc_q=q_crit, drc_dhsi=dhsi_value))) 
+
+example_result$fsa_duration[[1]] |> 
+  ggplot(aes(x=q)) + 
+  geom_line(aes(y=wua, color="Non-Temporal")) + 
+  geom_line(aes(y=durwua, color="Temporal")) + 
+  scale_x_log10() + 
+  geom_line(data=example_result$drc[[1]], aes(x=q_crit, y=duration_days*1000)) + 
+  scale_y_continuous(name="WUA (ft2)", sec.axis = sec_axis(name="Duration (days)", trans = ~./1000))
+
+example_result |>
+  mutate(wua = map2_dbl(fsa_duration, q_gauge, function(df, q_gauge) approx(x=df$q, y=df$wua, xout=q_gauge)$y),
+         durwua = map2_dbl(fsa_duration, q_gauge, function(df, q_gauge) approx(x=df$q, y=df$durwua, xout=q_gauge)$y),
+         durwua_simple = map2_dbl(fsa_duration, q_gauge, function(df, q_gauge) approx(x=df$q, y=df$durwua_simple, xout=q_gauge)$y)) |>
+  ggplot(aes(x=date)) + 
+  geom_line(aes(y=wua/43560, color="Non-Temporal WUA")) + 
+  geom_line(aes(y=durwua/43560, color="Temporal WUA")) + 
+  geom_line(aes(y=q_gauge/10, color="Flow")) + 
+  scale_y_continuous(name="WUA (ac)", sec.axis=sec_axis(name="Flow (cfs)", trans = ~.*10))
+```

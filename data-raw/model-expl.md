@@ -1,7 +1,7 @@
 Statistical Modeling to Predict Flow-to-Suitable-Area Curves
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-04-17
+2024-04-18
 
 - [Import and Preprocess Training
   Data](#import-and-preprocess-training-data)
@@ -322,6 +322,11 @@ factoextra::fviz_pca_var(pca, axes=c(2,3), col.var = "cos2", repel = TRUE)
 #norm_var <- sym("da_area_sq_km")
 norm_var <- sym("da_scalar")
 
+filter_variable_ranges <- function(data) {
+  data |>
+    filter(da_area_sq_km > 100) # 1000 may have better model performance, 100 encompasses all streams we want to predict
+}
+
 td <- train_data |>
   mutate(flow_norm_cfs = flow_cfs / !!norm_var) |> # flow as a percent of mean annual flow
   mutate(wua_per_lf = area_wua_ft2 / (reach_length_km*3280.84),
@@ -342,9 +347,9 @@ td <- train_data |>
          # predictors of flow (as would be found in a regional regression)
          slope, da_area_sq_km, da_elev_mean, da_ppt_mean_mm, 
          # baseflow and peakflow statistics
-         nf_bfl_dry_cfs, nf_bfl_wet_cfs, erom_q_ma_cfs, peak_q2_cfs, peak_q5_cfs, peak_q10_cfs,
+         # nf_bfl_dry_cfs, nf_bfl_wet_cfs, erom_q_ma_cfs, peak_q2_cfs, peak_q5_cfs, peak_q10_cfs,
          # flow and channel characteristics, hydrologically predicted
-         bf_depth_m, bf_w_d_ratio, erom_v_ma_fps,
+         bf_depth_m, bf_w_d_ratio, # erom_v_ma_fps,
          # misc characteristics of the catchment
          da_avg_slope, da_k_erodibility, mean_ndvi,
          # misc characteristics of the locality
@@ -360,13 +365,15 @@ td <- train_data |>
          # scalar for normalizing
          da_scalar
          ) |> 
-  mutate(nf_bfl_dry_cfs_norm = nf_bfl_dry_cfs/!!norm_var, 
-         nf_bfl_wet_cfs_norm = nf_bfl_wet_cfs/!!norm_var) |>
-  drop_na() |> glimpse()
+  #mutate(nf_bfl_dry_cfs_norm = nf_bfl_dry_cfs/!!norm_var, 
+  #       nf_bfl_wet_cfs_norm = nf_bfl_wet_cfs/!!norm_var) |>
+  drop_na() |> 
+  filter_variable_ranges() |>
+  glimpse()
 ```
 
-    ## Rows: 19,496
-    ## Columns: 43
+    ## Rows: 18,164
+    ## Columns: 34
     ## $ dataset                  <chr> "Lower Yuba River", "Lower Yuba River", "Lowe…
     ## $ comid                    <dbl> 8062583, 8062583, 8062583, 8062583, 8062583, …
     ## $ hsi_frac                 <dbl> 0.000000000, 0.000000000, 0.000000000, 0.0000…
@@ -382,15 +389,8 @@ td <- train_data |>
     ## $ da_area_sq_km            <dbl> 3110.288, 3110.288, 3110.288, 3110.288, 3110.…
     ## $ da_elev_mean             <dbl> 1379.63, 1379.63, 1379.63, 1379.63, 1379.63, …
     ## $ da_ppt_mean_mm           <dbl> 1675.915, 1675.915, 1675.915, 1675.915, 1675.…
-    ## $ nf_bfl_dry_cfs           <dbl> 502, 502, 502, 502, 502, 502, 502, 502, 502, …
-    ## $ nf_bfl_wet_cfs           <dbl> 924, 924, 924, 924, 924, 924, 924, 924, 924, …
-    ## $ erom_q_ma_cfs            <dbl> 2649.202, 2649.202, 2649.202, 2649.202, 2649.…
-    ## $ peak_q2_cfs              <dbl> 31500, 31500, 31500, 31500, 31500, 31500, 315…
-    ## $ peak_q5_cfs              <dbl> 73200, 73200, 73200, 73200, 73200, 73200, 732…
-    ## $ peak_q10_cfs             <dbl> 110000, 110000, 110000, 110000, 110000, 11000…
     ## $ bf_depth_m               <dbl> 2.83, 2.83, 2.83, 2.83, 2.83, 2.83, 2.83, 2.8…
     ## $ bf_w_d_ratio             <dbl> 24.80565, 24.80565, 24.80565, 24.80565, 24.80…
-    ## $ erom_v_ma_fps            <dbl> 2.58518, 2.58518, 2.58518, 2.58518, 2.58518, …
     ## $ da_avg_slope             <dbl> 29.4, 29.4, 29.4, 29.4, 29.4, 29.4, 29.4, 29.…
     ## $ da_k_erodibility         <dbl> 0.2423, 0.2423, 0.2423, 0.2423, 0.2423, 0.242…
     ## $ mean_ndvi                <dbl> 0.4897366, 0.4897366, 0.4897366, 0.4897366, 0…
@@ -408,8 +408,6 @@ td <- train_data |>
     ## $ hqt_gradient_class       <fct> Bedrock, Bedrock, Bedrock, Bedrock, Bedrock, …
     ## $ hyd_cls                  <fct> High-volume snowmelt and rain, High-volume sn…
     ## $ da_scalar                <dbl> 50.7109, 50.7109, 50.7109, 50.7109, 50.7109, …
-    ## $ nf_bfl_dry_cfs_norm      <dbl> 9.899253, 9.899253, 9.899253, 9.899253, 9.899…
-    ## $ nf_bfl_wet_cfs_norm      <dbl> 18.22094, 18.22094, 18.22094, 18.22094, 18.22…
 
 ``` r
 td |> ggplot() +
@@ -425,7 +423,7 @@ td |> ggplot() +
 
     ## `geom_smooth()` using formula = 'y ~ s(x, bs = "cs")'
 
-    ## Warning: Removed 875 rows containing non-finite values (`stat_smooth()`).
+    ## Warning: Removed 828 rows containing non-finite values (`stat_smooth()`).
 
 ![](model-expl_files/figure-gfm/td-summary-1.png)<!-- -->
 
@@ -469,6 +467,49 @@ filter_within_domain <- function(data, .cols = everything()) {
 # pd |> nrow()
 # pd |> filter_within_domain(c(flow_cfs, da_area_sq_km, da_elev_mean)) |> nrow()
 ```
+
+``` r
+td |> 
+  select(wua_per_lf, slope:sinuosity) |>
+  pivot_longer(cols = everything()) |>
+  ggplot(aes(x = value)) + 
+  geom_histogram(aes(y = after_stat(count / sum(count)))) +
+  facet_wrap(~name, scales = "free_x") +
+  scale_x_continuous(trans = ihs) + theme(panel.grid.minor = element_blank())
+```
+
+    ## `stat_bin()` using `bins = 30`. Pick better value with `binwidth`.
+
+![](model-expl_files/figure-gfm/td-flow-predictor-curves-1.png)<!-- -->
+
+``` r
+n_breaks <- 10
+td |>
+  # #filter((if_all(slope:sinuosity, function(x) x > quantile(x, 0.01)))) |>
+  # mutate(across(slope:sinuosity, function(x) {
+  #   lo <- quantile(x, 0.1)
+  #   hi <- quantile(x, 0.9)
+  #   clip_lo <- if_else(x > lo, x, lo)
+  #   clip_hi <- if_else(clip_lo < hi, clip_lo, hi)
+  #   return(clip_hi)
+  # })) |>
+  select(comid, wua_per_lf, flow_cfs, slope:sinuosity) |>
+  mutate(across(slope:sinuosity, function(x) cut(x, breaks=n_breaks, labels=seq(1,n_breaks)/n_breaks))) |>
+  pivot_longer(cols = slope:sinuosity) |>
+  ggplot(aes(x = flow_cfs, y = wua_per_lf)) +
+  facet_wrap(~name) + geom_smooth(aes(color = value), se=F) +
+  scale_color_viridis_d(name = "Percentile of predictor variable", option = "cividis", direction=-1) +
+  theme(legend.position = "top") + guides(color=guide_legend(nrow=2, byrow=TRUE)) +
+  scale_x_log10() + scale_y_log10() + theme(panel.grid.minor = element_blank())
+```
+
+    ## Warning: Transformation introduced infinite values in continuous y-axis
+
+    ## `geom_smooth()` using method = 'gam' and formula = 'y ~ s(x, bs = "cs")'
+
+    ## Warning: Removed 16560 rows containing non-finite values (`stat_smooth()`).
+
+![](model-expl_files/figure-gfm/td-flow-predictor-curves-2.png)<!-- -->
 
 Split into training and testing datasets
 
@@ -543,7 +584,7 @@ lm_sd |> glance()
     ## # A tibble: 1 × 12
     ##   r.squared adj.r.squared sigma statistic p.value    df  logLik    AIC    BIC
     ##       <dbl>         <dbl> <dbl>     <dbl>   <dbl> <dbl>   <dbl>  <dbl>  <dbl>
-    ## 1     0.425         0.423  1.04      271.       0    43 -23165. 46419. 46764.
+    ## 1     0.473         0.472  1.03      307.       0    43 -21289. 42667. 43009.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
@@ -553,16 +594,16 @@ lm_sd |> tidy()
     ## # A tibble: 44 × 5
     ##    term             estimate std.error statistic  p.value
     ##    <chr>               <dbl>     <dbl>     <dbl>    <dbl>
-    ##  1 (Intercept)        3.31     0.00830   398.    0       
-    ##  2 flow_cfs          35.3      3.40       10.4   3.96e-25
-    ##  3 slope              4.95     2.50        1.98  4.73e- 2
-    ##  4 da_area_sq_km     -7.29     2.84       -2.56  1.03e- 2
-    ##  5 da_elev_mean      -4.47     1.87       -2.39  1.70e- 2
-    ##  6 da_ppt_mean_mm     2.20     0.728       3.02  2.52e- 3
-    ##  7 bf_depth_m         8.50     2.14        3.98  7.04e- 5
-    ##  8 bf_w_d_ratio       0.600    0.921       0.651 5.15e- 1
-    ##  9 da_k_erodibility   0.0655   0.337       0.194 8.46e- 1
-    ## 10 da_avg_slope       2.55     1.64        1.55  1.21e- 1
+    ##  1 (Intercept)         3.36    0.00844   398.    0       
+    ##  2 flow_cfs          111.    101.          1.10  2.73e- 1
+    ##  3 slope             136.     17.5         7.79  7.41e-15
+    ##  4 da_area_sq_km       1.10    5.80        0.191 8.49e- 1
+    ##  5 da_elev_mean      -10.8     8.17       -1.32  1.88e- 1
+    ##  6 da_ppt_mean_mm    -14.5     4.96       -2.92  3.52e- 3
+    ##  7 bf_depth_m          1.96    1.11        1.76  7.85e- 2
+    ##  8 bf_w_d_ratio        0.243   0.539       0.451 6.52e- 1
+    ##  9 da_k_erodibility    1.70    9.43        0.180 8.57e- 1
+    ## 10 da_avg_slope       12.6     4.86        2.60  9.40e- 3
     ## # ℹ 34 more rows
 
 ``` r
@@ -578,18 +619,15 @@ lm_sd_res <- testing(td_split) |>
 lm_sd_res |>
   arrange(comid, flow_cfs) |>
   ggplot() + geom_path(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs, group=comid), linewidth=2) + 
-  scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c(name="Flow (cfs)") + 
+  #scale_y_log10(limits=c(1,NA)) + scale_x_log10(limits=c(1,NA)) + 
+  scale_y_continuous(trans=ihs, limits=c(1,NA), labels=scales::label_comma()) + 
+  scale_x_continuous(trans=ihs, limits=c(1,NA), labels=scales::label_comma()) +
+  coord_fixed() + geom_abline() + scale_color_viridis_c(name="Flow (cfs)") + 
   ggtitle("Scale-dependent model, linear regression") +
-  xlab("WUA per LF (Actual)") + ylab("WUA per LF (Predicted)")
+  xlab("Suitable Habitat Area (ft2) per LF (Actual)") + ylab("Suitable Habitat Area (ft2) per LF (Predicted)")
 ```
 
-    ## Warning in self$trans$transform(x): NaNs produced
-
-    ## Warning: Transformation introduced infinite values in continuous y-axis
-
-    ## Warning: Transformation introduced infinite values in continuous x-axis
-
-    ## Warning: Removed 14 rows containing missing values (`geom_path()`).
+    ## Warning: Removed 275 rows containing missing values (`geom_path()`).
 
 ![](model-expl_files/figure-gfm/lm-sd-1.png)<!-- -->
 
@@ -598,18 +636,15 @@ lm_sd_res |>
   filter(flow_cfs %in% c(300,500,1000,1500,3000,5000,10000,15000)) |>
   ggplot() + geom_point(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs)) + 
   facet_wrap(~flow_cfs, ncol = 4) +
-  scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c(name="Flow (cfs)") + 
+  #scale_y_log10(limits=c(1,NA)) + scale_x_log10(limits=c(1,NA)) + 
+  scale_y_continuous(trans=ihs, limits=c(1,NA), labels=scales::label_comma()) + 
+  scale_x_continuous(trans=ihs, limits=c(1,NA), labels=scales::label_comma()) +
+  coord_fixed() + geom_abline() + scale_color_viridis_c(name="Flow (cfs)") + 
   ggtitle("Scale-dependent model, linear regression") +
-  xlab("WUA per LF (Actual)") + ylab("WUA per LF (Predicted)")
+  xlab("Suitable Habitat Area (ft2) per LF (Actual)") + ylab("Suitable Habitat Area (ft2) per LF (Predicted)")
 ```
 
-    ## Warning in self$trans$transform(x): NaNs produced
-
-    ## Warning: Transformation introduced infinite values in continuous y-axis
-
-    ## Warning: Transformation introduced infinite values in continuous x-axis
-
-    ## Warning: Removed 10 rows containing missing values (`geom_point()`).
+    ## Warning: Removed 84 rows containing missing values (`geom_point()`).
 
 ![](model-expl_files/figure-gfm/lm-sd-2.png)<!-- -->
 
@@ -674,14 +709,14 @@ rfr_sd$fit$fit |> print()
     ## 
     ## Type:                             Regression 
     ## Number of trees:                  256 
-    ## Sample size:                      15850 
+    ## Sample size:                      14758 
     ## Number of independent variables:  43 
     ## Mtry:                             6 
     ## Target node size:                 5 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.01158338 
-    ## R squared (OOB):                  0.9938813
+    ## OOB prediction error (MSE):       0.01118236 
+    ## R squared (OOB):                  0.994382
 
 ``` r
 rfr_sd_res <- testing(td_split) |>
@@ -696,14 +731,15 @@ rfr_sd_res <- testing(td_split) |>
 rfr_sd_res |>
   arrange(comid, flow_cfs) |>
   ggplot() + geom_path(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs, group=comid), linewidth=2) + 
-  scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c(name="Flow (cfs)")   + 
+  #scale_y_log10(limits=c(1,NA)) + scale_x_log10(limits=c(1,NA)) + 
+  scale_y_continuous(trans=ihs, limits=c(1,NA), labels=scales::label_comma()) + 
+  scale_x_continuous(trans=ihs, limits=c(1,NA), labels=scales::label_comma()) +
+  coord_fixed() + geom_abline() + scale_color_viridis_c(name="Flow (cfs)")   + 
   ggtitle("Scale-dependent model, random forest regression") +
-  xlab("WUA per LF (Actual)") + ylab("WUA per LF (Predicted)")
+  xlab("Suitable Habitat Area (ft2) per LF (Actual)") + ylab("Suitable Habitat Area (ft2) per LF (Predicted)")
 ```
 
-    ## Warning: Transformation introduced infinite values in continuous y-axis
-
-    ## Warning: Transformation introduced infinite values in continuous x-axis
+    ## Warning: Removed 302 rows containing missing values (`geom_path()`).
 
 ![](model-expl_files/figure-gfm/rfr-sd-1.png)<!-- -->
 
@@ -712,13 +748,15 @@ rfr_sd_res |>
   filter(flow_cfs %in% c(300,500,1000,1500,3000,5000,10000,15000)) |>
   ggplot() + geom_point(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs)) + 
   facet_wrap(~flow_cfs, ncol = 4) +
-  scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c(name="Flow (cfs)") + 
+  #scale_y_log10(limits=c(1,NA)) + scale_x_log10(limits=c(1,NA)) + 
+  scale_y_continuous(trans=ihs, limits=c(1,NA), labels=scales::label_comma()) + 
+  scale_x_continuous(trans=ihs, limits=c(1,NA), labels=scales::label_comma()) +
+  coord_fixed() + geom_abline() + scale_color_viridis_c(name="Flow (cfs)") + 
   ggtitle("Scale-dependent model, random forest regression") +
-  xlab("WUA per LF (Actual)") + ylab("WUA per LF (Predicted)")
+  xlab("Suitable Habitat Area (ft2) per LF (Actual)") + ylab("Suitable Habitat Area (ft2) per LF (Predicted)")
 ```
 
-    ## Warning: Transformation introduced infinite values in continuous y-axis
-    ## Transformation introduced infinite values in continuous x-axis
+    ## Warning: Removed 89 rows containing missing values (`geom_point()`).
 
 ![](model-expl_files/figure-gfm/rfr-sd-2.png)<!-- -->
 
@@ -786,7 +824,7 @@ lm_sd2 |> glance()
     ## # A tibble: 1 × 12
     ##   r.squared adj.r.squared sigma statistic p.value    df logLik    AIC    BIC
     ##       <dbl>         <dbl> <dbl>     <dbl>   <dbl> <dbl>  <dbl>  <dbl>  <dbl>
-    ## 1     0.563         0.562 0.427      497.       0    41 -8963. 18012. 18342.
+    ## 1     0.578         0.577 0.444      492.       0    41 -8946. 17979. 18305.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
@@ -796,16 +834,16 @@ lm_sd2 |> tidy()
     ## # A tibble: 42 × 5
     ##    term             estimate std.error statistic  p.value
     ##    <chr>               <dbl>     <dbl>     <dbl>    <dbl>
-    ##  1 (Intercept)         6.23    0.00339   1839.   0       
-    ##  2 flow_cfs            8.75    1.38         6.32 2.71e-10
-    ##  3 slope              -7.94    1.01        -7.83 5.31e-15
-    ##  4 da_area_sq_km     -12.6     1.14       -11.0  3.45e-28
-    ##  5 da_elev_mean        7.46    0.764        9.76 1.99e-22
-    ##  6 da_ppt_mean_mm     -0.517   0.296       -1.74 8.11e- 2
-    ##  7 bf_depth_m         10.3     0.846       12.2  5.13e-34
-    ##  8 bf_w_d_ratio        2.87    0.369        7.78 7.50e-15
-    ##  9 da_k_erodibility   -0.220   0.137       -1.61 1.07e- 1
-    ## 10 da_avg_slope       -8.74    0.669      -13.1  8.00e-39
+    ##  1 (Intercept)         6.33    0.00366  1732.    0       
+    ##  2 flow_cfs          165.     43.0         3.84  1.25e- 4
+    ##  3 slope              23.3     7.37        3.16  1.61e- 3
+    ##  4 da_area_sq_km       1.70    2.47        0.687 4.92e- 1
+    ##  5 da_elev_mean        5.12    3.47        1.48  1.40e- 1
+    ##  6 da_ppt_mean_mm     -1.76    2.08       -0.848 3.96e- 1
+    ##  7 bf_depth_m          5.27    0.480      11.0   5.96e-28
+    ##  8 bf_w_d_ratio        2.09    0.233       8.98  3.08e-19
+    ##  9 da_k_erodibility   10.4     4.02        2.57  1.00e- 2
+    ## 10 da_avg_slope       -0.685   2.04       -0.336 7.37e- 1
     ## # ℹ 32 more rows
 
 ``` r
@@ -821,7 +859,8 @@ lm_sd2_res <- testing(td_split) |>
 lm_sd2_res |>
   arrange(comid, flow_cfs) |>
   ggplot() + geom_path(aes(x=tot_area_per_lf, y=tot_area_per_lf_pred, color=flow_cfs, group=comid), linewidth=2) + 
-  scale_y_log10() + scale_x_log10() +  coord_fixed() + geom_abline() + scale_color_viridis_c(name="Flow (cfs)") + 
+  scale_y_log10() + scale_x_log10() +  
+  coord_fixed() + geom_abline() + scale_color_viridis_c(name="Flow (cfs)") + 
   ggtitle("Scale-dependent model, linear regression") +
   xlab("Total Inundated Area per LF (Actual)") + ylab("Total Inundated Area per LF (Predicted)")
 ```
@@ -901,14 +940,14 @@ rfr_sd2$fit$fit |> print()
     ## 
     ## Type:                             Regression 
     ## Number of trees:                  256 
-    ## Sample size:                      15850 
+    ## Sample size:                      14758 
     ## Number of independent variables:  41 
     ## Mtry:                             6 
     ## Target node size:                 5 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.0005959296 
-    ## R squared (OOB):                  0.9985655
+    ## OOB prediction error (MSE):       0.000572551 
+    ## R squared (OOB):                  0.998773
 
 ``` r
 rfr_sd2_res <- testing(td_split) |>
@@ -1012,7 +1051,7 @@ lm_si |> glance()
     ## # A tibble: 1 × 12
     ##   r.squared adj.r.squared  sigma statistic p.value    df logLik     AIC     BIC
     ##       <dbl>         <dbl>  <dbl>     <dbl>   <dbl> <dbl>  <dbl>   <dbl>   <dbl>
-    ## 1     0.216         0.215 0.0637      132.       0    33 21159. -42247. -41979.
+    ## 1     0.242         0.240 0.0588      142.       0    33 20888. -41707. -41441.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
@@ -1022,21 +1061,21 @@ lm_si |> tidy()
     ## # A tibble: 34 × 5
     ##    term             estimate std.error statistic  p.value
     ##    <chr>               <dbl>     <dbl>     <dbl>    <dbl>
-    ##  1 (Intercept)       0.0803   0.000506   158.    0       
-    ##  2 flow_norm_cfs     3.27     0.230       14.2   1.38e-45
-    ##  3 slope             0.00369  0.00326      1.13  2.58e- 1
-    ##  4 sinuosity        -0.0262   0.00284     -9.21  3.58e-20
-    ##  5 bf_depth_m        0.0147   0.0119       1.24  2.15e- 1
-    ##  6 bf_w_d_ratio     -0.0158   0.00582     -2.72  6.49e- 3
-    ##  7 da_k_erodibility  0.0394   0.00739      5.32  1.02e- 7
-    ##  8 da_avg_slope      0.0691   0.0155       4.46  8.11e- 6
-    ##  9 mean_ndvi         0.0350   0.00504      6.93  4.39e-12
-    ## 10 loc_bfi           0.00452  0.00516      0.876 3.81e- 1
+    ##  1 (Intercept)       0.0751   0.000484   155.    0       
+    ##  2 flow_norm_cfs     1.19     0.277        4.29  1.80e- 5
+    ##  3 slope             0.0127   0.00438      2.91  3.58e- 3
+    ##  4 sinuosity         0.00742  0.00410      1.81  7.03e- 2
+    ##  5 bf_depth_m        0.106    0.0181       5.87  4.32e- 9
+    ##  6 bf_w_d_ratio      0.0152   0.00891      1.70  8.89e- 2
+    ##  7 da_k_erodibility  0.0238   0.0269       0.884 3.77e- 1
+    ##  8 da_avg_slope     -0.0228   0.0171      -1.33  1.83e- 1
+    ##  9 mean_ndvi         0.0261   0.00619      4.21  2.54e- 5
+    ## 10 loc_bfi           0.0939   0.00990      9.49  2.64e-21
     ## # ℹ 24 more rows
 
 ``` r
 lm_si_res <- testing(td_split) |>
-  transmute(comid, flow_cfs, flow_norm_cfs, erom_q_ma_cfs, hsi_frac,
+  transmute(comid, flow_cfs, flow_norm_cfs, !!norm_var, hsi_frac,
             hsi_frac_pred = predict(lm_si, testing(td_split))[[".pred"]]) |>
   # crude constraint to between 0 and 1; better to use betareg
   mutate(hsi_frac_pred=pmax(pmin(hsi_frac_pred,1),0))
@@ -1150,18 +1189,18 @@ rfr_si$fit$fit |> print()
     ## 
     ## Type:                             Regression 
     ## Number of trees:                  256 
-    ## Sample size:                      15850 
+    ## Sample size:                      14758 
     ## Number of independent variables:  33 
     ## Mtry:                             5 
     ## Target node size:                 5 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       3.767658e-05 
-    ## R squared (OOB):                  0.9927187
+    ## OOB prediction error (MSE):       4.385654e-05 
+    ## R squared (OOB):                  0.9903677
 
 ``` r
 rfr_si_res <- testing(td_split) |>
-  transmute(comid, flow_cfs, flow_norm_cfs, erom_q_ma_cfs, hsi_frac,
+  transmute(comid, flow_cfs, flow_norm_cfs, !!norm_var, hsi_frac,
             hsi_frac_pred = predict(rfr_si, testing(td_split))[[".pred"]]) |>
   # crude constraint to between 0 and 1; better to use betareg
   mutate(hsi_frac_pred=pmax(pmin(hsi_frac_pred,1),0))
@@ -1247,9 +1286,9 @@ lm_si2 |> glance()
 ```
 
     ## # A tibble: 1 × 12
-    ##   r.squared adj.r.squared sigma statistic p.value    df  logLik    AIC    BIC
-    ##       <dbl>         <dbl> <dbl>     <dbl>   <dbl> <dbl>   <dbl>  <dbl>  <dbl>
-    ## 1     0.923         0.923 0.777     5765.       0    33 -18479. 37027. 37296.
+    ##   r.squared adj.r.squared sigma statistic p.value    df logLik    AIC    BIC
+    ##       <dbl>         <dbl> <dbl>     <dbl>   <dbl> <dbl>  <dbl>  <dbl>  <dbl>
+    ## 1     0.748         0.747 0.469     1322.       0    33 -9734. 19538. 19804.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
@@ -1259,16 +1298,16 @@ lm_si2 |> tidy()
     ## # A tibble: 34 × 5
     ##    term             estimate std.error statistic   p.value
     ##    <chr>               <dbl>     <dbl>     <dbl>     <dbl>
-    ##  1 (Intercept)         1.67    0.00617   271.    0        
-    ##  2 flow_norm_cfs      71.4     2.81       25.4   6.26e-140
-    ##  3 slope              -0.128   0.0397     -3.23  1.25e-  3
-    ##  4 sinuosity           0.233   0.0347      6.71  1.97e- 11
-    ##  5 bf_depth_m          0.113   0.144       0.783 4.33e-  1
-    ##  6 bf_w_d_ratio       -0.934   0.0709    -13.2   2.08e- 39
-    ##  7 da_k_erodibility   -0.632   0.0901     -7.02  2.33e- 12
-    ##  8 da_avg_slope        4.41    0.189      23.3   1.80e-118
-    ##  9 mean_ndvi          -0.300   0.0615     -4.88  1.08e-  6
-    ## 10 loc_bfi             0.798   0.0629     12.7   1.01e- 36
+    ##  1 (Intercept)         0.738   0.00386    191.   0        
+    ##  2 flow_norm_cfs      54.1     2.21        24.5  4.17e-130
+    ##  3 slope               0.102   0.0348       2.93 3.44e-  3
+    ##  4 sinuosity           0.411   0.0326      12.6  4.05e- 36
+    ##  5 bf_depth_m          2.23    0.144       15.5  1.03e- 53
+    ##  6 bf_w_d_ratio        0.980   0.0710      13.8  4.48e- 43
+    ##  7 da_k_erodibility    1.11    0.214        5.17 2.41e-  7
+    ##  8 da_avg_slope        0.686   0.136        5.04 4.60e-  7
+    ##  9 mean_ndvi           0.584   0.0493      11.8  3.55e- 32
+    ## 10 loc_bfi             1.49    0.0788      18.9  1.98e- 78
     ## # ℹ 24 more rows
 
 ``` r
@@ -1366,14 +1405,14 @@ rfr_si2$fit$fit |> print()
     ## 
     ## Type:                             Regression 
     ## Number of trees:                  256 
-    ## Sample size:                      15850 
+    ## Sample size:                      14758 
     ## Number of independent variables:  33 
     ## Mtry:                             5 
     ## Target node size:                 5 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.002601757 
-    ## R squared (OOB):                  0.9996687
+    ## OOB prediction error (MSE):       0.001056586 
+    ## R squared (OOB):                  0.9987827
 
 ``` r
 rfr_si2_res <- testing(td_split) |>
@@ -1423,13 +1462,18 @@ rfr_si2_res |> filter(comid %in% test_comids) |>
 
 other models to try \* svm_rbf \* arima_reg
 
+boost_tree with xgboost
+
+try imposing a momnotoincity constraint on all variables *EXCEPT*
+flow_cfs
+
 ## Prediction and Validation
 
 ``` r
 # assemble prediction dataset
 pd_attr <- flowline_attributes |> 
   # select just major streams
-  filter(da_area_sq_km>=100) |> #stream_level<=4 & !is.na(gnis_name) 
+  filter_variable_ranges() |> #stream_level<=4 & !is.na(gnis_name) 
   # # filter out Valley Lowland areas
   # filter(hqt_gradient_class != "Valley Lowland") |>
   # # filter for just the areas that are hydrologically similar to the training data
@@ -1438,20 +1482,21 @@ pd_attr <- flowline_attributes |>
   # select the variables that are used in the model and drop NAs
   mutate(nf_bfl_dry_cfs_norm = coalesce(nf_bfl_dry_cfs / !!norm_var, 0), # normalized baseflow values
          nf_bfl_wet_cfs_norm = coalesce(nf_bfl_wet_cfs / !!norm_var, 0)) |>
-  select(comid, any_of(c(sd_rec$var_info$variable, si_rec$var_info$variable)), !!norm_var) |> 
-  drop_na()
+  select(comid, any_of(c(sd_rec$var_info$variable, si_rec$var_info$variable)), !!norm_var, hyd_cls, hqt_gradient_class) |> 
+  drop_na() 
   
 pd <- pd_attr |>
   # create series of flow prediction points
   expand_grid(flow_cfs = c(0,signif(100*2^seq(-2,7,0.5),2))) |>
+  #expand_grid(flow_cfs = c(0,100,250,500,1000,2500,5000,10000)) |>
   #mutate(flow_cfs = if_else(flow_cfs>0, flow_cfs, erom_q_ma_cfs)) |> # also evaluate at mean annual flow
   mutate(flow_norm_cfs = coalesce(flow_cfs / !!norm_var, 0)) |> # flow as a percent of mean annual flow
   arrange(comid, flow_cfs) |>
   glimpse()
 ```
 
-    ## Rows: 251,960
-    ## Columns: 24
+    ## Rows: 238,300
+    ## Columns: 26
     ## $ comid                    <dbl> 342517, 342517, 342517, 342517, 342517, 34251…
     ## $ slope                    <dbl> 0.05283632, 0.05283632, 0.05283632, 0.0528363…
     ## $ da_area_sq_km            <dbl> 113.4549, 113.4549, 113.4549, 113.4549, 113.4…
@@ -1474,6 +1519,8 @@ pd <- pd_attr |>
     ## $ vb_width_transect        <dbl> 17.32, 17.32, 17.32, 17.32, 17.32, 17.32, 17.…
     ## $ sinuosity                <dbl> 1.31, 1.31, 1.31, 1.31, 1.31, 1.31, 1.31, 1.3…
     ## $ da_scalar                <dbl> 1.364322, 1.364322, 1.364322, 1.364322, 1.364…
+    ## $ hyd_cls                  <fct> "Low-volume snowmelt and rain", "Low-volume s…
+    ## $ hqt_gradient_class       <fct> Bedrock, Bedrock, Bedrock, Bedrock, Bedrock, …
     ## $ flow_cfs                 <dbl> 0, 25, 35, 50, 71, 100, 140, 200, 280, 400, 5…
     ## $ flow_norm_cfs            <dbl> 0.00000, 18.32411, 25.65376, 36.64823, 52.040…
 
@@ -1481,10 +1528,29 @@ pd <- pd_attr |>
 flowlines |> st_zm() |>
   inner_join(pd_attr, by=join_by(comid)) |>
   ggplot() + geom_sf(aes(color = da_area_sq_km)) + 
-  scale_color_viridis_c(trans="sqrt", breaks = scales::breaks_log(6), direction = -1)
+  scale_color_viridis_c(name = "Drainage area (km2)", trans="sqrt", breaks = scales::breaks_log(6), direction = -1)
 ```
 
 ![](model-expl_files/figure-gfm/prediction-data-1.png)<!-- -->
+
+``` r
+flowlines |> st_zm() |>
+  inner_join(pd_attr, by=join_by(comid)) |>
+  ggplot() + geom_sf(aes(color = hyd_cls)) +
+  scale_color_manual(name = "eFlows hydrologic class",
+                     values = c(
+                       "Snowmelt" = "#F9F863",
+                       "High-volume snowmelt and rain" = "#55BA36",
+                       "Low-volume snowmelt and rain" = "#B4E749",
+                       "Winter storms" = "#0011A6",
+                       "Groundwater" = "#183F11",
+                       "Perennial groundwater and rain" = "#2C6CD9",
+                       "Flashy, ephemeral rain" = "#A2ACF9",
+                       "Rain and seasonal groundwater" = "#89E0F8",
+                       "High elevation, low precipitation" = "#D9D245"))
+```
+
+![](model-expl_files/figure-gfm/prediction-data-2.png)<!-- -->
 
 ### One-step model, scale-dependent: WUA/LF vs flow
 
@@ -1504,12 +1570,12 @@ sd_pred <-
   glimpse()
 ```
 
-    ## Rows: 251,960
+    ## Rows: 238,300
     ## Columns: 4
     ## $ comid               <dbl> 342517, 342517, 342517, 342517, 342517, 342517, 34…
     ## $ flow_cfs            <dbl> 0, 25, 35, 50, 71, 100, 140, 200, 280, 400, 570, 8…
-    ## $ ihs_wua_per_lf_pred <dbl> 1.280663, 1.362000, 1.367452, 1.417900, 1.431844, …
-    ## $ wua_per_lf_pred     <dbl> 1.660586, 1.823923, 1.835291, 1.943110, 1.973773, …
+    ## $ ihs_wua_per_lf_pred <dbl> 1.547920, 1.745233, 1.745424, 1.749344, 1.747339, …
+    ## $ wua_per_lf_pred     <dbl> 2.244496, 2.776315, 2.776880, 2.788470, 2.782537, …
 
 ``` r
 flowlines |> st_zm() |>
@@ -1520,6 +1586,30 @@ flowlines |> st_zm() |>
 ```
 
 ![](model-expl_files/figure-gfm/prediction-output-sd-1.png)<!-- -->
+
+``` r
+n_breaks <- 10
+sd_pred |>
+  inner_join(flowline_attributes, by=join_by(comid), relationship="many-to-one") |>
+  select(comid, wua_per_lf_pred, any_of(sd_rec$var_info$variable[which(sd_rec$var_info$role=="predictor")])) |>
+  mutate(across(-(1:3), function(x) cut(x, breaks=n_breaks, labels=seq(1,n_breaks)/n_breaks))) |>
+  pivot_longer(cols = -(1:3)) |>
+  ggplot(aes(x = flow_cfs, y = wua_per_lf_pred)) +
+  facet_wrap(~name) + geom_smooth(aes(color = value), se=F) +
+  scale_color_viridis_d(name = "Percentile of predictor variable", option = "cividis", direction=-1) +
+  theme(legend.position = "top") + guides(color=guide_legend(nrow=2, byrow=TRUE)) +
+  scale_x_log10() + scale_y_log10() + theme(panel.grid.minor = element_blank())
+```
+
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Transformation introduced infinite values in continuous y-axis
+
+    ## `geom_smooth()` using method = 'gam' and formula = 'y ~ s(x, bs = "cs")'
+
+    ## Warning: Removed 238620 rows containing non-finite values (`stat_smooth()`).
+
+![](model-expl_files/figure-gfm/prediction-output-sd-2.png)<!-- -->
 
 ### Two-step model: (%HSI vs normalized flow) \* (Total Area/LF vs flow)
 
@@ -1539,12 +1629,12 @@ sd2_pred <-
   glimpse()
 ```
 
-    ## Rows: 251,960
+    ## Rows: 238,300
     ## Columns: 4
     ## $ comid                    <dbl> 342517, 342517, 342517, 342517, 342517, 34251…
     ## $ flow_cfs                 <dbl> 0, 25, 35, 50, 71, 100, 140, 200, 280, 400, 5…
-    ## $ ihs_tot_area_per_lf_pred <dbl> 5.393529, 5.328164, 5.323067, 5.323247, 5.321…
-    ## $ tot_area_per_lf_pred     <dbl> 109.9869, 103.0272, 102.5034, 102.5219, 102.3…
+    ## $ ihs_tot_area_per_lf_pred <dbl> 5.619688, 5.813195, 5.817171, 5.820737, 5.818…
+    ## $ tot_area_per_lf_pred     <dbl> 137.8999, 167.3418, 168.0086, 168.6088, 168.2…
 
 ``` r
 si_pred <- 
@@ -1568,15 +1658,15 @@ si_pred <-
   glimpse()
 ```
 
-    ## Rows: 251,960
+    ## Rows: 238,300
     ## Columns: 7
     ## $ comid                    <dbl> 342517, 342517, 342517, 342517, 342517, 34251…
     ## $ flow_cfs                 <dbl> 0, 25, 35, 50, 71, 100, 140, 200, 280, 400, 5…
     ## $ flow_norm_cfs            <dbl> 0.00000, 18.32411, 25.65376, 36.64823, 52.040…
-    ## $ hsi_frac_pred            <dbl> 0.02442172, 0.03677191, 0.06231560, 0.0714937…
-    ## $ ihs_tot_area_per_lf_pred <dbl> 5.393529, 5.328164, 5.323067, 5.323247, 5.321…
-    ## $ tot_area_per_lf_pred     <dbl> 109.9869, 103.0272, 102.5034, 102.5219, 102.3…
-    ## $ wua_per_lf_pred          <dbl> 2.686069, 3.788508, 6.387559, 7.329672, 9.082…
+    ## $ hsi_frac_pred            <dbl> 0.02502688, 0.05306728, 0.07758161, 0.0939745…
+    ## $ ihs_tot_area_per_lf_pred <dbl> 5.619688, 5.813195, 5.817171, 5.820737, 5.818…
+    ## $ tot_area_per_lf_pred     <dbl> 137.8999, 167.3418, 168.0086, 168.6088, 168.2…
+    ## $ wua_per_lf_pred          <dbl> 3.451204, 8.880377, 13.034375, 15.844944, 17.…
 
 ``` r
 flowlines |> st_zm() |>
@@ -1612,15 +1702,15 @@ si2_pred <-
   glimpse()
 ```
 
-    ## Rows: 251,960
+    ## Rows: 238,300
     ## Columns: 7
     ## $ comid                    <dbl> 342517, 342517, 342517, 342517, 342517, 34251…
     ## $ flow_cfs                 <dbl> 0, 25, 35, 50, 71, 100, 140, 200, 280, 400, 5…
     ## $ flow_norm_cfs            <dbl> 0.00000, 18.32411, 25.65376, 36.64823, 52.040…
     ## $ da_scalar                <dbl> 1.364322, 1.364322, 1.364322, 1.364322, 1.364…
-    ## $ ihs_wua_per_lf_norm_pred <dbl> 0.3791786, 0.5611533, 0.6918665, 0.8318517, 0…
-    ## $ wua_per_lf_norm_pred     <dbl> 0.3883303, 0.5910710, 0.7483997, 0.9311633, 1…
-    ## $ wua_per_lf_pred          <dbl> 0.5298077, 0.8064114, 1.0210586, 1.2704070, 1…
+    ## $ ihs_wua_per_lf_norm_pred <dbl> 0.4841484, 0.8205066, 0.9178706, 1.0221283, 1…
+    ## $ wua_per_lf_norm_pred     <dbl> 0.5032853, 0.9157209, 1.0522922, 1.2096374, 1…
+    ## $ wua_per_lf_pred          <dbl> 0.6866434, 1.2493386, 1.4356659, 1.6503355, 1…
 
 ``` r
 flowlines |> st_zm() |>
@@ -1631,6 +1721,30 @@ flowlines |> st_zm() |>
 ```
 
 ![](model-expl_files/figure-gfm/prediction-output-si2-1.png)<!-- -->
+
+``` r
+n_breaks <- 10
+si2_pred |>
+  inner_join(flowline_attributes, by=join_by(comid), relationship="many-to-one") |>
+  select(comid, wua_per_lf_pred, flow_cfs, any_of(si2_rec$var_info$variable[which(si2_rec$var_info$role=="predictor")]), -flow_norm_cfs) |>
+  mutate(across(-(1:3), function(x) cut(x, breaks=n_breaks, labels=seq(1,n_breaks)/n_breaks))) |>
+  pivot_longer(cols = -(1:3)) |>
+  ggplot(aes(x = flow_cfs, y = wua_per_lf_pred)) +
+  facet_wrap(~name) + geom_smooth(aes(color = value), se=F) +
+  scale_color_viridis_d(name = "Percentile of predictor variable", option = "cividis", direction=-1) +
+  theme(legend.position = "top") + guides(color=guide_legend(nrow=2, byrow=TRUE)) +
+  scale_x_log10() + scale_y_log10() + theme(panel.grid.minor = element_blank())
+```
+
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Transformation introduced infinite values in continuous y-axis
+
+    ## `geom_smooth()` using method = 'gam' and formula = 'y ~ s(x, bs = "cs")'
+
+    ## Warning: Removed 191040 rows containing non-finite values (`stat_smooth()`).
+
+![](model-expl_files/figure-gfm/prediction-output-si2-2.png)<!-- -->
 
 ## Predictions summarized by DSMHabitat reach
 

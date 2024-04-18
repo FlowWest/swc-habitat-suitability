@@ -1749,6 +1749,32 @@ si2_pred |>
 ## Predictions summarized by DSMHabitat reach
 
 ``` r
+# summary of typical flow ranges by DSMhabitat stream
+oom_range <- function(from, to) {
+  from_mag <- floor(log10(if (from > 0) from else 1))
+  to_mag <- ceiling(log10(to))
+  magnitudes <- seq(from_mag, to_mag + 1, 1)
+  expanded <- as.vector(t(10^seq(magnitudes) %o% seq(1,9,1)))
+  result <- expanded[which(expanded>=signif(from,1) & expanded<=signif(to,1))]
+  return(if (from == 0) c(0, result) else result)
+}
+
+prediction_flows <- readRDS("../data/watershed_flow_summary.Rds") |>
+  # make the numbers cleaner by rounding to nearest 100 cfs or 2 sig figs max
+  mutate(across(-watershed, function(x) signif(round(x, -2), 2))) |>
+  # establish ranges
+  mutate(flow_cfs = map2(min_cfs, max_cfs, function(x, y) oom_range(x, y))) |>
+  select(watershed, flow_cfs) |>
+  unnest(flow_cfs) |>
+  glimpse()
+```
+
+    ## Rows: 587
+    ## Columns: 2
+    ## $ watershed <chr> "American River", "American River", "American River", "Ameri…
+    ## $ flow_cfs  <dbl> 500, 600, 700, 800, 900, 1000, 2000, 3000, 4000, 5000, 6000,…
+
+``` r
 mainstems_comid <- 
   st_read("/vsizip/rearing_spatial_data/nhdplusv2_comid_habitat_xw.shp.zip", as_tibble=T) |>
   janitor::clean_names() |>
@@ -1889,7 +1915,7 @@ pd_sd <- flowline_attributes |>
   select(comid, any_of(sd_rec$var_info$variable)) |> 
   inner_join(select(mainstems_comid, comid, river), by=join_by(comid)) |>
   #expand_grid(flow_cfs = interp_flows) |>
-  inner_join(dsm_flows, by=join_by(river), relationship="many-to-many") |>
+  inner_join(prediction_flows, by=join_by(river==watershed), relationship="many-to-many") |>
   arrange(comid, flow_cfs) |>
   filter(comid %in% mainstems_comid$comid) |>
   drop_na() #
@@ -1931,7 +1957,7 @@ pd_rf_by_mainstem |>
 
     ## `geom_smooth()` using formula = 'y ~ x'
 
-    ## Warning: Removed 24 rows containing non-finite values (`stat_smooth()`).
+    ## Warning: Removed 762 rows containing non-finite values (`stat_smooth()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-sd-val-1.png)<!-- -->
 
@@ -2035,7 +2061,7 @@ pd_sd2 <- flowline_attributes |>
   select(comid, any_of(sd2_rec$var_info$variable)) |> 
   inner_join(select(mainstems_comid, comid, river), by=join_by(comid)) |>
   #expand_grid(flow_cfs = interp_flows) |>
-  inner_join(dsm_flows, by=join_by(river), relationship="many-to-many") |>
+  inner_join(prediction_flows, by=join_by(river==watershed), relationship="many-to-many") |>
   arrange(comid, flow_cfs) |>
   filter(comid %in% mainstems_comid$comid) |>
   drop_na()
@@ -2054,7 +2080,7 @@ pd_si <- flowline_attributes |>
   select(comid, any_of(si_rec$var_info$variable), !!norm_var) |> #, erom_q_ma_cfs, nf_bfl_dry_cfs, nf_bfl_wet_cfs) |> 
   inner_join(select(mainstems_comid, comid, river), by=join_by(comid)) |>
   #expand_grid(flow_cfs = interp_flows) |>
-  inner_join(dsm_flows, by=join_by(river), relationship="many-to-many") |>
+  inner_join(prediction_flows, by=join_by(river==watershed), relationship="many-to-many") |>
   arrange(comid, flow_cfs) |>
   filter(comid %in% mainstems_comid$comid) |>
   mutate(flow_norm_cfs = flow_cfs / !!norm_var) |>#,
@@ -2100,7 +2126,7 @@ pd_rf_by_mainstem |>
 
     ## `geom_smooth()` using formula = 'y ~ x'
 
-    ## Warning: Removed 24 rows containing non-finite values (`stat_smooth()`).
+    ## Warning: Removed 762 rows containing non-finite values (`stat_smooth()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si-val-1.png)<!-- -->
 
@@ -2204,7 +2230,7 @@ pd_si2 <- flowline_attributes |>
   select(comid, any_of(si2_rec$var_info$variable), !!norm_var) |> #erom_q_ma_cfs, nf_bfl_dry_cfs, nf_bfl_wet_cfs) |> 
   inner_join(select(mainstems_comid, comid, river), by=join_by(comid)) |>
   #expand_grid(flow_cfs = interp_flows) |>
-  inner_join(dsm_flows, by=join_by(river), relationship="many-to-many") |>
+  inner_join(prediction_flows, by=join_by(river==watershed), relationship="many-to-many") |>
   arrange(comid, flow_cfs) |>
   filter(comid %in% mainstems_comid$comid) |>
   mutate(flow_norm_cfs = flow_cfs / !!norm_var) |> #,
@@ -2247,7 +2273,7 @@ pd_rf_by_mainstem |>
 
     ## `geom_smooth()` using formula = 'y ~ x'
 
-    ## Warning: Removed 24 rows containing non-finite values (`stat_smooth()`).
+    ## Warning: Removed 762 rows containing non-finite values (`stat_smooth()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si2-val-1.png)<!-- -->
 

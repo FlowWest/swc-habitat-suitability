@@ -1206,6 +1206,27 @@ si2_pred |>
 
 ## Predictions summarized by DSMHabitat reach
 
+```{r prediction-flows}
+# summary of typical flow ranges by DSMhabitat stream
+oom_range <- function(from, to) {
+  from_mag <- floor(log10(if (from > 0) from else 1))
+  to_mag <- ceiling(log10(to))
+  magnitudes <- seq(from_mag, to_mag + 1, 1)
+  expanded <- as.vector(t(10^seq(magnitudes) %o% seq(1,9,1)))
+  result <- expanded[which(expanded>=signif(from,1) & expanded<=signif(to,1))]
+  return(if (from == 0) c(0, result) else result)
+}
+
+prediction_flows <- readRDS("../data/watershed_flow_summary.Rds") |>
+  # make the numbers cleaner by rounding to nearest 100 cfs or 2 sig figs max
+  mutate(across(-watershed, function(x) signif(round(x, -2), 2))) |>
+  # establish ranges
+  mutate(flow_cfs = map2(min_cfs, max_cfs, function(x, y) oom_range(x, y))) |>
+  select(watershed, flow_cfs) |>
+  unnest(flow_cfs) |>
+  glimpse()
+```
+
 ```{r dsmhabitat-prep, fig.width=6.5, fig.height=6.5, dpi=300}
 mainstems_comid <- 
   st_read("/vsizip/rearing_spatial_data/nhdplusv2_comid_habitat_xw.shp.zip", as_tibble=T) |>
@@ -1309,7 +1330,7 @@ pd_sd <- flowline_attributes |>
   select(comid, any_of(sd_rec$var_info$variable)) |> 
   inner_join(select(mainstems_comid, comid, river), by=join_by(comid)) |>
   #expand_grid(flow_cfs = interp_flows) |>
-  inner_join(dsm_flows, by=join_by(river), relationship="many-to-many") |>
+  inner_join(prediction_flows, by=join_by(river==watershed), relationship="many-to-many") |>
   arrange(comid, flow_cfs) |>
   filter(comid %in% mainstems_comid$comid) |>
   drop_na() #
@@ -1410,7 +1431,7 @@ pd_sd2 <- flowline_attributes |>
   select(comid, any_of(sd2_rec$var_info$variable)) |> 
   inner_join(select(mainstems_comid, comid, river), by=join_by(comid)) |>
   #expand_grid(flow_cfs = interp_flows) |>
-  inner_join(dsm_flows, by=join_by(river), relationship="many-to-many") |>
+  inner_join(prediction_flows, by=join_by(river==watershed), relationship="many-to-many") |>
   arrange(comid, flow_cfs) |>
   filter(comid %in% mainstems_comid$comid) |>
   drop_na()
@@ -1429,7 +1450,7 @@ pd_si <- flowline_attributes |>
   select(comid, any_of(si_rec$var_info$variable), !!norm_var) |> #, erom_q_ma_cfs, nf_bfl_dry_cfs, nf_bfl_wet_cfs) |> 
   inner_join(select(mainstems_comid, comid, river), by=join_by(comid)) |>
   #expand_grid(flow_cfs = interp_flows) |>
-  inner_join(dsm_flows, by=join_by(river), relationship="many-to-many") |>
+  inner_join(prediction_flows, by=join_by(river==watershed), relationship="many-to-many") |>
   arrange(comid, flow_cfs) |>
   filter(comid %in% mainstems_comid$comid) |>
   mutate(flow_norm_cfs = flow_cfs / !!norm_var) |>#,
@@ -1534,7 +1555,7 @@ pd_si2 <- flowline_attributes |>
   select(comid, any_of(si2_rec$var_info$variable), !!norm_var) |> #erom_q_ma_cfs, nf_bfl_dry_cfs, nf_bfl_wet_cfs) |> 
   inner_join(select(mainstems_comid, comid, river), by=join_by(comid)) |>
   #expand_grid(flow_cfs = interp_flows) |>
-  inner_join(dsm_flows, by=join_by(river), relationship="many-to-many") |>
+  inner_join(prediction_flows, by=join_by(river==watershed), relationship="many-to-many") |>
   arrange(comid, flow_cfs) |>
   filter(comid %in% mainstems_comid$comid) |>
   mutate(flow_norm_cfs = flow_cfs / !!norm_var) |> #,

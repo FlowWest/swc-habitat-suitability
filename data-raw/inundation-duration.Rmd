@@ -19,6 +19,18 @@ output:
       url: https://latex.codecogs.com/svg.image?
 ---
 
+Duration suitability criteria from the CBEC LYR analysis are:
+
+**Valley Lowland**
+
+* 1 to 17 days: 0.66
+* 18 to 24 days: 1.00
+* 25+ days: 0.66
+
+**Valley Foothill**
+
+* 1 to 9 days: 1.00
+* 10+ days: 0.66
 
 ```{r setup, message=FALSE, warning=FALSE}
 library(tidyverse)
@@ -38,6 +50,17 @@ flowlines <- readRDS("../data/flowline_geometries.Rds") |>
 flowline_attributes <- readRDS("../data/flowline_attributes.Rds")
 
 flow_to_suitable_area <- readRDS("../data/fsa_combined.Rds")
+```
+
+```{r}
+# Water type indices from  https://cdec.water.ca.gov/reportapp/javareports?name=WSIHIST
+water_year_types <- read_csv("water_year_type/water_year_type.csv") |>
+  mutate(wy_type = factor(wy_type, 
+                          levels=c("C", "D", "BN", "N", "AN", "W"), 
+                          labels=c("Critical", "Dry", "Below Normal", "Normal", "Above Normal", "Wet"))) |>
+  mutate(wy_group = factor(case_when(wy_type %in% c("Critical","Dry") ~ "Dry", 
+                                     wy_type %in% c("Below Normal", "Normal", "Above Normal") ~ "Normal", 
+                                     wy_type %in% c("Wet") ~ "Wet")))
 ```
 
 ## Import Flow Time Series Data
@@ -76,19 +99,6 @@ parse_cdec_csv <- function(filename) {
     mutate(water_year = if_else(month(date_time)>=10, year(date_time)+1, year(date_time)))
 }
 ```
-
-Duration suitability criteria from the CBEC LYR analysis are:
-
-**Valley Lowland**
-
-* 1 to 17 days: 0.66
-* 18 to 24 days: 1.00
-* 25+ days: 0.66
-
-**Valley Foothill**
-
-* 1 to 9 days: 1.00
-* 10+ days: 0.66
 
 ```{r cdec-gage-data, message=FALSE, warning=FALSE}
 # refer to https://cdec.water.ca.gov/webgis/?appid=cdecstation
@@ -142,11 +152,13 @@ training_cdec_data |>
   #filter(water_year>=2013) |>
   ggplot() + 
   facet_wrap(~river, ncol=1, scales="free_y") +
-  geom_point(aes(x = date, y = q_gauge), size=1) 
+  geom_line(aes(x = date, y = q_gauge, group = water_year), size=1) 
 
 ```
 
-## Approach 1: Average/typical inundation durations by flow
+## Flow Exceedence Calculation
+
+### Version 1: Overall Inundation Stats
 
 ```{r exceedence-periods, message=FALSE, warning=FALSE}
 #  function to calculate exceedence by flow
@@ -178,6 +190,7 @@ calculate_exceedence_summary <- function(q_gauge, q_crit) {
               avg_durhsi_vl = mean(durhsi_vl),
               avg_durhsi_vf = mean(durhsi_vf),
               tot_days_inundated = sum(duration_days),
+              max_days_inundated = max(duration_days),
               frac_days_inundated = sum(duration_days) / n_days,
               tot_days_weighted_vl = sum(duration_days * durhsi_vl),
               tot_days_weighted_vf = sum(duration_days * durhsi_vf)) |>
@@ -218,9 +231,42 @@ durhsi_by_model_q |> ggplot() +
   scale_x_log10(labels = scales::label_comma()) +
   scale_y_continuous(limits = c(0,1), minor_breaks=NULL) +
   xlab("Flow (cfs)") + ylab("Percent of days exceeding flow (Nov-Jun)") + ggtitle("Inundation Frequency")
+
+durhsi_by_model_q |> 
+  pivot_longer(cols=c(avg_durhsi_vf, avg_durhsi_vl)) |> 
+  ggplot() + 
+  geom_histogram(aes(x = value)) + 
+  facet_wrap(~name, ncol=1)
 ```
 
-```{r calc-duration-hsi-by-wy, message=FALSE, warning=FALSE}
+### Revised Version 2: Max Contiguous Days Inundated by Water Year
+
+```{r}
+# simple version, for data within one water year only
+calculate_days_inundated <- function(q_gauge, q_crit, stat="max") {
+  
+  n_days <- length(q_gauge)
+  
+  exceedence_intervals <- 
+    tibble(exceeds_q = q_gauge > q_crit,
+           exceedence_event = with(rle(exceeds_q), rep(seq_along(lengths), lengths))) |>
+    group_by(exceedence_event) |>
+    mutate(cumulative_exceedence = if_else(exceeds_q, seq_along(exceedence_event), 0)) |>
+    filter(exceeds_q) |>
+    summarize(duration_days = max(cumulative_exceedence))
+  
+  if(stat=="sum"){
+    return(sum(exceedence_intervals$duration_days))
+  } else if(stat=="max") {
+    return(pmax(max(exceedence_intervals$duration_days),0))
+  }
+}
+
+# example usage
+calculate_days_inundated(filter(training_cdec_data, river=="Deer Creek" & water_year==2017)$q_gauge, 500)
+```
+
+```{r calc-inundation-by-wy, message=FALSE, warning=FALSE}
 durhsi_by_model_q_wy <- 
   training_reach_gages |> 
   expand_grid(water_year = seq(1998, 2023, 1)) |>
@@ -228,26 +274,53 @@ durhsi_by_model_q_wy <-
   select(river, water_year, flows, date, q_gauge) |>
   nest(gauge_ts = c(date, q_gauge)) |>
   unnest(flows) |> rename(model_q = flows) |>
-  mutate(result = map2(gauge_ts, model_q, 
-                       function(df, q) calculate_exceedence_summary(df$q_gauge, q))) |>
+  mutate(max_days_inundated = map2_dbl(gauge_ts, model_q, 
+                                       function(df, q) calculate_days_inundated(df$q_gauge, q, stat="max"))) |>
   select(-gauge_ts) |>
-  unnest_wider(result) |>
+  mutate(location = case_when(
+         river=="Deer Creek" ~ "Sacramento Valley",
+         river=="Lower Yuba River" ~ "Sacramento Valley",
+         river=="Stanislaus River" ~ "San Joaquin Valley")) |>
+  inner_join(water_year_types, by=join_by(location, water_year), relationship="many-to-one") |>
+  mutate(durhsi_vl = case_when(max_days_inundated == 0  ~ 0,
+                               max_days_inundated < 18  ~ 2/3,
+                               max_days_inundated < 25 ~ 1.00,
+                               max_days_inundated >= 25 ~ 2/3),
+         durhsi_vf = case_when(max_days_inundated <= 0  ~ 0,
+                               max_days_inundated < 10 ~ 1,
+                               max_days_inundated >= 10 ~ 2/3)) |> 
   glimpse()
 
 durhsi_by_model_q_wy |>
-  ggplot(aes(x=model_q, y=avg_days_inundated)) +
+  ggplot(aes(x=model_q, y=max_days_inundated)) +
   facet_wrap(~river, ncol=1) +
-  geom_line(aes(color=water_year, group=water_year)) +
-  scale_x_log10()
+  geom_line(aes(group=water_year, color=wy_group)) +
+  scale_x_log10(labels = scales::label_comma()) +
+  ylab("Maximum Contiguous Days Inundated") + xlab("Flow (cfs)") +
+  scale_color_manual(name="Water Year Type", values = c("Dry"="#ffae34","Normal"="#bb7693","Wet"="#8cc2ca")) + 
+  theme(panel.grid.minor = element_blank())
+
+durhsi_by_model_q_wy |>
+  filter(water_year==2017) |>
+  ggplot(aes(x=model_q, y=max_days_inundated)) +
+  facet_wrap(~river, ncol=1) +
+  geom_line(aes(group=water_year, color=wy_group)) +
+  scale_x_log10(labels = scales::label_comma()) +
+  ylab("Maximum Contiguous Days Inundated") + xlab("Flow (cfs)") +
+  scale_color_manual(name="Water Year Type", values = c("Dry"="#ffae34","Normal"="#bb7693","Wet"="#8cc2ca")) + 
+  theme(panel.grid.minor = element_blank())
+
+durhsi_by_model_q_wy |>
+  filter(water_year==2017 & river=="Deer Creek") |>
+  ggplot(aes(x=model_q, y=max_days_inundated)) +
+  geom_line() +
+  scale_x_log10(labels = scales::label_comma()) +
+  ylab("Maximum Contiguous Days Inundated") + xlab("Flow (cfs)") +
+  theme(panel.grid.minor = element_blank()) +
+  ggtitle("Flow-to-Inundation-Duration Curve")
 ```
 
-```{r}
-durhsi_by_model_q |> 
-  pivot_longer(cols=c(avg_durhsi_vf, avg_durhsi_vl)) |> 
-  ggplot() + 
-  geom_histogram(aes(x = value)) + 
-  facet_wrap(~name, ncol=1)
-```
+## Approach 1: Average/typical inundation durations by flow
 
 *To apply this output:*
 
@@ -272,6 +345,8 @@ durhsi_by_model_q_wy |> saveRDS("../data/durhsi_by_model_q_wy.Rds")
 ## Approach 2: Post-hoc application of a duration-vs-flow curve to a flow-to-suitable-area curve 
 
 *Alternate method to apply this output after estimation:*
+
+### Version 1 (skip down to "Revised Version 2")
 
 ```{r fractional-range-sum}
 linterp <- function(x, x1, x2, y1, y2){
@@ -349,7 +424,8 @@ durhsi_by_model_q |>
 
 ```
 
-```{r posthoc-duration-func}
+```{r posthoc-duration-func, eval=FALSE, include=TRUE}
+# full version
 apply_durations_to_fsa_curve <- function(fsa, drc, fsa_q=q, fsa_wua=wua, drc_q=q, drc_dhsi=dhsi) {
   full_join(fsa |> transmute(q={{fsa_q}}, wua={{fsa_wua}}),
             drc |> transmute(q={{drc_q}}, dhsi={{drc_dhsi}}),
@@ -445,15 +521,7 @@ fsa_duration_posthoc |>
 
 
 ```{r wet-dry-normal}
-# Water type indices from  https://cdec.water.ca.gov/reportapp/javareports?name=WSIHIST
-water_year_types <- read_csv("water_year_type/water_year_type.csv") |>
-  mutate(wy_type = factor(wy_type, 
-                          levels=c("C", "D", "BN", "N", "AN", "W"), 
-                          labels=c("Critical", "Dry", "Below Normal", "Normal", "Above Normal", "Wet"))) |>
-  mutate(wy_group = factor(case_when(wy_type %in% c("Critical","Dry") ~ "Dry", 
-                                     wy_type %in% c("Below Normal", "Normal", "Above Normal") ~ "Normal", 
-                                     wy_type %in% c("Wet") ~ "Wet")))
-                                       
+                      
 #durhsi_by_model_q_wyt <- 
 #  training_reach_gages |> 
 #  expand_grid(water_year = seq(1998, 2023, 1)) |>
@@ -622,3 +690,124 @@ example_result |>
   geom_line(aes(y=q_gauge/10, color="Flow")) + 
   scale_y_continuous(name="WUA (ac)", sec.axis=sec_axis(name="Flow (cfs)", trans = ~.*10))
 ```
+
+
+### Revised Version 2
+
+```{r posthoc-duration-func-simple}
+# simple version
+apply_durations_to_fsa_curve <- function(fsa, drc, fsa_q=q, fsa_wua=wua, drc_q=q, drc_dhsi=dhsi) {
+  full_join(fsa |> transmute(q={{fsa_q}}, wua={{fsa_wua}}),
+            drc |> transmute(q={{drc_q}}, dhsi={{drc_dhsi}}),
+            by = join_by(q)) |>
+    # fill in any gaps with linear interpolation
+    arrange(q) |>
+    mutate(wua = zoo::na.approx(wua, q, na.rm=F),
+           dhsi = zoo::na.approx(dhsi, q, na.rm=F)) |>
+    drop_na() |>
+    # start by computing the marginal WUA added at each step
+    mutate(marginal_wua = if_else(row_number()==1, wua, wua - lag(wua))) |>
+    # apply each flow's DHSI to whatever area is added or removed at that flow
+### mutate(marginal_durwua = pmin(dhsi * marginal_wua, marginal_wua), 
+###       # pmin is a simplification to account for loss; this will end up overestimating the magnitude of the marginal drop in habitat 
+###       durwua = pmax(cumsum(marginal_durwua), 0))
+    mutate(wua_added = if_else(marginal_wua > 0, marginal_wua, 0),
+           marginal_durwua_added = dhsi * wua_added,
+           wua_removed = (-1) * if_else(marginal_wua < 0, marginal_wua, 0), 
+           marginal_durwua_removed = cummean(dhsi) * wua_removed,
+           marginal_durwua = marginal_durwua_added - marginal_durwua_removed,
+           durwua = pmin(pmax(cumsum(marginal_durwua), 0), wua))
+}
+
+apply_durations_to_fsa_curve <- possibly(apply_durations_to_fsa_curve, otherwise=NA)
+```
+
+Example
+
+```{r}
+# EXAMPLE FLOW-TO-SUITABLE-AREA CURVE
+
+# monotonic test comid: 12075424; chaotic test comid: 12069362
+fsa <- fsa_combined |>
+  inner_join(flowline_attributes |> select(comid, hqt_gradient_class, reach_length_km)) |>
+  mutate(wua_per_lf = area_wua_ft2_hqt / (reach_length_km*3280.84)) |>
+  filter(dataset=="Deer Creek" & comid==12075424) |>
+  transmute(flow_cfs, wua=wua_per_lf) |>
+  glimpse()
+  
+fsa |> ggplot() + geom_line(aes(x=flow_cfs, y=wua)) + scale_x_log10() + scale_y_log10() +
+  ggtitle("Flow-to-Suitable-Area Curve") + 
+  theme(panel.grid.minor = element_blank()) + xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2) per LF")
+
+# EXAMPLE DURATION HSI RATING CURVE
+drc <- durhsi_by_model_q_wy |>
+  filter(river=="Deer Creek" & water_year==2017) |>
+  transmute(model_q, dhsi = durhsi_vl) |>
+  glimpse()
+
+drc |> ggplot() + geom_line(aes(x=model_q, y=dhsi)) + scale_x_log10() + scale_y_continuous(limits=c(0,1)) +
+  ggtitle("Duration HSI Rating Curve") + 
+  theme(panel.grid.minor = element_blank()) + xlab("Flow (cfs)") + ylab("Duration HSI")
+
+# APPLY 
+
+res <- apply_durations_to_fsa_curve(fsa, drc, 
+                                    # specify variable names
+                                    fsa_q = flow_cfs, fsa_wua = wua,
+                                    drc_q = model_q, drc_dhsi = dhsi) |>
+  glimpse()
+
+res |> 
+  ggplot(aes(x=q)) + 
+  geom_line(aes(y=wua, color="WUA")) + 
+  geom_line(aes(y=durwua, color="Duration-weighted WUA")) +
+  geom_line(aes(y=dhsi*20, color="DHSI")) +
+  ggtitle("Duration Criteria Applied to Flow-to-Suitable-Area Curve") +
+  scale_y_continuous(sec.axis = sec_axis(trans = ~./20, name="Duration HSI")) + 
+  theme(panel.grid.minor = element_blank()) + xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2) per LF")
+  scale_x_log10()
+```
+
+Batch
+
+```{r fig.width=6.5, fig.height=6.5, dpi=300}
+batch_fsa <- fsa_combined |>
+  inner_join(flowline_attributes |> select(comid, hqt_gradient_class, reach_length_km)) |>
+  mutate(hqt_cls = if_else(hqt_gradient_class == "Valley Lowland", "VL", "VF")) |>
+  mutate(wua_per_lf = area_wua_ft2_hqt / (reach_length_km*3280.84)) |>
+  select(dataset, comid, hqt_cls, flow_cfs, wua = wua_per_lf) |>
+  nest(.by=c(dataset, hqt_cls, comid), .key="tbl_fsa") |> 
+  glimpse()
+
+batch_drc <- durhsi_by_model_q_wy |>
+  pivot_longer(cols = c(durhsi_vl, durhsi_vf)) |>
+  transmute(river, water_year, model_q, 
+            hqt_cls = if_else(name=="durhsi_vl", "VL", "VF"), dhsi = value) |>
+  nest(.by=c(river, hqt_cls, water_year), .key="tbl_drc") |> 
+  glimpse()
+
+batch_res <-
+  inner_join(batch_fsa, batch_drc, by=join_by(dataset==river, hqt_cls), relationship="many-to-many") |>
+  mutate(result = map2(tbl_fsa, tbl_drc, 
+                       function(f, d) apply_durations_to_fsa_curve(f, d, 
+                       # specify variable names
+                       fsa_q = flow_cfs, fsa_wua = wua,
+                       drc_q = model_q, drc_dhsi = dhsi))) |>
+  select(-tbl_fsa, -tbl_drc) |>
+  unnest(result) |>
+  glimpse()
+
+batch_res |>
+  filter(comid %in% test_comids) |>
+  filter(water_year == 2017) |>
+  ggplot(aes(x=q)) + facet_wrap(~comid, scales="free_y") +
+  geom_line(aes(y=wua, color="WUA")) + 
+  geom_line(aes(y=durwua, color="Duration-weighted WUA")) +
+  scale_x_log10() +
+  ggtitle("Duration Criteria Applied to Flow-to-Suitable-Area Curve") +
+  xlab("Flow (cfs)") + ylab("Suitable habitat area per linear ft") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), 
+        panel.grid.minor=element_blank(), 
+        legend.position = "top")
+```
+

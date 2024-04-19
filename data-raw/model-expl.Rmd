@@ -27,7 +27,7 @@ library(tidymodels)
 library(broom.mixed) # tidy output of mixed model results
 library(dotwhisker) # visualize regression results
 
-knitr::opts_chunk$set(eval=TRUE, fig.width=6.5, fig.height=4, dpi=300)
+knitr::opts_chunk$set(eval=TRUE, fig.width=6.5, fig.height=6.5, dpi=300)
 
 theme_set(theme_minimal())
 
@@ -248,16 +248,24 @@ td |>
   facet_wrap(~name, scales = "free_x") +
   scale_x_continuous(trans = ihs) + theme(panel.grid.minor = element_blank())
 
+identify_outliers <- function(x, qlo = 0.1, qhi = 0.9) {
+  lo <- quantile(x, qlo)
+  hi <- quantile(x, qhi)
+  return(x < lo | x > hi)
+}
+# td |> filter((if_all(slope:sinuosity, function(x) !identify_outliers(x, qlo=0.1, qhi=0.9)))) 
+  
+clip_outliers <- function(x, qlo = 0.1, qhi = 0.9) {
+  lo <- quantile(x, qlo)
+  hi <- quantile(x, qhi)
+  clip_lo <- if_else(x > lo, x, lo)
+  clip_hi <- if_else(clip_lo < hi, clip_lo, hi)
+  return(clip_hi)
+}
+# td |> mutate(across(slope:sinuosity, function(x) clip_outliers(x, qlo=0.1, qhi=0.9)))
+  
 n_breaks <- 10
 td |>
-  # #filter((if_all(slope:sinuosity, function(x) x > quantile(x, 0.01)))) |>
-  # mutate(across(slope:sinuosity, function(x) {
-  #   lo <- quantile(x, 0.1)
-  #   hi <- quantile(x, 0.9)
-  #   clip_lo <- if_else(x > lo, x, lo)
-  #   clip_hi <- if_else(clip_lo < hi, clip_lo, hi)
-  #   return(clip_hi)
-  # })) |>
   select(comid, wua_per_lf, flow_cfs, slope:sinuosity) |>
   mutate(across(slope:sinuosity, function(x) cut(x, breaks=n_breaks, labels=seq(1,n_breaks)/n_breaks))) |>
   pivot_longer(cols = slope:sinuosity) |>
@@ -275,7 +283,7 @@ set.seed(47)
 td_split <- group_initial_split(td |> mutate(strata=paste(hyd_cls, dataset)), strata=strata, group=comid)
 
 # select some example reaches to use for validation
-test_comids <- testing(td_split) |> group_by(dataset, hyd_cls, comid) |> summarize() |> group_by(dataset, hyd_cls) |> filter(row_number()<=6) |> pull(comid)
+test_comids <- testing(td_split) |> group_by(dataset, hyd_cls, comid) |> summarize() |> group_by(dataset, hyd_cls) |> filter(row_number()<=11) |> pull(comid) 
 ```
 
 ## Model Training
@@ -364,10 +372,12 @@ lm_sd_res |>
   xlab("Suitable Habitat Area (ft2) per LF (Actual)") + ylab("Suitable Habitat Area (ft2) per LF (Predicted)")
 
 lm_sd_res |> filter(comid %in% test_comids) |>
-  ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid, scale="free_y") + 
+  ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
-  scale_y_continuous(trans = ihs, limits = c(0, NA)) + theme(panel.grid.minor = element_blank()) +
-  xlab("Flow (cfs)") + ylab("Suitable Habitat Area per LF Channel (ft)") 
+  scale_y_continuous(trans = ihs, limits = c(0, NA)) +
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area per LF Channel (ft)")  +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), panel.grid.minor=element_blank()) +
+  scale_x_continuous(labels = scales::label_comma())
 
 ```
 
@@ -441,10 +451,12 @@ rfr_sd_res |>
   xlab("Suitable Habitat Area (ft2) per LF (Actual)") + ylab("Suitable Habitat Area (ft2) per LF (Predicted)")
 
 rfr_sd_res |> filter(comid %in% test_comids) |>
-  ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid, scale="free_y") + 
+  ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
-  scale_y_continuous(trans = ihs, limits = c(0, NA)) + theme(panel.grid.minor = element_blank()) +
-  xlab("Flow (cfs)") + ylab("Suitable Habitat Area per LF Channel (ft)") 
+  scale_y_continuous(trans = ihs, limits = c(0, NA)) + 
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area per LF Channel (ft)")  +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), panel.grid.minor=element_blank()) +
+  scale_x_continuous(labels = scales::label_comma())
 ```
 
 ### Scale Dependent Model 2: TOTAL Inundated Area per linear ft versus flow:
@@ -523,10 +535,12 @@ lm_sd2_res |>
   xlab("Total Inundated Area per LF (Actual)") + ylab("Total Inundated Area per LF (Predicted)")
 
 lm_sd2_res |> filter(comid %in% test_comids) |>
-  ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid, scale="free_y") + 
+  ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=tot_area_per_lf_pred, color="predicted", group=1)) + geom_line(aes(y=tot_area_per_lf, color="actual", group=1)) + 
-  scale_y_continuous(trans = ihs) + theme(panel.grid.minor = element_blank()) +
-  xlab("Flow (cfs)") + ylab("Total Inundated Area per LF Channel (ft)")
+  scale_y_continuous(trans = ihs) + 
+  xlab("Flow (cfs)") + ylab("Total Inundated Area per LF Channel (ft)")  +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), panel.grid.minor=element_blank()) +
+  scale_x_continuous(labels = scales::label_comma())
 
 ```
 
@@ -594,10 +608,12 @@ rfr_sd2_res |>
   xlab("Total Inundated Area per LF (Actual)") + ylab("Total Inundated Area per LF (Predicted)")
 
 rfr_sd2_res |> filter(comid %in% test_comids) |>
-  ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid, scale="free_y") + 
+  ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=tot_area_per_lf_pred, color="predicted", group=1)) + geom_line(aes(y=tot_area_per_lf, color="actual", group=1)) + 
-  scale_y_continuous(trans = ihs) + theme(panel.grid.minor = element_blank()) +
-  xlab("Flow (cfs)") + ylab("Total Inundated Area per LF Channel (ft)") 
+  scale_y_continuous(trans = ihs) +
+  xlab("Flow (cfs)") + ylab("Total Inundated Area per LF Channel (ft)")  +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), panel.grid.minor=element_blank()) +
+  scale_x_continuous(labels = scales::label_comma())
 ```
 
 ### Scale Independent Model: %HSI versus flow (normalized by MAF)
@@ -674,9 +690,11 @@ lm_si_res |>
   xlab("HSI (Frac. of Channel Area) (Actual)") + ylab("HSI (Frac. of Channel Area) (Predicted)")
 
 lm_si_res |> filter(comid %in% test_comids) |>
-  ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid, scale="free_y") + 
+  ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=hsi_frac_pred*100, color="predicted", group=1)) + geom_line(aes(y=hsi_frac*100, color="actual", group=1)) + 
-  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (% of Total Area)")
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (% of Total Area)") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), panel.grid.minor=element_blank()) +
+  scale_x_continuous(labels = scales::label_comma())
 ```
 
 ```{r lm-si-coeffs, fig.width=6.5, fig.height=6.5, dpi=300}
@@ -767,9 +785,11 @@ rfr_si_res |>
   xlab("HSI (Frac. of Channel Area) (Actual)") + ylab("HSI (Frac. of Channel Area) (Predicted)")
 
 rfr_si_res |> filter(comid %in% test_comids) |>
-  ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid, scale="free_y") + 
+  ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=hsi_frac_pred*100, color="predicted", group=1)) + geom_line(aes(y=hsi_frac*100, color="actual", group=1)) + 
-  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (% of Total Area)")
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (% of Total Area)") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), panel.grid.minor=element_blank()) +
+  scale_x_continuous(labels = scales::label_comma())
 ```
 
 ### Scale Independent Model 2: WUA-per-linear-ft (normalized by `r norm_var`) versus flow (normalized by `r norm_var`)
@@ -784,8 +804,8 @@ si2_rec <- recipe(data=training(td_split),
         # channel characteristics: gradient and sinuosity
         slope + sinuosity + 
         # flow and channel characteristics, hydrologically predicted
-        #erom_v_ma_fps + 
-        bf_depth_m + bf_w_d_ratio + 
+        #erom_v_ma_fps + bf_depth_m + 
+        bf_w_d_ratio + 
         # misc characteristics of the catchment
         da_k_erodibility + da_avg_slope + mean_ndvi +
         # misc characteristics of the locality
@@ -847,10 +867,13 @@ lm_si2_res |>
   xlab("Suitable Habitat Area (ft2) per LF (Actual)") + ylab("Suitable Habitat Area (ft2) per LF (Predicted)")
 
 lm_si2_res |> filter(comid %in% test_comids) |>
-  ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid, scale="free_y") + 
+  ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + 
   geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
-  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2) per LF")
+  scale_y_continuous(trans = ihs, limits = c(0, NA)) + 
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2) per LF") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), panel.grid.minor=element_blank()) +
+  scale_x_continuous(labels = scales::label_comma())
 ```
 
 ```{r lm-si2-coeffs, fig.width=6.5, fig.height=6.5, dpi=300}
@@ -919,120 +942,14 @@ rfr_si2_res |>
   xlab("Suitable Habitat Area ft2) per LF (Actual)") + ylab("Suitable Habitat Area ft2) per LF (Predicted)")
 
 rfr_si2_res |> filter(comid %in% test_comids) |>
-  ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid, scale="free_y") + 
+  ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + 
   geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
-  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2) per LF")
+  scale_y_continuous(trans = ihs, limits = c(0, NA)) + 
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2) per LF")  +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), panel.grid.minor=element_blank()) +
+  scale_x_continuous(labels = scales::label_comma())
 ```
-
-#### TEST
-
-other models to try
-* svm_rbf
-* arima_reg
-
-```{r svr-si2, eval=FALSE, message=FALSE, include=FALSE}
-rfr_spec <- svm_rbf(mode = "regression")
-
-rfr_si2 <- workflow() |>
-  add_recipe(si2_rec) |>
-  add_model(rfr_spec) |>
-  fit(data=training(td_split))
-
-rfr_si2$fit$fit |> print()
-
-rfr_si2_res <- testing(td_split) |>
-  transmute(comid, flow_norm_cfs, flow_cfs, !!norm_var,
-            # actuals
-            ihs_wua_per_lf_norm,
-            wua_per_lf_norm = sinh(ihs_wua_per_lf_norm), 
-            wua_per_lf = wua_per_lf_norm * !!norm_var,
-            # predicted
-            ihs_wua_per_lf_norm_pred = predict(rfr_si2, testing(td_split))[[".pred"]],
-            wua_per_lf_norm_pred = sinh(ihs_wua_per_lf_norm_pred),
-            wua_per_lf_pred = wua_per_lf_norm_pred * !!norm_var)
-
-rfr_si2_res |>
-  arrange(comid, flow_norm_cfs) |>
-  ggplot() + geom_path(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs, group=comid), linewidth=2) + 
-  coord_fixed() + geom_abline() + scale_color_viridis_c(trans="log10", name="Frac. of MAF") + 
-  ggtitle("Scale-independent model 2, random forest regression") +
-  xlab("Suitable Habitat Area (ft2) per LF (Actual)") + ylab("Suitable Habitat Area (ft2) per LF (Predicted)")
-
-rfr_si2_res |> 
-  filter(flow_cfs %in% c(300,500,1000,1500,3000,5000,10000,15000)) |>
-  ggplot() + geom_point(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs)) + 
-  facet_wrap(~flow_cfs, ncol = 4) +
-  coord_fixed() + geom_abline() + scale_color_viridis_c(name = "Flow (cfs)") + 
-  ggtitle("Scale-independent model 2, random forest regression") +
-  xlab("Suitable Habitat Area ft2) per LF (Actual)") + ylab("Suitable Habitat Area ft2) per LF (Predicted)")
-
-rfr_si2_res |> filter(comid %in% test_comids) |>
-  ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid, scale="free_y") + 
-  geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + 
-  geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
-  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2) per LF")
-```
-
-boost_tree with xgboost
-
-try imposing a momnotoincity constraint on all variables *EXCEPT* flow_cfs
-
-```{r btr-si2, eval=FALSE, message=FALSE, include=FALSE}
-si2_rec$var_info |>
-  mutate(monotonicity = case_when(
-    # no monotonicity constraint
-    variable == flow_norm_cfs ~ 0,
-    # positive constraint
-    variable %in% c() ~ 1,
-    # negative constraint
-    variable %in% c() ~ -1,
-  ))
-
-rfr_spec <- boost_tree(mode = "regression") |>
-  set_engine(engine = "xgboost", 
-             params = list(monotone_constraints = 1 * ((si2_rec$var_info$role=="predictor") & (si2_rec$var_info$variable!="flow_norm_cfs"))))
-
-rfr_si2 <- workflow() |>
-  add_recipe(si2_rec) |>
-  add_model(rfr_spec) |>
-  fit(data=training(td_split))
-
-rfr_si2$fit$fit |> print()
-
-rfr_si2_res <- testing(td_split) |>
-  transmute(comid, flow_norm_cfs, flow_cfs, !!norm_var,
-            # actuals
-            ihs_wua_per_lf_norm,
-            wua_per_lf_norm = sinh(ihs_wua_per_lf_norm), 
-            wua_per_lf = wua_per_lf_norm * !!norm_var,
-            # predicted
-            ihs_wua_per_lf_norm_pred = predict(rfr_si2, testing(td_split))[[".pred"]],
-            wua_per_lf_norm_pred = sinh(ihs_wua_per_lf_norm_pred),
-            wua_per_lf_pred = wua_per_lf_norm_pred * !!norm_var)
-
-rfr_si2_res |>
-  arrange(comid, flow_norm_cfs) |>
-  ggplot() + geom_path(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs, group=comid), linewidth=2) + 
-  coord_fixed() + geom_abline() + scale_color_viridis_c(trans="log10", name="Frac. of MAF") + 
-  ggtitle("Scale-independent model 2, random forest regression") +
-  xlab("Suitable Habitat Area (ft2) per LF (Actual)") + ylab("Suitable Habitat Area (ft2) per LF (Predicted)")
-
-rfr_si2_res |> 
-  filter(flow_cfs %in% c(300,500,1000,1500,3000,5000,10000,15000)) |>
-  ggplot() + geom_point(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs)) + 
-  facet_wrap(~flow_cfs, ncol = 4) +
-  coord_fixed() + geom_abline() + scale_color_viridis_c(name = "Flow (cfs)") + 
-  ggtitle("Scale-independent model 2, random forest regression") +
-  xlab("Suitable Habitat Area ft2) per LF (Actual)") + ylab("Suitable Habitat Area ft2) per LF (Predicted)")
-
-rfr_si2_res |> filter(comid %in% test_comids) |>
-  ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid, scale="free_y") + 
-  geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + 
-  geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
-  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2) per LF")
-```
-
 
 ## Prediction and Validation
 
@@ -1118,6 +1035,48 @@ sd_pred |>
   scale_x_log10() + scale_y_log10() + theme(panel.grid.minor = element_blank())
 ```
 
+### One-step model, scale-independent: normalized WUA/LF vs normalized flow
+
+```{r prediction-output-si2, fig.width=6.5, fig.height=6.5, dpi=300}
+si2_pred <- 
+  si2_rec |> 
+  prep(training(td_split)) |> 
+  bake(pd) |> 
+  # bring in unbaked variables
+  bind_cols(pd |> transmute(comid, 
+                            flow_cfs_orig = flow_cfs,
+                            flow_norm_cfs_orig = flow_norm_cfs, 
+                            "{norm_var}_orig" := !!norm_var)) |>
+  drop_na() %>% # need to use magrittr pipe for this purpose
+  mutate(ihs_wua_per_lf_norm_pred = predict(rfr_si2$fit$fit, new_data=.)[[".pred"]]) |>
+  transmute(comid, 
+            flow_cfs = flow_cfs_orig, 
+            flow_norm_cfs = flow_norm_cfs_orig, 
+            "{norm_var}" := !!sym(glue::glue("{norm_var}_orig")),
+            ihs_wua_per_lf_norm_pred) |>
+  mutate(wua_per_lf_norm_pred = sinh(ihs_wua_per_lf_norm_pred),
+         wua_per_lf_pred = wua_per_lf_norm_pred * !!norm_var) |>
+  glimpse()
+
+flowlines |> st_zm() |>
+  inner_join(si2_pred |> filter(round(flow_cfs)==800), by=join_by(comid)) |>
+  mutate(wua_per_lf_pred = if_else(wua_per_lf_pred <1, 1, wua_per_lf_pred)) |> # for visualization only
+  ggplot() + geom_sf(aes(color = wua_per_lf_pred)) + 
+  scale_color_viridis_c(trans="log", breaks = scales::breaks_log(6), direction=-1)
+
+n_breaks <- 10
+si2_pred |>
+  inner_join(flowline_attributes, by=join_by(comid), relationship="many-to-one") |>
+  select(comid, wua_per_lf_pred, flow_cfs, any_of(si2_rec$var_info$variable[which(si2_rec$var_info$role=="predictor")]), -flow_norm_cfs) |>
+  mutate(across(-(1:3), function(x) cut(x, breaks=n_breaks, labels=seq(1,n_breaks)/n_breaks))) |>
+  pivot_longer(cols = -(1:3)) |>
+  ggplot(aes(x = flow_cfs, y = wua_per_lf_pred)) +
+  facet_wrap(~name) + geom_smooth(aes(color = value), se=F) +
+  scale_color_viridis_d(name = "Percentile of predictor variable", option = "cividis", direction=-1) +
+  theme(legend.position = "top") + guides(color=guide_legend(nrow=2, byrow=TRUE)) +
+  scale_x_log10() + scale_y_log10() + theme(panel.grid.minor = element_blank())
+```
+
 ### Two-step model: (%HSI vs normalized flow) * (Total Area/LF vs flow)
 
 ```{r prediction-output-si, fig.width=6.5, fig.height=6.5, dpi=300}
@@ -1160,48 +1119,6 @@ flowlines |> st_zm() |>
   mutate(wua_per_lf_pred = if_else(wua_per_lf_pred <1, 1, wua_per_lf_pred)) |> # for visualization only
   ggplot() + geom_sf(aes(color = wua_per_lf_pred)) + 
   scale_color_viridis_c(trans="log", breaks = scales::breaks_log(6), direction=-1)
-```
-
-### One-step model, scale-independent: normalized WUA/LF vs normalized flow
-
-```{r prediction-output-si2, fig.width=6.5, fig.height=6.5, dpi=300}
-si2_pred <- 
-  si2_rec |> 
-  prep(training(td_split)) |> 
-  bake(pd) |> 
-  # bring in unbaked variables
-  bind_cols(pd |> transmute(comid, 
-                            flow_cfs_orig = flow_cfs,
-                            flow_norm_cfs_orig = flow_norm_cfs, 
-                            "{norm_var}_orig" := !!norm_var)) |>
-  drop_na() %>% # need to use magrittr pipe for this purpose
-  mutate(ihs_wua_per_lf_norm_pred = predict(rfr_si2$fit$fit, new_data=.)[[".pred"]]) |>
-  transmute(comid, 
-            flow_cfs = flow_cfs_orig, 
-            flow_norm_cfs = flow_norm_cfs_orig, 
-            "{norm_var}" := !!sym(glue::glue("{norm_var}_orig")),
-            ihs_wua_per_lf_norm_pred) |>
-  mutate(wua_per_lf_norm_pred = sinh(ihs_wua_per_lf_norm_pred),
-         wua_per_lf_pred = wua_per_lf_norm_pred * !!norm_var) |>
-  glimpse()
-
-flowlines |> st_zm() |>
-  inner_join(si2_pred |> filter(round(flow_cfs)==800), by=join_by(comid)) |>
-  mutate(wua_per_lf_pred = if_else(wua_per_lf_pred <1, 1, wua_per_lf_pred)) |> # for visualization only
-  ggplot() + geom_sf(aes(color = wua_per_lf_pred)) + 
-  scale_color_viridis_c(trans="log", breaks = scales::breaks_log(6), direction=-1)
-
-n_breaks <- 10
-si2_pred |>
-  inner_join(flowline_attributes, by=join_by(comid), relationship="many-to-one") |>
-  select(comid, wua_per_lf_pred, flow_cfs, any_of(si2_rec$var_info$variable[which(si2_rec$var_info$role=="predictor")]), -flow_norm_cfs) |>
-  mutate(across(-(1:3), function(x) cut(x, breaks=n_breaks, labels=seq(1,n_breaks)/n_breaks))) |>
-  pivot_longer(cols = -(1:3)) |>
-  ggplot(aes(x = flow_cfs, y = wua_per_lf_pred)) +
-  facet_wrap(~name) + geom_smooth(aes(color = value), se=F) +
-  scale_color_viridis_d(name = "Percentile of predictor variable", option = "cividis", direction=-1) +
-  theme(legend.position = "top") + guides(color=guide_legend(nrow=2, byrow=TRUE)) +
-  scale_x_log10() + scale_y_log10() + theme(panel.grid.minor = element_blank())
 ```
 
 ## Predictions summarized by DSMHabitat reach
@@ -1424,6 +1341,108 @@ pd_rf_by_mainstem_summary |>
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
 ```
 
+### One-step model, scale-independent: WUA/LF vs normalized flow
+
+```{r dsmhabitat-si2-val, fig.width=6.5, fig.height=6.5, dpi=300}
+pd_si2 <- flowline_attributes |> 
+  select(comid, any_of(si2_rec$var_info$variable), !!norm_var) |> #erom_q_ma_cfs, nf_bfl_dry_cfs, nf_bfl_wet_cfs) |> 
+  inner_join(select(mainstems_comid, comid, river), by=join_by(comid)) |>
+  #expand_grid(flow_cfs = interp_flows) |>
+  inner_join(prediction_flows, by=join_by(river==watershed), relationship="many-to-many") |>
+  arrange(comid, flow_cfs) |>
+  filter(comid %in% mainstems_comid$comid) |>
+  mutate(flow_norm_cfs = flow_cfs / !!norm_var) |> #,
+       #nf_bfl_dry_cfs_norm = nf_bfl_dry_cfs/erom_q_ma_cfs, 
+       #nf_bfl_wet_cfs_norm = nf_bfl_wet_cfs/erom_q_ma_cfs) |>
+  drop_na()
+
+pd_si2_dsmhabitat_pred <- 
+  si2_rec |> 
+  prep(training(td_split)) |> 
+  bake(pd_si2) |> 
+  bind_cols(select(pd_si2, comid, flow_cfs_actual=flow_cfs, !!norm_var)) |>
+  drop_na() %>% # need to use magrittr pipe for this purpose
+  mutate(ihs_wua_per_lf_norm_pred = predict(rfr_si2$fit$fit, new_data=.)[[".pred"]]) |>
+  mutate(wua_per_lf_pred = sinh(ihs_wua_per_lf_norm_pred) * !!norm_var) |> 
+  select(comid, flow_norm_cfs, wua_per_lf_pred, flow_cfs=flow_cfs_actual, wua_per_lf_pred)
+
+pd_rf_by_mainstem <-
+  mainstems_comid |> 
+  st_drop_geometry() |>
+  inner_join(pd_si2_dsmhabitat_pred, by=join_by(comid), relationship="one-to-many") |>
+  mutate(length_ft = coalesce(length_ft,0),
+         wua_per_lf_pred = coalesce(wua_per_lf_pred,0),
+         wua_ft2_pred = wua_per_lf_pred * length_ft) 
+
+pd_rf_by_mainstem |>
+  ggplot(aes(x = flow_cfs, y = wua_per_lf_pred, color = hqt_gradient_class)) + 
+  geom_line(aes(group = comid), alpha=0.5) + geom_smooth(method="loess", se=F) +
+  facet_wrap(~river, scales="free_y") + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_y_continuous() + 
+  theme(legend.position="top", 
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
+
+pd_rf_by_mainstem_summary <- pd_rf_by_mainstem |>
+  group_by(river, flow_cfs) |>
+  summarize(tot_length_ft = sum(length_ft),
+            tot_wua_ft2 = sum(wua_ft2_pred),
+            tot_wua_ac = tot_wua_ft2 / 43560,
+            avg_wua_ft2_per_lf = tot_wua_ft2 / tot_length_ft,
+            avg_wua_ft2_per_1000ft = 1000 * avg_wua_ft2_per_lf)
+  
+pd_rf_by_mainstem_summary |>
+  ggplot() + 
+  geom_line(aes(x = flow_cfs, y = tot_wua_ac, color = river)) + #, color=species, linetype=habitat)) + 
+  facet_wrap(~river, scales="free_y") + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_y_continuous() + 
+  theme(legend.position="none", 
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  xlab("Flow (cfs)") + ylab("Total WUA (ac)")
+
+pd_rf_by_mainstem_summary |>
+  ggplot() + 
+  geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color = river)) + #, color=species, linetype=habitat)) + 
+  facet_wrap(~river, scales="free_y") + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_y_continuous() + 
+  theme(legend.position="none", 
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
+
+pd_rf_by_mainstem_summary |> 
+  #inner_join(dsm_habitat_floodplain, by=join_by(river==river, flow_cfs==flow_cfs)) |> 
+  #filter(river == "American River") |> 
+  ggplot() +
+  geom_line(aes(x = flow_cfs, y = tot_wua_ac, color='modeled')) + 
+  geom_line(data=dsm_habitat_suitable_ac, aes(x = flow_cfs, y = value, color = name)) +  
+  facet_wrap(~river) + #, scales="free_y") + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  theme(legend.position="top", legend.title=element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  xlab("Flow (cfs)") + ylab("Total WUA (ac)")
+
+pd_rf_by_mainstem_summary |> 
+  #inner_join(dsm_habitat_instream, by=join_by(river==river, flow_cfs==flow_cfs)) |> 
+  ggplot() +
+  geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color='modeled')) + 
+  geom_line(data=dsm_habitat_wua_per_lf, aes(x = flow_cfs, y = value, color = name)) +  
+  facet_wrap(~river) + #, scales="free_y") + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  theme(legend.position="top", legend.title=element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
+```
+
 ### Two-step model: (%HSI vs normalized flow) \* (Total Area/LF vs flow)
 
 ```{r dsmhabitat-si-val, fig.width=6.5, fig.height=6.5, dpi=300}
@@ -1548,104 +1567,3 @@ pd_rf_by_mainstem_summary |>
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
 ```
 
-### One-step model, scale-independent: WUA/LF vs normalized flow
-
-```{r dsmhabitat-si2-val, fig.width=6.5, fig.height=6.5, dpi=300}
-pd_si2 <- flowline_attributes |> 
-  select(comid, any_of(si2_rec$var_info$variable), !!norm_var) |> #erom_q_ma_cfs, nf_bfl_dry_cfs, nf_bfl_wet_cfs) |> 
-  inner_join(select(mainstems_comid, comid, river), by=join_by(comid)) |>
-  #expand_grid(flow_cfs = interp_flows) |>
-  inner_join(prediction_flows, by=join_by(river==watershed), relationship="many-to-many") |>
-  arrange(comid, flow_cfs) |>
-  filter(comid %in% mainstems_comid$comid) |>
-  mutate(flow_norm_cfs = flow_cfs / !!norm_var) |> #,
-       #nf_bfl_dry_cfs_norm = nf_bfl_dry_cfs/erom_q_ma_cfs, 
-       #nf_bfl_wet_cfs_norm = nf_bfl_wet_cfs/erom_q_ma_cfs) |>
-  drop_na()
-
-pd_si2_dsmhabitat_pred <- 
-  si2_rec |> 
-  prep(training(td_split)) |> 
-  bake(pd_si2) |> 
-  bind_cols(select(pd_si2, comid, flow_cfs_actual=flow_cfs, !!norm_var)) |>
-  drop_na() %>% # need to use magrittr pipe for this purpose
-  mutate(ihs_wua_per_lf_norm_pred = predict(rfr_si2$fit$fit, new_data=.)[[".pred"]]) |>
-  mutate(wua_per_lf_pred = sinh(ihs_wua_per_lf_norm_pred) * !!norm_var) |> 
-  select(comid, flow_norm_cfs, wua_per_lf_pred, flow_cfs=flow_cfs_actual, wua_per_lf_pred)
-
-pd_rf_by_mainstem <-
-  mainstems_comid |> 
-  st_drop_geometry() |>
-  inner_join(pd_si2_dsmhabitat_pred, by=join_by(comid), relationship="one-to-many") |>
-  mutate(length_ft = coalesce(length_ft,0),
-         wua_per_lf_pred = coalesce(wua_per_lf_pred,0),
-         wua_ft2_pred = wua_per_lf_pred * length_ft) 
-
-pd_rf_by_mainstem |>
-  ggplot(aes(x = flow_cfs, y = wua_per_lf_pred, color = hqt_gradient_class)) + 
-  geom_line(aes(group = comid), alpha=0.5) + geom_smooth(method="loess", se=F) +
-  facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
-  scale_y_continuous() + 
-  theme(legend.position="top", 
-        panel.grid.minor = element_blank(),
-        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
-
-pd_rf_by_mainstem_summary <- pd_rf_by_mainstem |>
-  group_by(river, flow_cfs) |>
-  summarize(tot_length_ft = sum(length_ft),
-            tot_wua_ft2 = sum(wua_ft2_pred),
-            tot_wua_ac = tot_wua_ft2 / 43560,
-            avg_wua_ft2_per_lf = tot_wua_ft2 / tot_length_ft,
-            avg_wua_ft2_per_1000ft = 1000 * avg_wua_ft2_per_lf)
-  
-pd_rf_by_mainstem_summary |>
-  ggplot() + 
-  geom_line(aes(x = flow_cfs, y = tot_wua_ac, color = river)) + #, color=species, linetype=habitat)) + 
-  facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
-  scale_y_continuous() + 
-  theme(legend.position="none", 
-        panel.grid.minor = element_blank(),
-        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  xlab("Flow (cfs)") + ylab("Total WUA (ac)")
-
-pd_rf_by_mainstem_summary |>
-  ggplot() + 
-  geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color = river)) + #, color=species, linetype=habitat)) + 
-  facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
-  scale_y_continuous() + 
-  theme(legend.position="none", 
-        panel.grid.minor = element_blank(),
-        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
-
-pd_rf_by_mainstem_summary |> 
-  #inner_join(dsm_habitat_floodplain, by=join_by(river==river, flow_cfs==flow_cfs)) |> 
-  #filter(river == "American River") |> 
-  ggplot() +
-  geom_line(aes(x = flow_cfs, y = tot_wua_ac, color='modeled')) + 
-  geom_line(data=dsm_habitat_suitable_ac, aes(x = flow_cfs, y = value, color = name)) +  
-  facet_wrap(~river) + #, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
-  scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
-  theme(legend.position="top", legend.title=element_blank(),
-        panel.grid.minor = element_blank(),
-        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  xlab("Flow (cfs)") + ylab("Total WUA (ac)")
-
-pd_rf_by_mainstem_summary |> 
-  #inner_join(dsm_habitat_instream, by=join_by(river==river, flow_cfs==flow_cfs)) |> 
-  ggplot() +
-  geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color='modeled')) + 
-  geom_line(data=dsm_habitat_wua_per_lf, aes(x = flow_cfs, y = value, color = name)) +  
-  facet_wrap(~river) + #, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
-  scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
-  theme(legend.position="top", legend.title=element_blank(),
-        panel.grid.minor = element_blank(),
-        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
-```

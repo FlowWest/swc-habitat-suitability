@@ -58,8 +58,9 @@ function(input, output, session){
         geom_line(aes(y = wua_per_lf_pred_si2, color="Scale-Normalized Model")) +
         geom_line(aes(y = wua_per_lf_pred_sd2si, color="Two-Step Model")) +
         geom_line(aes(y = wua_per_lf_actual, color="Actual")) +
+        geom_hline(aes(yintercept = chan_width_ft, linetype="Channel Width (ft)")) +
         scale_x_log10(labels = scales::label_comma()) +
-        scale_y_continuous(trans = ihs, labels = scales::label_comma(), limits = c(0, NA)) +
+        #scale_y_continuous(trans = ihs, labels = scales::label_comma(), limits = c(0, NA)) +
         theme_minimal() + theme(panel.grid.minor = element_blank(), legend.position = "top") +
         xlab("Flow (cfs)") + ylab("WUA (ft2) per linear ft")
   })
@@ -103,14 +104,16 @@ function(input, output, session){
 
   layer_flowlines <- function(m, show = TRUE) {
     if(show) {
+      pal_limits <- c(min(active_geom()$wua_per_lf), max(active_geom()$wua_per_lf))
+
       m |> leaflet::addPolylines(data = active_geom(),
                                  layerId = ~object_id,
-                                 label = ~lapply(paste0("<strong>", comid, "</strong>", "<br />",
+                                 label = ~lapply(paste0("<strong>", comid, " ", gnis_name, "</strong>", "<br />",
                                                         "Scale-dependent model: ", round(wua_per_lf_pred_sd,2), " ft2/ft", "<br />",
                                                         "Scale-normalized model: ", round(wua_per_lf_pred_si2,2), " ft2/ft", "<br />",
                                                         "Two-step model: ", round(wua_per_lf_pred_sd2si,2), " ft2/ft", "<br />",
                                                         "Actual: ", round(wua_per_lf_actual,2), " ft2/ft"), htmltools::HTML),
-                                 color = ~pal(wua_per_lf),
+                                 color = ~pal(wua_per_lf), #pal(wua_per_lf),
                                  opacity = 1,
                                  weight = 2,
                                  options = leaflet::pathOptions(pane = "Flowlines"),
@@ -118,9 +121,14 @@ function(input, output, session){
                                  highlightOptions = leaflet::highlightOptions(color = "#8B0000",
                                                                               weight = 3,
                                                                               bringToFront = TRUE)
-      )
+      ) |>
+        leaflet::addLegend(position = "bottomright",
+                           colors = rev(pal(seq(pal_limits[[1]], pal_limits[[2]], (pal_limits[[2]]-pal_limits[[1]])/5))),
+                           labels = c(round(pal_limits[[2]],2), rep("", 5-1), round(pal_limits[[1]],2)),
+                           title = "WUA (ft2) per linear ft",
+                           layerId = "clegend")
     } else {
-      m |> leaflet::removeShape(active_geom()$comid)
+      m |> leaflet::removeShape(active_geom()$comid) |> leaflet::removeControl("clegend")
     }
   }
 

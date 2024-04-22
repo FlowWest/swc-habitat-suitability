@@ -991,4 +991,15 @@ ggplot() + geom_sf(data = catchments, color="orange") +
 catchments |> saveRDS("../data/catchments.Rds")
 ```
 
+## Export GCS versions of spatial data
 
+```{r}
+flowlines_gcs <- flowlines |>
+  st_transform("+proj=longlat +datum=NAD83") |> 
+  st_zm()
+
+# just redefine NAD83 to WGS84 for leaflet, this is ok because just for rough visualization not analysis
+st_crs(flowlines_gcs) <- "+proj=longlat +datum=WGS84"
+
+flowlines_gcs |> saveRDS("../data/flowline_geometries_leaflet.Rds")
+```

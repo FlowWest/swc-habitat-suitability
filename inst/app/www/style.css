@@ -1,0 +1,71 @@
+body {
+  font-family: "Helvetica Neue",Helvetica,Arial,sans-serif;
+}
+
+#main_map {
+  height: calc(100vh - 80px) !important;
+}
+
+div[role=main] {
+  padding: 0 0 0 0;
+}
+
+
+.leaflet-container {
+  background-color: white;
+}
+.leaflet-Basemap-pane {
+  opacity: 0.75;
+  filter: saturate(0.75);
+}
+.leaflet-Reference-pane {
+  filter: saturate(0);
+  mix-blend-mode: multiply;
+  opacity: 0.33;
+}
+
+#invmassControlPanel {
+  background: white;
+  padding: 1em;
+}
+
+#mapControls {
+  margin-top: 1em;
+  margin-bottom: 1em;
+}
+
+#resetButton {
+  margin-top: 1em;
+  margin-bottom: 1em;
+}
+
+.sidebar-message {
+  margin-top: 1em;
+  margin-bottom: 1em;
+}
+
+#filter_guidance {
+  font-weight: bold;
+}
+
+#loading_radio, #reset_guidance {
+  font-style: italic;
+}
+
+.leaflet-control-layers-base > label:not(:first-child)  {
+  font-weight: normal;
+}
+.leaflet-control-layers-overlays > label:not(:first-child)  {
+  font-weight: normal;
+}
+
+.download_item {
+  margin-top: 1em;
+  margin-bottom: 1em;
+}
+
+.leaflet-control-attribution {
+  max-width: calc(75vw - 200px);
+}
+
+

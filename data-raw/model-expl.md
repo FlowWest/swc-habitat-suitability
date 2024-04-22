@@ -1,7 +1,7 @@
 Statistical Modeling to Predict Flow-to-Suitable-Area Curves
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-04-19
+2024-04-22
 
 - [Import and Preprocess Training
   Data](#import-and-preprocess-training-data)
@@ -32,6 +32,7 @@ Statistical Modeling to Predict Flow-to-Suitable-Area Curves
     flow](#one-step-model-scale-independent-wualf-vs-normalized-flow)
   - [Two-step model: (%HSI vs normalized flow) \* (Total Area/LF vs
     flow)](#two-step-model-hsi-vs-normalized-flow--total-arealf-vs-flow-1)
+- [Results Export](#results-export)
 
 ``` r
 library(tidyverse)
@@ -52,6 +53,15 @@ ihs <- trans_new("ihs",
                  #minor_breaks = scales::minor_breaks_n(n = 0),
                  domain=c(0, Inf),
                  format = scales::label_comma())
+
+oom_range <- function(from, to) {
+  from_mag <- floor(log10(if (from > 0) from else 1))
+  to_mag <- ceiling(log10(to))
+  magnitudes <- seq(from_mag, to_mag + 1, 1)
+  expanded <- as.vector(t(10^seq(magnitudes) %o% seq(1,9,1)))
+  result <- expanded[which(expanded>=signif(from,1) & expanded<=signif(to,1))]
+  return(if (from == 0) c(0, result) else result)
+}
 ```
 
 ## Import and Preprocess Training Data
@@ -578,6 +588,8 @@ sd_rec <- recipe(data=training(td_split),
   step_normalize(all_numeric_predictors())
 ```
 
+#### Linear Regression
+
 ``` r
 lm_spec <- linear_reg() 
 
@@ -699,8 +711,13 @@ lm_sd |>
 
 ![](model-expl_files/figure-gfm/lm-sd-coeffs-1.png)<!-- -->
 
+#### Random Forest Regression
+
 ``` r
-rfr_spec <- rand_forest(mode = "regression", trees = 2^8)
+mtry <- floor(length(sd_rec$var_info$variable[which(sd_rec$var_info$role=="predictor")])/3)
+rfr_spec <- rand_forest(mode = "regression", trees = 2^8, mtry = mtry, min_n = 10) |> #, min_n = 10) |>
+  #set_engine("ranger", num.threads = 4)#, sample.fraction = .8, importance = "impurity")
+  set_engine("ranger", num.threads = 4)#, sample.fraction = .8, importance = "impurity")
 
 rfr_sd <- workflow() |>
   add_recipe(sd_rec) |>
@@ -715,18 +732,18 @@ rfr_sd$fit$fit |> print()
     ## Ranger result
     ## 
     ## Call:
-    ##  ranger::ranger(x = maybe_data_frame(x), y = y, num.trees = ~2^8,      num.threads = 1, verbose = FALSE, seed = sample.int(10^5,          1)) 
+    ##  ranger::ranger(x = maybe_data_frame(x), y = y, mtry = min_cols(~mtry,      x), num.trees = ~2^8, min.node.size = min_rows(~10, x), num.threads = ~4,      verbose = FALSE, seed = sample.int(10^5, 1)) 
     ## 
     ## Type:                             Regression 
     ## Number of trees:                  256 
     ## Sample size:                      14758 
     ## Number of independent variables:  43 
-    ## Mtry:                             6 
-    ## Target node size:                 5 
+    ## Mtry:                             7 
+    ## Target node size:                 10 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.01118236 
-    ## R squared (OOB):                  0.994382
+    ## OOB prediction error (MSE):       0.01358472 
+    ## R squared (OOB):                  0.9931751
 
 ``` r
 rfr_sd_res <- testing(td_split) |>
@@ -749,7 +766,7 @@ rfr_sd_res |>
   xlab("Suitable Habitat Area (ft2) per LF (Actual)") + ylab("Suitable Habitat Area (ft2) per LF (Predicted)")
 ```
 
-    ## Warning: Removed 302 rows containing missing values (`geom_path()`).
+    ## Warning: Removed 303 rows containing missing values (`geom_path()`).
 
 ![](model-expl_files/figure-gfm/rfr-sd-1.png)<!-- -->
 
@@ -766,7 +783,7 @@ rfr_sd_res |>
   xlab("Suitable Habitat Area (ft2) per LF (Actual)") + ylab("Suitable Habitat Area (ft2) per LF (Predicted)")
 ```
 
-    ## Warning: Removed 89 rows containing missing values (`geom_point()`).
+    ## Warning: Removed 90 rows containing missing values (`geom_point()`).
 
 ![](model-expl_files/figure-gfm/rfr-sd-2.png)<!-- -->
 
@@ -781,6 +798,41 @@ rfr_sd_res |> filter(comid %in% test_comids) |>
 ```
 
 ![](model-expl_files/figure-gfm/rfr-sd-3.png)<!-- -->
+
+``` r
+residuals <- sd_rec |> 
+  prep(training(td_split)) |> 
+  bake(td) |>
+  bind_cols(td |> transmute(comid, 
+                            wua_per_lf,
+                            flow_cfs_orig = flow_cfs,
+                            train_test = if_else(comid %in% training(td_split)$comid, "Train", "Test"))) |>
+  drop_na() %>% # need to use magrittr pipe for this purpose
+  mutate(ihs_wua_per_lf_pred = predict(rfr_sd$fit$fit, new_data=.)[[".pred"]]) |>
+  transmute(comid, 
+            wua_per_lf,
+            train_test,
+            flow_cfs = flow_cfs_orig, 
+            ihs_wua_per_lf_pred,
+            wua_per_lf_pred = sinh(ihs_wua_per_lf_pred),
+            resid = wua_per_lf_pred - wua_per_lf)
+residuals |> 
+  group_by(train_test) |>
+  summarize(mean(resid)) |> 
+  deframe()
+```
+
+    ##       Test      Train 
+    ## -6.2550344 -0.2571302
+
+``` r
+residuals |>
+  ggplot(aes(x = flow_cfs)) + 
+  geom_line(aes(y = wua_per_lf_pred - wua_per_lf, group = comid, color = train_test)) +
+  scale_x_log10()
+```
+
+![](model-expl_files/figure-gfm/rfr-sd-4.png)<!-- -->
 
 ### Scale Dependent Model 2: TOTAL Inundated Area per linear ft versus flow:
 
@@ -821,6 +873,8 @@ sd2_rec <- recipe(data=training(td_split),
   step_zv(all_predictors()) |>
   step_normalize(all_numeric_predictors())
 ```
+
+#### Linear Regression
 
 ``` r
 lm_spec <- linear_reg() 
@@ -934,8 +988,12 @@ lm_sd2 |>
 
 ![](model-expl_files/figure-gfm/lm-sd2-coeffs-1.png)<!-- -->
 
+#### Random Forest Regression
+
 ``` r
-rfr_spec <- rand_forest(mode = "regression", trees = 2^8)
+mtry <- floor(length(sd2_rec$var_info$variable[which(sd2_rec$var_info$role=="predictor")])/3)
+rfr_spec <- rand_forest(mode = "regression", trees = 2^8, mtry = mtry, min_n = 10) |> #, min_n = 10) |>
+    set_engine("ranger", num.threads = 4)
 
 rfr_sd2 <- workflow() |>
   add_recipe(sd2_rec) |>
@@ -950,18 +1008,18 @@ rfr_sd2$fit$fit |> print()
     ## Ranger result
     ## 
     ## Call:
-    ##  ranger::ranger(x = maybe_data_frame(x), y = y, num.trees = ~2^8,      num.threads = 1, verbose = FALSE, seed = sample.int(10^5,          1)) 
+    ##  ranger::ranger(x = maybe_data_frame(x), y = y, mtry = min_cols(~mtry,      x), num.trees = ~2^8, min.node.size = min_rows(~10, x), num.threads = ~4,      verbose = FALSE, seed = sample.int(10^5, 1)) 
     ## 
     ## Type:                             Regression 
     ## Number of trees:                  256 
     ## Sample size:                      14758 
     ## Number of independent variables:  41 
     ## Mtry:                             6 
-    ## Target node size:                 5 
+    ## Target node size:                 10 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.000572551 
-    ## R squared (OOB):                  0.998773
+    ## OOB prediction error (MSE):       0.0008292413 
+    ## R squared (OOB):                  0.998223
 
 ``` r
 rfr_sd2_res <- testing(td_split) |>
@@ -1052,6 +1110,8 @@ si_rec <- recipe(data=training(td_split),
   step_zv(all_predictors()) |>
   step_normalize(all_numeric_predictors()) 
 ```
+
+#### Linear Regression
 
 ``` r
 lm_spec <- linear_reg() 
@@ -1160,6 +1220,8 @@ lm_si |>
 
 ![](model-expl_files/figure-gfm/lm-si-coeffs-1.png)<!-- -->
 
+#### Random Forest Regression
+
 ``` r
 # set up cross validation
 folds <- vfold_cv(training(td_split), v = 10, strata = dataset)
@@ -1188,7 +1250,9 @@ rfr_si_tune |>
 ```
 
 ``` r
-rfr_spec <- rand_forest(mode = "regression", trees = 2^8)
+mtry <- floor(length(si_rec$var_info$variable[which(si_rec$var_info$role=="predictor")])/3)
+rfr_spec <- rand_forest(mode = "regression", trees = 2^8, mtry = mtry, min_n = 10) |> #, min_n = 10) |>
+    set_engine("ranger", num.threads = 4)
 
 rfr_si <- workflow() |>
   add_recipe(si_rec) |>
@@ -1203,18 +1267,18 @@ rfr_si$fit$fit |> print()
     ## Ranger result
     ## 
     ## Call:
-    ##  ranger::ranger(x = maybe_data_frame(x), y = y, num.trees = ~2^8,      num.threads = 1, verbose = FALSE, seed = sample.int(10^5,          1)) 
+    ##  ranger::ranger(x = maybe_data_frame(x), y = y, mtry = min_cols(~mtry,      x), num.trees = ~2^8, min.node.size = min_rows(~10, x), num.threads = ~4,      verbose = FALSE, seed = sample.int(10^5, 1)) 
     ## 
     ## Type:                             Regression 
     ## Number of trees:                  256 
     ## Sample size:                      14758 
     ## Number of independent variables:  33 
     ## Mtry:                             5 
-    ## Target node size:                 5 
+    ## Target node size:                 10 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       4.385654e-05 
-    ## R squared (OOB):                  0.9903677
+    ## OOB prediction error (MSE):       6.050362e-05 
+    ## R squared (OOB):                  0.9867115
 
 ``` r
 rfr_si_res <- testing(td_split) |>
@@ -1293,6 +1357,8 @@ si2_rec <- recipe(data=training(td_split),
   step_zv(all_predictors()) |>
   step_normalize(all_numeric_predictors())
 ```
+
+#### Linear Regression
 
 ``` r
 lm_spec <- linear_reg() 
@@ -1408,8 +1474,12 @@ lm_si2 |>
 
 ![](model-expl_files/figure-gfm/lm-si2-coeffs-1.png)<!-- -->
 
+#### Random Forest Regression
+
 ``` r
-rfr_spec <- rand_forest(mode = "regression", trees = 2^8)
+mtry <- floor(length(si2_rec$var_info$variable[which(si2_rec$var_info$role=="predictor")])/3)
+rfr_spec <- rand_forest(mode = "regression", trees = 2^8, mtry = mtry, min_n = 10) |> #, min_n = 10) |>
+    set_engine("ranger", num.threads = 4)
 
 rfr_si2 <- workflow() |>
   add_recipe(si2_rec) |>
@@ -1424,18 +1494,18 @@ rfr_si2$fit$fit |> print()
     ## Ranger result
     ## 
     ## Call:
-    ##  ranger::ranger(x = maybe_data_frame(x), y = y, num.trees = ~2^8,      num.threads = 1, verbose = FALSE, seed = sample.int(10^5,          1)) 
+    ##  ranger::ranger(x = maybe_data_frame(x), y = y, mtry = min_cols(~mtry,      x), num.trees = ~2^8, min.node.size = min_rows(~10, x), num.threads = ~4,      verbose = FALSE, seed = sample.int(10^5, 1)) 
     ## 
     ## Type:                             Regression 
     ## Number of trees:                  256 
     ## Sample size:                      14758 
     ## Number of independent variables:  31 
     ## Mtry:                             5 
-    ## Target node size:                 5 
+    ## Target node size:                 10 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.001062193 
-    ## R squared (OOB):                  0.9987763
+    ## OOB prediction error (MSE):       0.001453083 
+    ## R squared (OOB):                  0.9983259
 
 ``` r
 rfr_si2_res <- testing(td_split) |>
@@ -1504,7 +1574,9 @@ pd_attr <- flowline_attributes |>
   
 pd <- pd_attr |>
   # create series of flow prediction points
-  expand_grid(flow_cfs = c(0,signif(100*2^seq(-2,7,0.5),2))) |>
+  #expand_grid(flow_cfs = interp_flows) |>
+  expand_grid(flow_cfs = c(oom_range(100, 10000), 15000)) |>
+  # expand_grid(flow_cfs = c(0,signif(100*2^seq(-2,7,0.5),2))) |>
   #expand_grid(flow_cfs = c(0,100,250,500,1000,2500,5000,10000)) |>
   #mutate(flow_cfs = if_else(flow_cfs>0, flow_cfs, erom_q_ma_cfs)) |> # also evaluate at mean annual flow
   mutate(flow_norm_cfs = coalesce(flow_cfs / !!norm_var, 0)) |> # flow as a percent of mean annual flow
@@ -1538,8 +1610,8 @@ pd <- pd_attr |>
     ## $ da_scalar                <dbl> 1.364322, 1.364322, 1.364322, 1.364322, 1.364…
     ## $ hyd_cls                  <fct> "Low-volume snowmelt and rain", "Low-volume s…
     ## $ hqt_gradient_class       <fct> Bedrock, Bedrock, Bedrock, Bedrock, Bedrock, …
-    ## $ flow_cfs                 <dbl> 0, 25, 35, 50, 71, 100, 140, 200, 280, 400, 5…
-    ## $ flow_norm_cfs            <dbl> 0.00000, 18.32411, 25.65376, 36.64823, 52.040…
+    ## $ flow_cfs                 <dbl> 100, 200, 300, 400, 500, 600, 700, 800, 900, …
+    ## $ flow_norm_cfs            <dbl> 73.29645, 146.59291, 219.88936, 293.18582, 36…
 
 ``` r
 flowlines |> st_zm() |>
@@ -1590,9 +1662,9 @@ sd_pred <-
     ## Rows: 238,300
     ## Columns: 4
     ## $ comid               <dbl> 342517, 342517, 342517, 342517, 342517, 342517, 34…
-    ## $ flow_cfs            <dbl> 0, 25, 35, 50, 71, 100, 140, 200, 280, 400, 570, 8…
-    ## $ ihs_wua_per_lf_pred <dbl> 1.547920, 1.745233, 1.745424, 1.749344, 1.747339, …
-    ## $ wua_per_lf_pred     <dbl> 2.244496, 2.776315, 2.776880, 2.788470, 2.782537, …
+    ## $ flow_cfs            <dbl> 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000,…
+    ## $ ihs_wua_per_lf_pred <dbl> 2.009086, 2.037042, 2.079911, 2.201014, 2.350480, …
+    ## $ wua_per_lf_pred     <dbl> 3.661193, 3.768742, 3.939409, 4.461740, 5.197640, …
 
 ``` r
 flowlines |> st_zm() |>
@@ -1618,13 +1690,11 @@ sd_pred |>
   scale_x_log10() + scale_y_log10() + theme(panel.grid.minor = element_blank())
 ```
 
-    ## Warning: Transformation introduced infinite values in continuous x-axis
-
     ## Warning: Transformation introduced infinite values in continuous y-axis
 
     ## `geom_smooth()` using method = 'gam' and formula = 'y ~ s(x, bs = "cs")'
 
-    ## Warning: Removed 238620 rows containing non-finite values (`stat_smooth()`).
+    ## Warning: Removed 580 rows containing non-finite values (`stat_smooth()`).
 
 ![](model-expl_files/figure-gfm/prediction-output-sd-2.png)<!-- -->
 
@@ -1655,12 +1725,12 @@ si2_pred <-
     ## Rows: 238,300
     ## Columns: 7
     ## $ comid                    <dbl> 342517, 342517, 342517, 342517, 342517, 34251…
-    ## $ flow_cfs                 <dbl> 0, 25, 35, 50, 71, 100, 140, 200, 280, 400, 5…
-    ## $ flow_norm_cfs            <dbl> 0.00000, 18.32411, 25.65376, 36.64823, 52.040…
+    ## $ flow_cfs                 <dbl> 100, 200, 300, 400, 500, 600, 700, 800, 900, …
+    ## $ flow_norm_cfs            <dbl> 73.29645, 146.59291, 219.88936, 293.18582, 36…
     ## $ da_scalar                <dbl> 1.364322, 1.364322, 1.364322, 1.364322, 1.364…
-    ## $ ihs_wua_per_lf_norm_pred <dbl> 0.4130355, 0.6765071, 0.7944478, 0.9714825, 1…
-    ## $ wua_per_lf_norm_pred     <dbl> 0.4248800, 0.7293028, 0.8806940, 1.1316683, 1…
-    ## $ wua_per_lf_pred          <dbl> 0.5796733, 0.9950042, 1.2015506, 1.5439604, 1…
+    ## $ ihs_wua_per_lf_norm_pred <dbl> 1.264528, 1.443429, 1.634720, 1.687944, 1.709…
+    ## $ wua_per_lf_norm_pred     <dbl> 1.629525, 1.999539, 2.466507, 2.611725, 2.673…
+    ## $ wua_per_lf_pred          <dbl> 2.223197, 2.728016, 3.365110, 3.563234, 3.647…
 
 ``` r
 flowlines |> st_zm() |>
@@ -1686,13 +1756,11 @@ si2_pred |>
   scale_x_log10() + scale_y_log10() + theme(panel.grid.minor = element_blank())
 ```
 
-    ## Warning: Transformation introduced infinite values in continuous x-axis
-
     ## Warning: Transformation introduced infinite values in continuous y-axis
 
     ## `geom_smooth()` using method = 'gam' and formula = 'y ~ s(x, bs = "cs")'
 
-    ## Warning: Removed 179085 rows containing non-finite values (`stat_smooth()`).
+    ## Warning: Removed 435 rows containing non-finite values (`stat_smooth()`).
 
 ![](model-expl_files/figure-gfm/prediction-output-si2-2.png)<!-- -->
 
@@ -1717,12 +1785,12 @@ sd2_pred <-
     ## Rows: 238,300
     ## Columns: 4
     ## $ comid                    <dbl> 342517, 342517, 342517, 342517, 342517, 34251…
-    ## $ flow_cfs                 <dbl> 0, 25, 35, 50, 71, 100, 140, 200, 280, 400, 5…
-    ## $ ihs_tot_area_per_lf_pred <dbl> 5.619688, 5.813195, 5.817171, 5.820737, 5.818…
-    ## $ tot_area_per_lf_pred     <dbl> 137.8999, 167.3418, 168.0086, 168.6088, 168.2…
+    ## $ flow_cfs                 <dbl> 100, 200, 300, 400, 500, 600, 700, 800, 900, …
+    ## $ ihs_tot_area_per_lf_pred <dbl> 5.910602, 5.924425, 5.933161, 5.954668, 5.988…
+    ## $ tot_area_per_lf_pred     <dbl> 184.4627, 187.0302, 188.6714, 192.7731, 199.3…
 
 ``` r
-si_pred <- 
+sd2si_pred <- 
   si_rec |> 
   prep(training(td_split)) |> 
   bake(pd) |> 
@@ -1746,16 +1814,16 @@ si_pred <-
     ## Rows: 238,300
     ## Columns: 7
     ## $ comid                    <dbl> 342517, 342517, 342517, 342517, 342517, 34251…
-    ## $ flow_cfs                 <dbl> 0, 25, 35, 50, 71, 100, 140, 200, 280, 400, 5…
-    ## $ flow_norm_cfs            <dbl> 0.00000, 18.32411, 25.65376, 36.64823, 52.040…
-    ## $ hsi_frac_pred            <dbl> 0.02502688, 0.05306728, 0.07758161, 0.0939745…
-    ## $ ihs_tot_area_per_lf_pred <dbl> 5.619688, 5.813195, 5.817171, 5.820737, 5.818…
-    ## $ tot_area_per_lf_pred     <dbl> 137.8999, 167.3418, 168.0086, 168.6088, 168.2…
-    ## $ wua_per_lf_pred          <dbl> 3.451204, 8.880377, 13.034375, 15.844944, 17.…
+    ## $ flow_cfs                 <dbl> 100, 200, 300, 400, 500, 600, 700, 800, 900, …
+    ## $ flow_norm_cfs            <dbl> 73.29645, 146.59291, 219.88936, 293.18582, 36…
+    ## $ hsi_frac_pred            <dbl> 0.1318697, 0.1602785, 0.1647445, 0.1696468, 0…
+    ## $ ihs_tot_area_per_lf_pred <dbl> 5.910602, 5.924425, 5.933161, 5.954668, 5.988…
+    ## $ tot_area_per_lf_pred     <dbl> 184.4627, 187.0302, 188.6714, 192.7731, 199.3…
+    ## $ wua_per_lf_pred          <dbl> 24.32503, 29.97693, 31.08258, 32.70334, 34.62…
 
 ``` r
 flowlines |> st_zm() |>
-  inner_join(si_pred |> filter(round(flow_cfs)==800), by=join_by(comid)) |>
+  inner_join(sd2si_pred |> filter(round(flow_cfs)==800), by=join_by(comid)) |>
   mutate(wua_per_lf_pred = if_else(wua_per_lf_pred <1, 1, wua_per_lf_pred)) |> # for visualization only
   ggplot() + geom_sf(aes(color = wua_per_lf_pred)) + 
   scale_color_viridis_c(trans="log", breaks = scales::breaks_log(6), direction=-1)
@@ -1767,15 +1835,6 @@ flowlines |> st_zm() |>
 
 ``` r
 # summary of typical flow ranges by DSMhabitat stream
-oom_range <- function(from, to) {
-  from_mag <- floor(log10(if (from > 0) from else 1))
-  to_mag <- ceiling(log10(to))
-  magnitudes <- seq(from_mag, to_mag + 1, 1)
-  expanded <- as.vector(t(10^seq(magnitudes) %o% seq(1,9,1)))
-  result <- expanded[which(expanded>=signif(from,1) & expanded<=signif(to,1))]
-  return(if (from == 0) c(0, result) else result)
-}
-
 prediction_flows <- readRDS("../data/watershed_flow_summary.Rds") |>
   # make the numbers cleaner by rounding to nearest 100 cfs or 2 sig figs max
   mutate(across(-watershed, function(x) signif(round(x, -2), 2))) |>
@@ -2386,3 +2445,19 @@ pd_rf_by_mainstem_summary |>
     ## Warning: Removed 25 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si-val-5.png)<!-- -->
+
+## Results Export
+
+``` r
+predictions_export <- pd |>
+  inner_join(sd_pred |> select(comid, flow_cfs, wua_per_lf_pred_sd = wua_per_lf_pred),
+             by=join_by(comid, flow_cfs), relationship="one-to-one") |>
+  inner_join(si2_pred |> select(comid, flow_cfs, wua_per_lf_pred_si2 = wua_per_lf_pred),
+             by=join_by(comid, flow_cfs), relationship="one-to-one") |>
+  inner_join(sd2si_pred |> select(comid, flow_cfs, wua_per_lf_pred_sd2si = wua_per_lf_pred),
+             by=join_by(comid, flow_cfs), relationship="one-to-one") |>
+  left_join(td |> select(comid, flow_cfs, wua_per_lf_actual = wua_per_lf),
+            by=join_by(comid, flow_cfs), relationship="one-to-one")
+
+predictions_export |> saveRDS("../data/predictions_table.Rds")
+```

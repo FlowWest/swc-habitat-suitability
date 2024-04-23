@@ -1,0 +1,109 @@
+---
+title: "Preictor Data Prep: Aquatic Species"
+author: "Maddee Rubenson (FlowWest)"
+date: "`r Sys.Date()`"
+output: 
+  github_document:
+    toc: true
+    toc_depth: 3
+    number_sections: false
+    math_method:
+      engine: webtex
+      url: https://latex.codecogs.com/svg.image?
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(sf)
+library(stars)
+
+theme_set(theme_minimal())
+
+# This needs to be run if the device is not yet authenticated
+#googledrive::drive_auth()
+
+source(here::here("data-raw", "scripts", "data-functions.R"))
+```
+
+```{r watersheds}
+project_crs <- "ESRI:102039" # NAD83 CONUS Albers USGS Version
+
+flowlines <- readRDS(here::here("data-raw", "results", "flowline_geometries.Rds")) |>
+  st_transform(project_crs) |> 
+  st_zm()
+
+catchments <- readRDS(here::here("data-raw", "results", "catchments.Rds"))
+```
+
+## Aquatic Richness Data
+
+### Aquatic Biodiveristy Summary
+
+The aquatic biodiversity summary combines the three measures of biodiversity developed for ACE into a single metric: 1) aquatic native species richness, which represents overall native diversity of all species in the state, both common and rare; 2) aquatic rare species richness, which represents diversity of rare species; and, 3) aquatic irreplaceability, which is a weighted measure of rarity and endemism.
+
+<https://data-cdfw.opendata.arcgis.com/datasets/CDFW>::aquatic-species-list-ace-ds2740-2/explore
+
+```{r aqu-spec, message=FALSE, warning=FALSE}
+
+# CDFW:
+drive_file_by_id("13S1YWYP_t7pb2SUmEWEprJA-tJ-8FM-V") 
+
+aquatic_cdfw_sf <- read_sf(here::here("data-raw", "temp", "Aquatic_Species_List_-_ACE_[ds2740].geojson")) |> 
+  janitor::clean_names() |> 
+  st_transform(project_crs) 
+
+comids_joined_aquatic_cdfw <-
+  flowlines |>
+  select(comid) |>
+  st_point_on_surface() |>
+  st_join(aquatic_cdfw_sf) |>
+  st_drop_geometry() |>
+  glimpse()
+
+flowlines |> 
+  left_join(comids_joined_aquatic_cdfw, by=join_by(comid)) |>
+  ggplot() + geom_sf(aes(color=as_factor(bio_aq_rank_sw))) 
+
+comids_joined_aquatic_cdfw |> 
+  select(comid, bio_aq_rank_sw) |>
+  saveRDS(here::here("data-raw", "results", "attr_cdfw_aquatic_species_rank.Rds"))
+```
+
+### California Freshwater Species Database V2
+
+The California Freshwater Species Database is the first comprehensive geospatial database of California’s freshwater species compiled and standardized into single format from nearly 500 sources. It provides a single source for geodata covering the plants and animals that rely on California’s freshwater resources to survive.
+
+<https://www.scienceforconservation.org/products/california-freshwater-species-database>
+
+```{r message=FALSE, warning=FALSE}
+richness <- read_csv(here::here("data-raw", "source", "ca_freshwater_species", "RichnessSummary.csv")) |> 
+  janitor::clean_names() |> 
+  rename(huc_12 = au_id) |> 
+  mutate(huc_12_aq = as.character(huc_12)) |> glimpse()
+
+analysis_units <- read_sf(here::here("data-raw", "source", "ca_freshwater_species", "AnalysisUnits.shp")) |> 
+  janitor::clean_names() |> 
+  rename(huc_12_aq = au_id) |> 
+  mutate(huc_12_aq = as.character(huc_12_aq)) |> 
+  left_join(richness) |> 
+  st_transform(project_crs) |> 
+  glimpse()
+
+comids_joined_aquatic_tnc <-
+  flowlines |>
+  select(comid) |>
+  st_point_on_surface() |>
+  st_join(analysis_units) |>
+  st_drop_geometry() |>
+  glimpse()
+
+flowlines |> 
+  left_join(comids_joined_aquatic_tnc, by=join_by(comid)) |>
+  ggplot() + geom_sf(aes(color=species)) 
+
+comids_joined_aquatic_tnc |> 
+  select(comid, species:species_other) |>
+  saveRDS(here::here("data-raw", "results", "attr_tnc_aquatic_species_rank.Rds"))
+```

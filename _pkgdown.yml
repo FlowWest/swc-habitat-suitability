@@ -1,0 +1,13 @@
+#template:
+#  bootstrap: 5
+#  bootswatch: cerulean
+authors:
+  Skyler Lewis:
+    href: mailto:slewis@flowwest.com
+navbar:
+  structure:
+    left:  [reference, articles, maplink]
+  components:
+    maplink:
+      href: https://flowwest.shinyapps.io/habistat/
+      text: "Interactive Map"

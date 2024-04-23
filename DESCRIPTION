@@ -1,0 +1,29 @@
+Package: habistat
+Type: Package
+Title: HabiStat
+Version: 0.1.0
+Author: FlowWest, Trout Unlimited
+Authors@R: c(person("Maddee", "Rubenson", email = "mrubenson@flowwest.com", role = c("aut", "pdr")), person("Skyler", "Lewis", email = "slewis@flowwest.com", role = c("aut", "cre")))
+Description: Description here
+License: MIT
+Encoding: UTF-8
+LazyData: true
+Depends: 
+    R (>= 2.10)
+Imports: 
+    dplyr,
+    tidyr,
+    magrittr,
+    tibble,
+    purrr,
+    readr,
+    zoo,
+    ggplot2,
+    shiny,
+    DT,
+    parsnip,
+    recipes,
+    workflows,
+    broom,
+    ranger
+RoxygenNote: 7.2.3

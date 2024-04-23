@@ -5,12 +5,14 @@ library(leaflet)
 
 # DATA IMPORT ------------------------------------------------------------------
 
-flowline_attributes <- readRDS("../../data/flowline_attributes.Rds")
+flowline_attributes <- readRDS(here::here("data-raw", "results", "flowline_attributes.Rds"))
 
-flowlines_gcs <- readRDS("../../data/flowline_geometries_leaflet.Rds") |>
+flowlines_gcs <- readRDS(here::here("data-raw", "results", "flowline_geometries.Rds")) |>
   mutate(object_id = paste0("comid_", comid))
 
-predictions_table <- readRDS("../../data/predictions_table.Rds") |>
+st_crs(flowlines_gcs) <- "+proj=longlat +datum=WGS84"
+
+predictions_table <- readRDS(here::here("data-raw", "results", "predictions_table.Rds")) |>
   left_join(flowline_attributes |> transmute(comid, gnis_name, chan_width_ft = chan_width_m/0.3048),
             by=join_by(comid), relationship="many-to-one")
 

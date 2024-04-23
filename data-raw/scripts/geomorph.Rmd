@@ -1,0 +1,167 @@
+---
+title: "Predictor Data Prep: Geomorphology and Soils"
+author: "[Skyler Lewis](mailto:slewis@flowwest.com)"
+date: "`r Sys.Date()`"
+output: 
+  github_document:
+    toc: true
+    toc_depth: 3
+    number_sections: false
+    math_method:
+      engine: webtex
+      url: https://latex.codecogs.com/svg.image?
+---
+
+
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(sf)
+library(stars)
+library(tidymodels)
+
+theme_set(theme_minimal())
+
+source(here::here("data-raw", "scripts", "data-functions.R"))
+```
+
+```{r data-import}
+flow <- 
+  drive_file_by_id("1UiG8AeMr6mFOw7Jx--LyNRzez7GsDhzK", vsizip=T) |>
+  st_read() |>
+  janitor::clean_names() |>
+  select(comid) |>
+  st_transform(project_crs) |>
+  st_zm()
+
+flowline_attributes <- readRDS(here::here("data-raw", "results", "flowline_attributes.Rds"))
+```
+
+## Soils
+
+```{r soils-data}
+soils <- 
+  st_read(file.path("/vsizip", here::here("data-raw", "source", "soils", "Cal_STATSGO2.shp.zip")), as_tibble=T) |>
+  st_transform(project_crs) |>
+  janitor::clean_names() |> 
+  transmute(soil_drainage = factor(drainage, levels=c("Very poorly drained",
+                                                      "Poorly drained",
+                                                      "Somewhat poorly drained",
+                                                      "Well drained",
+                                                      "Somewhat excessively drained",
+                                                      "Excessively drained")),
+            soil_hsg = factor(hydro_g, levels=c("A","B","C","D")),
+            soil_salt_accum = factor(salt, levels=c("acid","nonacid","euic","calcareous")),
+            soil_climate = factor(climate, levels=c("frigid","mesic","thermic","hyperthermic","isofrigid","isomesic","isothermic","isohyperthermic")),
+            soil_minerology = factor(minerology, levels=c("superactive","active","semiactive","subactive")),
+            soil_volcanic = if_else(str_detect(texture,"ashy") | str_detect(texture,"cindery") | str_detect(texture,"medial"), 1, 0),
+            soil_texture_simple = case_when(str_detect(word(texture,1), "ashy") ~ "ashy",
+                                            str_detect(word(texture,1), "medial") ~ "medial",
+                                            str_detect(word(texture,1), "clayey") ~ "clayey",
+                                            str_detect(word(texture,1), "clayey") ~ "silty",
+                                            str_detect(word(texture,1), "clayey") ~ "sandy",
+                                            str_detect(word(texture,1), "clayey") ~ "loamy",
+                                            str_detect(word(texture,1), "clayey") ~ "fine"
+                                            ) |> factor())
+
+soils_comid <-
+  flow |>
+  select(comid) |>
+  st_point_on_surface() |>
+  st_join(soils) |>
+  st_drop_geometry() |>
+  glimpse()
+
+saveRDS(here::here("data-raw", "results", "attr_soils.Rds"))
+```
+
+## UCD Geomorphology classes (experimental)
+
+```{r geomorph-data-import}
+geomorph_site_data <- 
+  tibble(result=rjson::fromJSON(file=here::here("data-raw", "source", "ucd_geomorph", "geoSites.json"))) |> 
+  unnest_wider(result) |> 
+  mutate(geomorph_region = map_chr(geoClass, function(x) x$geoRegion$abbreviation),
+         geomorph_class = map_chr(geoClass, function(x) x$name),
+         geomorph_class_median_attributes = map(geoClass, function(x) x$medianAttributes),
+         geometry = map(geometry, function(x) c(x$coordinates[[2]], x$coordinates[[1]]) |> st_point()) |> st_sfc(crs="EPSG:4326")) |>
+  janitor::clean_names() |> 
+  st_as_sf() |>
+  filter(geomorph_region=="SAC") |>
+  select(identity, geometry, geomorph_class) |>
+  mutate(identity = str_replace(identity, "SAC_", ""),
+         geomorph_class_num=str_replace(geomorph_class, "SAC-","") |> as.numeric(),
+         geomorph_class = factor(geomorph_class, 
+                                 levels = paste0("SAC-",seq(1,10,1)),
+                                 labels = c("SAC-1"  = "Unconfined, boulder-bedrock, bed undulating",
+                                            "SAC-2"  = "Confined, boulder, high gradient, step-pool/cascade",
+                                            "SAC-3"  = "Confined, boulder-bedrock, uniform",
+                                            "SAC-4"  = "Confined, boulder-bedrock, low-gradient step-pool",
+                                            "SAC-5"  = "Confined, gravel-cobble, uniform",
+                                            "SAC-6"  = "Partly-confined, low width-to-depth ratio, gravel-cobble, riffle-pool",
+                                            "SAC-7"  = "Partly-confined, cobble-boulder, uniform",
+                                            "SAC-8"  = "Partly-confined, high width-to-depth ratio, gravel-cobble, riffle-pool",
+                                            "SAC-9"  = "Unconfined, low width-to-depth ratio, gravel",
+                                            "SAC-10" = "Unconfined, gravel-cobble, riffle-pool"))) |>
+  inner_join(read_csv(here::here("data-raw", "source", "ucd_geomorph", "geomorph_site_attributes.csv")), by=join_by(identity)) |>
+  st_transform(project_crs) |> 
+  st_join(flow |> select(comid), join=st_nearest_feature)
+
+geomorph_site_data |> ggplot() + geom_sf(aes(color=geomorph_class))
+
+flow |> inner_join(geomorph_site_data |> st_drop_geometry()) |> 
+  ggplot() + geom_sf(aes(color=geomorph_class))
+```
+
+```{r geomorph-fill-gaps}
+geomorph_training_data <- 
+  geomorph_site_data |>
+  left_join(flowline_attributes, by=join_by(comid)) |>
+  select(comid, geomorph_class, geomorph_class_num,
+         da_area_sq_km, slope, bf_depth_m, bf_width_m, bf_w_d_ratio,  
+         mtpi30_min, loc_k_erodibility, sinuosity, 
+         ) |>
+  drop_na() |>
+  st_drop_geometry()
+
+geomorph_rec <- 
+  recipe(geomorph_class ~ da_area_sq_km + slope + bf_depth_m + bf_width_m + bf_w_d_ratio + 
+         mtpi30_min + loc_k_erodibility + sinuosity,
+         data=geomorph_training_data)
+
+geomorph_spec <- rand_forest(mode = "classification", trees = 256)
+
+geomorph_fit <- 
+  workflow() |>
+  add_recipe(geomorph_rec) |>
+  add_model(geomorph_spec) |>
+  fit(data=geomorph_training_data)
+
+geomorph_prediction_data <- flow |>
+  left_join(flowline_attributes, by=join_by(comid)) |>
+  select(comid, 
+         da_area_sq_km, slope, bf_depth_m, bf_width_m, bf_w_d_ratio,  
+         mtpi30_min, loc_k_erodibility, sinuosity, 
+         ) |>
+  drop_na() |>
+  st_drop_geometry()
+  
+geomorph_pred <- 
+  geomorph_prediction_data |>
+  mutate(geomorph_class = predict(geomorph_fit, geomorph_prediction_data)[[".pred_class"]])
+
+geomorph_pred |> select(comid, geomorph_class) |> saveRDS(here::here("data-raw", "results", "attr_geomorph_class.Rds"))
+  
+flow |> inner_join(geomorph_pred, by=join_by(comid)) |> 
+  ggplot() + geom_sf(aes(color=geomorph_class))
+
+# # validation matrix
+# geomorph_training_data |>
+#   select(comid, geomorph_class_actual=geomorph_class) |>
+#   inner_join(geomorph_pred |> select(comid, geomorph_class_pred=geomorph_class)) |>
+#   group_by(geomorph_class_actual, geomorph_class_pred) |>
+#   tally() |> 
+#   mutate(n=coalesce(n,0)) |>
+#   spread(geomorph_class_actual, n)
+  
+```
+

@@ -1,0 +1,999 @@
+---
+title: "Hydraulic Training Data Assembly"
+author: "[Skyler Lewis](mailto:slewis@flowwest.com)"
+date: "`r Sys.Date()`"
+output: 
+  github_document:
+    toc: true
+    toc_depth: 3
+    number_sections: false
+    math_method:
+      engine: webtex
+      url: https://latex.codecogs.com/svg.image?
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(sf)
+library(stars)
+library(terra)
+
+# implement parallel processing
+library(future) # parallel processing backend
+library(future.apply) # parallelized versions of lapply, sapply, ...
+library(furrr) # parallelized versions of purrr functions: map, map2, pmap,...
+library(tictoc) # measure time to run
+message(availableCores())
+#if (availableCores()>1) plan(multisession) else plan(sequential)
+plan(multisession, workers = 4)
+# use plan(sequential) to run all as ordinary lapply, pmap, etc.
+ 
+theme_set(theme_minimal())
+
+source(here::here("data-raw", "scripts", "data-functions.R"))
+
+set.seed(47)
+```
+
+```{r import, message=FALSE, warning=FALSE}
+flowlines <- readRDS(here::here("data-raw", "results", "flowline_geometries_proj.Rds"))
+
+flowline_attributes <- readRDS(here::here("data-raw", "results", "flowline_attributes.Rds"))
+
+# import duration info from inundation-duration.Rmd
+durhsi_by_first_inundating_flow <- readRDS(here::here("data-raw", "results", "durhsi_by_model_q.Rds"))
+
+valley_lowland <- readRDS(here::here("data-raw", "source", "hqt", "hqt_valley_lowland.Rds")) |> 
+  st_transform("ESRI:102039") |> 
+  st_sf() |>
+  st_set_geometry("geometry") |>
+  mutate(hqt_gradient_class = "Valley Lowland")
+```
+
+Define habitat suitability functions
+
+Source: 1029_Yuba_Flow_Effects_Modeling_Task_1_2022-09-30_reduced.pdf
+
+```{r funcs}
+# vectorized function to calculate the depth*velocity suitability factor
+# if applicable, cover will also need to be applied.
+
+# method=0 uses simple 1/0 thresholds (CVPIA -  see Deer Creek FR juvenile rearing floodplain criteria)
+# method=1 uses ranges defined in CBEC Lower Yuba River report, tables 8-9
+# method=2 uses ranges defined for USBR San Joaquin model (which also did not incorporate cover)
+# method=3 uses simple 1/0 thresholds from HQT
+
+dvhsi <- function(d, v, method=0) {
+  
+  if(method==0){
+    
+    return(if_else(d>0.5 & d<=5.2 & v>0 & v<=4.0, 1, 0))
+    
+  } else if(method==1){
+    
+    dhsi <- case_when(
+      d<=0.5 ~ 0,
+      d<=0.9 ~ linterp(d, 0.5, 0.9, 0, 1),
+      d<=4.0 ~ 1,
+      d<=5.2 ~ linterp(d, 4.0, 5.2, 1, 0),
+      d>5.2 ~ 0)
+    vhsi <- case_when(
+      v<=0.1 ~ linterp(v, 0.0, 0.1, 0, 1),
+      v<=0.8 ~ 1,
+      v<=1.8 ~ linterp(v, 0.8, 1.8, 1, 0.35),
+      v<=4.0 ~ linterp(v, 1.8, 4.0, 0.35, 0),
+      v>4.0 ~ 0)
+    return(sqrt(dhsi*vhsi))
+    
+  } else if(method==2){
+    
+    dhsi <- case_when(d<=0.01 ~ 0.00,
+                      d<=0.10 ~ 0.10,
+                      d<=0.20 ~ 0.20,
+                      d<=0.60 ~ 0.15,
+                      d<=0.80 ~ 0.35,
+                      d<=1.00 ~ 0.46,
+                      d<=1.20 ~ 0.53,
+                      d<=1.50 ~ 0.64,
+                      d<=2.10 ~ 0.86,
+                      d<=2.50 ~ 0.86,
+                      d<=2.90 ~ 0.57,
+                      d<=4.00 ~ 0.34,
+                      d<=4.50 ~ 0.14,
+                      d<=5.00 ~ 0.30,
+                      d<=7.00 ~ 0.20,
+                      d<=7.10 ~ 0.10,
+                      d<=10.0 ~ 0.00,
+                      d>10.0 ~ 0.00)
+    vhsi <- case_when(v<=0.1 ~ 0.94,
+                      v<=0.2 ~ 0.98,
+                      v<=0.3 ~ 1.00,
+                      v<=0.5 ~ 0.99,
+                      v<=0.7 ~ 0.98,
+                      v<=1.0 ~ 0.96,
+                      v<=1.2 ~ 0.95,
+                      v<=1.5 ~ 0.93,
+                      v<=2.0 ~ 0.68,
+                      v<=2.5 ~ 0.30,
+                      v<=2.8 ~ 0.08,
+                      v<=3.4 ~ 0.01,
+                      v<=3.5 ~ 0.01,
+                      v>3.5 ~ 0.00)
+    return(pmin(dhsi, vhsi))
+    
+  } else if(method==3){
+    
+    return(if_else(d>1 & d<=3.28 & v>0 & v<=1.5, 1, 0))
+
+  }
+}
+```
+
+## Stanislaus
+
+Import SRH2D model data for Stanislaus (unlike HEC-RAS, the SRH2D outputs are natively vector format)
+
+```{r stan-import, message=FALSE, warning=FALSE}
+# SRH2D model domain, dissolved from SRH2D mesh faces using QGIS
+stan_domain <- st_read(file.path("/vsizip", here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_Domain.shp.zip")), as_tibble=T)
+
+# SRH2D model domain, manually split into polygons aligning with COMID segments
+stan_comid <- st_read(file.path("/vsizip", here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_Domain_COMID.shp.zip")), as_tibble=T) |>
+  st_zm() |> janitor::clean_names()
+
+# SRH2D mesh vertices, converted from 2DM using QGIS 
+stan_vertices <- st_read(file.path("/vsizip", here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_Vertices.shp.zip")), as_tibble=T) |>
+  mutate(vid = row_number()) |>
+  select(vid)
+
+# Thiessen (aka Voronoi) polygons for mesh vertices, generated using QGIS
+stan_thiessen <- st_read(file.path("/vsizip", here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_Thiessen.shp.zip")), as_tibble=T) |>
+  #mutate(vid = row_number()) # row order doesn't match the SRH2D outputs so need to spatial join
+  st_join(stan_vertices, join=st_nearest_feature) |>
+  select(vid) |>
+  arrange(vid)
+# confirm correct join via:
+# ggplot() + geom_sf(data=stan_thiessen|>filter(vid<50)) + geom_sf(data=stan_vertices|>filter(vid<50)) 
+
+# Bed elevations, extracted from mesh using QGIS "Export time series values from points of a mesh dataset"
+stan_elev <- read_csv(here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_BedElevation.csv.gz")) |>
+  janitor::clean_names() |>
+  mutate(vid = row_number()) |>
+  select(vid, bed_elevation)
+
+# Material Manning coefficients, extracted from SRH2D DAT files for runs
+stan_material_n <-
+  read_delim(here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/manning_coef.txt"), delim="\t", col_names=c("manning_coef")) |>
+  mutate(material_id = row_number())
+
+# Material IDs (Manning's roughness classes) extracted from mesh using QGIS "Export time series values from points of a mesh dataset"
+stan_material <- 
+  read_csv(here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_MaterialID.csv.gz")) |>
+  janitor::clean_names() |>
+  mutate(vid = row_number()) |>
+  select(vid, material_id) |>
+  left_join(stan_material_n)
+
+#stan_thiessen |> left_join(st_drop_geometry(stan_material)) |> st_write("temp/stanislaus_thiessen_material.shp")
+
+# alternate approach with spatial join yields the same result
+# stan_material <- 
+#   read_csv("hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_MaterialID.csv.gz") |>
+#   janitor::clean_names() |>
+#   st_as_sf(coords=c("x","y"), crs=st_crs(stan_thiessen)) |>
+#   st_join(stan_thiessen, join=st_nearest_feature)
+
+# SRH2D results by vertex point, incl. depth, velocity, shear stress, froude
+stan_result_filenames <- c(
+   "500" = here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/500cfs_072313.csv.gz"),
+   "750" = here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/750cfs_072413.csv.gz"),
+  "1000" = here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/1000cfs_072413.csv.gz"),
+  "1250" = here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/1250cfs_090313.csv.gz"),
+  "1500" = here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/1500cfs_071013.csv.gz"),
+  "1750" = here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/1750cfs_090313.csv.gz"),
+  "2250" = here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/2250cfs_121713.csv.gz"),
+  "3000" = here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/3000cfs_061913.csv.gz"),
+  "5000" = here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/5000cfs_071113.csv.gz")
+)
+stan_result_cols <- c("x_m"="n", "y_m"="n", "z_m"="n", 
+                      "wse_m"="n", "wdepth_m"="n", 
+                      "vel_x"="n", "vel_y"="n", "vel_mag"="n", 
+                      "froude"="n", "stress"="n")
+
+stan_result <- 
+  names(stan_result_filenames) |>
+  lapply(function(x) read_csv(stan_result_filenames[x], col_names=names(stan_result_cols), col_types=stan_result_cols, skip=1) |> 
+           mutate(discharge_cfs = as.numeric(x), vid=row_number())) |>
+  bind_rows() |>
+  mutate(across(everything(), function(x) if_else(x==-999,NA,x))) |>
+  mutate(depth_ft = wdepth_m*3.28084, velocity_fps = vel_mag*3.28084) |>
+  select(discharge_cfs, vid, depth_ft, velocity_fps) |>
+  left_join(stan_elev, by=join_by(vid)) |> 
+  left_join(stan_material, by=join_by(vid)) |>
+  mutate(
+    inundated = depth_ft > 0,
+    cover_hs = 1, # cover habitat suitability should be added here
+    hsi_simp = dvhsi(depth_ft, velocity_fps, method=0) * cover_hs,
+    hsi_frac = dvhsi(depth_ft, velocity_fps, method=1) * cover_hs,
+    hsi_sjrm = dvhsi(depth_ft, velocity_fps, method=2) * cover_hs,
+    hsi_shqt = dvhsi(depth_ft, velocity_fps, method=3) * cover_hs
+  ) |>
+  glimpse()
+
+# filter for just the mesh cells that are contiguously inundated - WIP
+if(FALSE){
+  stan_contiguous_inundation <- stan_thiessen |> #head(10000) |>
+    inner_join(stan_result |> filter(inundated) |> select(vid, discharge_cfs)) |>
+    group_by(discharge_cfs) |> 
+    summarize() |>
+    st_union(by_feature = TRUE) |>
+    st_cast("POLYGON") |>
+    mutate(inundation_area = st_area(geometry)) |>
+    group_by(discharge_cfs) |>
+    filter(inundation_area == max(inundation_area))
+  
+  stan_contiguity_filter <- 
+    lapply(names(stan_result_filenames), function(q) {
+      stan_thiessen |>
+      st_filter(stan_contiguous_inundation |> filter(discharge_cfs==q)) |>
+      pull(vid)})
+  names(stan_contiguity_filter) <- names(stan_result_filenames)
+  
+  stan_contiguity <- stan_result |> 
+    mutate(contiguous = map2(vid, discharge_cfs, function(x, y) x %in% stan_contiguity_filter[as.character(y)])) |>
+    select(vid, discharge_cfs, contiguous)
+  
+  # stan_result <- stan_result |>
+  #   group_by(discharge_cfs) |>
+  #   filter(vid %in% stan_contiguity_filter[[as.character(discharge_cfs)]]) |>
+  #   ungroup()
+}
+```
+
+```{r fig.width=15, fig.height=10, dpi=300, eval=FALSE, include=FALSE}
+# confirm that using row order is equivalent to spatial joining
+read_csv(here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_MaterialID.csv.gz")) |>
+  janitor::clean_names() |>
+  mutate(vid = row_number()) |>
+  st_as_sf(coords = c("x","y")) |>
+  ggplot() + geom_sf(aes(color=factor(material_id)), size=1) + theme(legend.position = "top")
+```
+
+```{r fig.width=15, fig.height=10, dpi=300, eval=FALSE, include=FALSE}
+stan_vertices |> left_join(stan_material) |> 
+  ggplot() + geom_sf(aes(color=factor(material_id)), size=1) + theme(legend.position = "top")
+```
+
+```{r stan-import-durhsi}
+stan_valley_lowland <- valley_lowland |> 
+  st_crop(ext(st_transform(stan_domain, st_crs(valley_lowland)))) |>
+  st_transform(st_crs(stan_domain))
+
+# first determine which vids are valley lowland vs foothill
+stan_vid_lowland <- stan_thiessen |>
+  mutate(lowland = st_intersects(geometry, stan_valley_lowland, sparse=F)[,1]) |>
+  select(vid, lowland) |>
+  unnest(lowland) |>
+  st_drop_geometry()
+
+# for each grid cell, get the first flow at which the cell is inundated, and the avg DurHSI for that flow
+stan_durhsi_by_vid <- stan_result |>
+  filter(depth_ft>0) |>
+  group_by(vid) |>
+  summarize(first_inundating_flow = min(discharge_cfs)) |>
+  left_join(durhsi_by_first_inundating_flow |> 
+              filter(river=="Stanislaus River"), 
+            by=join_by(first_inundating_flow == model_q),
+            relationship="many-to-one") |>
+  left_join(stan_vid_lowland, by=join_by(vid)) |>
+  mutate(avg_durhsi = if_else(lowland, avg_durhsi_vl, avg_durhsi_vf)) |>
+  select(vid, first_inundating_flow, avg_durhsi) |>
+  glimpse()
+```
+
+```{r stan-bfc}
+# baseflow channel is eliminated from the in-stream result
+stan_500cfs_channel <- stan_thiessen |>
+  filter(vid %in% (stan_result |> filter(inundated & discharge_cfs==500) |> pull(vid))) |>
+  summarize() |>
+  st_union() |>
+  st_sf() |>
+  mutate(bfc = TRUE)
+
+stan_width_summary <- stan_thiessen |>
+  st_join(stan_comid, join=st_nearest_feature) |>
+  mutate(area_m2 = st_area(geometry) |> units::drop_units()) |>
+  st_drop_geometry() |>
+  left_join(stan_result, by=join_by(vid)) |>
+  filter(inundated) |>
+  left_join(flowline_attributes, by=join_by(comid), relationship="many-to-one") |>
+  mutate(length_m = lengthkm * 1000) |>
+  group_by(discharge_cfs, comid) |>
+  summarize(tot_inund_area_m2 = sum(area_m2),
+            avg_inund_width_m = sum(area_m2) / mean(length_m)) 
+
+stan_width_summary |>
+  ggplot(aes(y = avg_inund_width_m, x = discharge_cfs)) + 
+  geom_point() + geom_smooth(method="lm", fullrange=TRUE) + 
+  scale_x_log10(limits=c(300,NA)) + scale_y_log10() + annotation_logticks()
+
+# power series model parameters such that avg_inund_width_m = coeff * discharge_cfs^power 
+stan_width_summary_log_coef <- 
+  lm(data = stan_width_summary,
+     formula = log(avg_inund_width_m) ~ log(discharge_cfs)) |>
+  summary() |> 
+  coef()
+coeff <- exp(stan_width_summary_log_coef[[1,1]])
+power <- stan_width_summary_log_coef[[2,1]]
+
+# natural flows: observed median dry season baseflow for Stanislaus River USGS gage 11303000 at COMID 2819818 is 306 cfs
+stan_bfc_width <- coeff * 306^power
+
+# lowest stan model flow is 500 
+stan_500cfs_width <- coeff * 500^power
+
+# so need to shrink the delineated baseflow channel by the difference
+# stan_500cfs_width - stan_bfc_width
+stan_baseflow_channel <- stan_500cfs_channel |> 
+  st_buffer(0.5 * (stan_bfc_width - stan_500cfs_width))
+```
+
+Import polygons created for each COMID reach, and calculate suitable area for each
+
+Batch process, saving flow-to-suitable-area (fsa) by comid to file
+
+```{r stan-calc-hsi}
+stan_calc_hsi <- function(g, q){
+  message(q)
+  stan_thiessen |>
+    left_join(filter(stan_result, discharge_cfs==q), by=join_by(vid)) |> 
+    left_join(stan_durhsi_by_vid, by=join_by(vid)) |>
+    mutate(avg_durhsi = coalesce(avg_durhsi, 0)) |>
+    st_intersection(g) |>
+    st_join(stan_baseflow_channel) |>
+    mutate(bfc_mask = if_else(is.na(bfc), 1, 0),
+           area_m2 = if_else(depth_ft>0, units::drop_units(st_area(geometry)), 0),
+           wua_simp = hsi_simp * area_m2 * bfc_mask,
+           wua_frac = hsi_frac * area_m2 * bfc_mask,
+           wua_sjrm = hsi_sjrm * area_m2 * bfc_mask,
+           wua_shqt = hsi_shqt * area_m2 * bfc_mask,
+           wua_simp_dur = hsi_simp * area_m2 * bfc_mask * avg_durhsi,
+           wua_frac_dur = hsi_frac * area_m2 * bfc_mask * avg_durhsi,
+           wua_sjrm_dur = hsi_sjrm * area_m2 * bfc_mask * avg_durhsi,
+           wua_shqt_dur = hsi_shqt * area_m2 * bfc_mask * avg_durhsi) |>
+    summarize(area_m2 = sum(area_m2),
+              wua_simp = sum(wua_simp),
+              wua_frac = sum(wua_frac),
+              wua_sjrm = sum(wua_sjrm),
+              wua_shqt = sum(wua_shqt),
+              wua_simp_dur = sum(wua_simp_dur),
+              wua_frac_dur = sum(wua_frac_dur),
+              wua_sjrm_dur = sum(wua_sjrm_dur),
+              wua_shqt_dur = sum(wua_shqt_dur)) |>
+    mutate(pcthab_simp = wua_simp / area_m2,
+           pcthab_frac = wua_frac / area_m2,
+           pcthab_sjrm = wua_sjrm / area_m2,
+           pcthab_shqt = wua_shqt / area_m2,
+           pcthab_simp_dur = wua_simp / area_m2,
+           pcthab_frac_dur = wua_frac / area_m2,
+           pcthab_sjrm_dur = wua_sjrm / area_m2,
+           pcthab_shqt_dur = wua_shqt / area_m2) |>
+    st_drop_geometry()
+}
+
+if(!file.exists(here::here("data-raw", "results", "fsa_stanislaus.Rds"))) {
+  tic("calculate stanislaus fsa")
+  fsa_stanislaus <- 
+    stan_comid |>
+    expand_grid(flow_cfs = as.numeric(names(stan_result_filenames))) |>
+    mutate(result = future_map2(geometry, flow_cfs, function(g, q) stan_calc_hsi(st_sfc(g, crs=st_crs(stan_comid)), q))) |>
+    unnest_wider(result) |>
+    st_as_sf() |>
+    glimpse()
+  toc()
+  fsa_stanislaus |> saveRDS(here::here("data-raw", "results", "fsa_stanislaus.Rds"))
+} else {
+  fsa_stanislaus <- readRDS(here::here("data-raw", "results", "fsa_stanislaus.Rds")) |> glimpse()
+}
+
+#stan_hsi |> ggplot() + geom_sf(aes(fill=pcthab_simp), color=NA) + facet_wrap(~discharge_cfs)
+#stan_calc_hsi(g=stan_comid$geometry[54],q=5000)
+```
+
+```{r stan-plot-hsi, fig.width=6.5, fig.height=4, dpi=300}
+fsa_stanislaus |> ggplot() + geom_line(aes(x = flow_cfs, y = pcthab_frac, color=factor(comid))) 
+```
+
+## Deer Creek
+
+Import 2018 HEC-RAS 2D model outputs for Deer Creek
+
+```{r deer-import-lc}
+# get land cover data
+dir.create(here::here("data-raw", "temp", "deer_land_cover"), recursive = TRUE)
+drive_file_by_id("1OMJzuVoFdt1hygfMVPWrQBGr2BIuxSZj") |>
+  archive::archive_extract(dir="temp/deer_land_cover")
+deer_lcc <- terra::rast(here::here("data-raw", "temp", "deer_land_cover", "existing_landcover_20181109.tif"))
+terra::cats(deer_lcc)[[1]] |> glimpse()
+ggplot() + tidyterra::geom_spatraster(data=deer_lcc)
+
+# merge in other attributes
+deer_lcc_table <- 
+  read_csv(here::here("data-raw", "source", "hydraulic_model_data/deercreek_hecras2d_2018/existing_landcover_classes.csv")) |>
+  janitor::clean_names() |>
+  select(id, cover_type, cover_hsi) 
+deer_lcc <- deer_lcc |> 
+  terra::addCats(value=deer_lcc_table, merge=TRUE, layer=1)
+terra::activeCat(deer_lcc, layer=1) <- "cover_hsi"
+ggplot() + tidyterra::geom_spatraster(data=deer_lcc)
+```
+
+```{r deer-import-flow}
+dir.create(here::here("data-raw", "temp", "deer_model_output"), recursive = TRUE)
+# "temp/deer_model_output/Existing_Habitat.tar.gz"
+drive_file_by_id("1rmMw6PXJGS0-ui52eaotABCSlJsZOzvr", dir=here::here("data-raw", "temp", "deer_model_output")) |>
+  archive::archive_extract(dir=here::here("data-raw", "temp", "deer_model_output"))
+
+filenames <- tribble(~flow_cfs, ~timestep,
+        100, "15NOV2018 06 00 00",
+        250, "15NOV2018 16 00 00",
+        300, "16NOV2018 02 00 00",
+        400, "16NOV2018 12 00 00",
+        500, "16NOV2018 22 00 00",
+        600, "17NOV2018 08 00 00",
+       1000, "17NOV2018 18 00 00",
+       3000, "18NOV2018 04 00 00",
+       5000, "18NOV2018 14 00 00",
+       6000, "19NOV2018 00 00 00",
+       7000, "19NOV2018 10 00 00",
+       9000, "19NOV2018 20 00 00",
+      10000, "20NOV2018 06 00 00",
+      11000, "20NOV2018 16 00 00",
+      12000, "21NOV2018 02 00 00",
+      13000, "21NOV2018 12 00 00",
+      14000, "21NOV2018 22 00 00",
+      15000, "22NOV2018 08 00 00") |>
+  mutate(depth =    here::here("data-raw", paste0("temp/deer_model_output/Depth (",timestep,").vrt")),
+         velocity = here::here("data-raw", paste0("temp/deer_model_output/Velocity (",timestep,").vrt")))
+```
+
+```{r deer-duration}
+depth_rasters <- filenames |> 
+  select(flow_cfs, depth) |>
+  deframe()
+
+first_inundating_flow <- 
+  names(depth_rasters) |>
+  lapply(function(q) (terra::ifel(terra::rast(depth_rasters[[q]]) > 0, 1, NA) * as.numeric(q))) |>
+  terra::rast() |>
+  terra::app(fun = "min", na.rm=TRUE) 
+
+first_inundating_flow |> terra::set.names("flow_cfs")
+
+first_inundating_flow |> plot(main="First Inundating Flow (cfs)", col=grDevices::terrain.colors(50))
+```
+
+```{r deer-duration-calc}
+deer_dhsis_vl <-
+  durhsi_by_first_inundating_flow |> filter(river=="Deer Creek") |>
+  select(model_q, avg_durhsi_vl) |>
+  deframe()
+
+deer_dhsis_vf <-
+  durhsi_by_first_inundating_flow |> filter(river=="Deer Creek") |>
+  select(model_q, avg_durhsi_vf) |>
+  deframe()
+
+deer_avg_days_inundated <-
+  durhsi_by_first_inundating_flow |> filter(river=="Deer Creek") |>
+  select(model_q, avg_days_inundated) |>
+  deframe()
+
+deer_dhsi_components <- terra::rast(list(
+  "vf" = first_inundating_flow |> terra::app(function(x) deer_dhsis_vf[as.character(x)]),
+  "vl" = first_inundating_flow |> terra::app(function(x) deer_dhsis_vl[as.character(x)]),
+  "di" = first_inundating_flow |> terra::app(function(x) deer_avg_days_inundated[as.character(x)])))
+
+terra::rast(list(deer_dhsi_components$vf, deer_dhsi_components$vl)) |> plot(range=c(0,1))
+
+deer_dhsi_components$di |> plot(main="Average Length of Continuous Inundation (days)")
+
+cls_vl <- valley_lowland |> 
+  st_transform(st_crs(first_inundating_flow)) |> 
+  st_crop(st_bbox(first_inundating_flow)) |> 
+  terra::rasterize(first_inundating_flow, values=1, background=0)
+
+deer_dhsi <- terra::ifel(cls_vl==1, deer_dhsi_components$vl, deer_dhsi_components$vf)
+
+deer_dhsi |> plot(main="Duration HSI Factor")
+
+dhsi_packed <- terra::wrap(deer_dhsi)
+```
+
+```{r deer-baseflow}
+# using 100 cfs result as baseflow channel: 
+# Natural Flows Database obserfved median dry season baseflow for USGS gage 11383500 at COMID 8020924 is 95 cfs
+
+deer_min_extent <- terra::ifel(terra::rast(depth_rasters[["100"]]) > 0, 1, NA)
+
+terra::activeCat(deer_lcc, layer=1) <- "Value"
+deer_lcc_channel <- 
+  terra::ifel(deer_lcc %in% c(21, 27, 28, 29, 30, 31), 1, NA) |>
+  terra::crop(deer_min_extent, extend=T)#, ext=T)
+deer_lcc_channel |> set.ext(ext(deer_min_extent))
+deer_lcc_channel |> set.crs(crs(deer_min_extent))
+
+deer_bfc <- deer_min_extent * deer_lcc_channel
+deer_bfc_mask <- terra::ifel(is.na(deer_bfc), 1, NA)
+deer_bfc_mask_packed <- terra::wrap(deer_bfc_mask)
+
+#drive_file_by_id("1-mhKVsC6cwPZRSg9G_zszVxsRLZa4Cbt") |>
+# archive::archive_extract(dir="temp") 
+#deer_bfc <- terra::rast("temp/deer_ck_bfc.tif") |> terra::crop(terra::rast(depth_rasters[["100"]]), extend=T, ext=T)
+#terra::extend(deer_bfc)
+
+deer_bfc |> plot()
+```
+
+```{r deer-calc-hsi}
+dep_r <- terra::rast(filenames$depth)
+terra::set.names(dep_r, filenames$flow_cfs)
+dep_r_packed <- terra::wrap(dep_r)
+
+vel_r <- terra::rast(filenames$velocity)
+terra::set.names(vel_r, filenames$flow_cfs)
+vel_r_packed <- terra::wrap(vel_r)
+
+cell_area_ft2 <- dep_r |> terra::res() |> prod()
+
+deer_comids <- 
+  st_read(file.path("/vsizip/", here::here("data-raw", "hydraulic_model_data/deercreek_hecras2d_2018/model_perim_split_comid_generalized.shp.zip")), as_tibble=T) |>
+  janitor::clean_names() |> filter(comid>0)
+
+raster_hsi <- function(g, q, crs){
+  comid <- terra::vect(st_sfc(g, crs=crs))
+  dep_r_unpacked <- terra::unwrap(dep_r_packed)
+  vel_r_unpacked <- terra::unwrap(vel_r_packed)  
+  d <- dep_r_unpacked[[as.character(q)]] |> terra::crop(comid) 
+  v <- vel_r_unpacked[[as.character(q)]] |> terra::crop(comid) 
+  bfc_mask <- terra::unwrap(deer_bfc_mask_packed) |> terra::crop(comid)
+  # total inundated area
+  ext <- (d > 0)
+  area_tot <- terra::global(ext, "sum", na.rm=TRUE)[[1]] * cell_area_ft2
+  # LYR version
+  hsi <- (d>0.5 & d<=5.2) & (v>0 & v<=4.0) * bfc_mask
+  area_wua <- terra::global(hsi, "sum", na.rm=TRUE)[[1]] * cell_area_ft2
+  area_pct <- area_wua / area_tot
+  # HQT version
+  hsi_hqt <- (d>1 & d<=3.28) & (v>0 & v<=1.5) * bfc_mask
+  area_wua_hqt <- terra::global(hsi_hqt, "sum", na.rm=TRUE)[[1]] * cell_area_ft2
+  area_pct_hqt <- area_wua_hqt / area_tot
+  # versions adding the duration HSI
+  dhsi <- terra::unwrap(dhsi_packed) |> terra::crop(comid)
+  hsi_d <- hsi * dhsi
+  hsi_hqt_d <- hsi_hqt * dhsi
+  area_wua_d <- terra::global(hsi_d, "sum", na.rm=TRUE)[[1]] * cell_area_ft2
+  area_pct_d <- area_wua_d / area_tot
+  area_wua_hqt_d <- terra::global(hsi_hqt_d, "sum", na.rm=TRUE)[[1]] * cell_area_ft2
+  area_pct_hqt_d <- area_wua_hqt_d / area_tot
+  return(list("area_tot"=area_tot, 
+              "area_wua"=area_wua, 
+              "area_pct"=area_pct,
+              "area_wua_hqt"=area_wua_hqt, 
+              "area_pct_hqt"=area_pct_hqt,
+              "area_wua_d"=area_wua_d, 
+              "area_pct_d"=area_pct_d,
+              "area_wua_hqt_d"=area_wua_hqt_d, 
+              "area_pct_hqt_d"=area_pct_hqt_d))
+}
+
+run_for_flow <- function(q){
+  message(paste0("calculating HSI for q=",q))
+  deer_comids |> 
+    mutate(result = map(geometry, function(g) raster_hsi(g, q, crs="EPSG:6416"))) |>
+    unnest_wider(result) |> 
+    st_drop_geometry() |>
+    mutate(flow_cfs=q)
+}
+
+options(future.globals.maxSize = 8000 * 1024^2)
+
+if(!file.exists(here::here("data-raw", "results", "fsa_deercreek.Rds"))) {
+  tic("calculate deer fsa")
+  deer_hsi_result <- bind_rows(future_lapply(filenames$flow_cfs, run_for_flow, future.seed=T))
+  toc()
+  deer_hsi_result |> saveRDS(here::here("data-raw", "results", "fsa_deercreek.Rds"))
+} else {
+  deer_hsi_result <- readRDS(here::here("data-raw", "results", "fsa_deercreek.Rds"))
+}
+
+deer_hsi_result |> glimpse()
+```
+
+```{r deer-plot-hsi, fig.width=6.5, fig.height=4, dpi=300}
+# examples
+deer_hsi_result |> ggplot() + geom_line(aes(x = flow_cfs, y = area_pct, color=factor(comid)))
+```
+
+## Yuba River
+
+Import SRH2D model data for Yuba (adapted version of Stanislaus methods)
+
+```{r yuba-import, message=FALSE, warning=FALSE}
+
+# IMPORT DATA
+
+flows <- c(300, 350, 400, 450, 530, 600, 622, 700, 800, 880, 930,
+           1000, 1300, 1500, 1700, 2000, 2500, 3000, 4000, 5000, 7500, 
+           10000, 15000, 21100, 30000, 42200, 84400, 110400)
+
+# extract CSV results
+dir.create("temp", recursive = TRUE)
+yuba_csv_results <- drive_file_by_id("155QA16y1PP5wFAc21Uvwb_gj2tNqdYDG") 
+
+if(!file.exists(here::here("data-raw", "temp", "lyr_srh2d_csv.tar"))){
+  yuba_csv_results |> archive::archive_extract(dir=here::here("data-raw", "temp"), files="lyr_srh2d_csv.tar")
+  yuba_csv_results |> archive::archive_extract(dir=here::here("data-raw", "temp"))
+}
+
+yuba_gdrive_ids <- tribble(
+  ~reach, ~domain, ~vertices, ~thiessen,
+  "EDR", "17KmDTcYfTDJTF-6WcbhQd_5WUbqrVs3k", "1t_oT37auM_25SnU3TLrXa_xCyoV9H9qt", "1s-FhTTDlclwcuu-H-9wIwwC1K7lEijXI", 
+  "TBR", "1IArTq6Yh_R44csnUYEayNtbRFYr3xPsl", "1tHAvrhIaw_Gz47K5pL0SpeniEMYnczln", "1E7ucN5WOyynzNjeYTiPiS_ixbaJXA6cW",
+  "HR" , "1HXYUeop_otp0H06x69NPrE02SNradmEC", "1cByc4uVCf46lwVnvfECmKi3IOsR3T2sU", "1ca5tpyAAe2DzeiVStl4Cl8qEvwI7Jaxx",
+  "DGR", "17ybIFHUBlKmMuQkXVIrQOOPPnoDWQkRe", "1aSsCAHVwRyquDH_-tA89-7qObJ4eqc-v", "1aCvZAd7YqU5kzQfshmxIBNECWQqRJKoC",
+  "FR" , "1f0N27qss7FsXHfml8U_B-FtoVApbaVKV", "1teWo-kp-ujtKtHfvoLfZZCKcGsh0twiD", "1lkGlWPqBDHHP8yN8U-lkxKBnkRKmfVgS")
+
+# FUNCTIONS FOR IMPORTING ALL REACHES, ALL FLOWS
+
+# r <- "EDR" # FOR TESTING PURPOSES
+# q <- 700  # FOR TESTING PURPOSES
+
+result_cols <- c("vid"="n", 
+                 "x_ft"="n", "y_ft"="n", "z_ft"="n", 
+                 "wse_ft"="n", "wdepth_ft"="n", 
+                 "vel_x"="n", "vel_y"="n", "vel_mag"="n", 
+                 "froude"="n", "stress"="n")
+
+get_reach_flow_result <- function(r, q) {
+  message(q)
+  # returns a data frame of results for a particular reach and flow
+  #yuba_csv_results |>
+  #  archive::archive_read(paste0("temp/", r, "_", q, "_SMS.csv"))
+  filename <- paste0("temp/", r, "_", q, "_SMS.csv") 
+  if(file.exists(filename)) {
+    out <- filename |>
+    read_csv(col_names=names(result_cols), col_types=result_cols, skip=1) |>
+    mutate(discharge_cfs = q, 
+           vid=row_number())
+    return(out)
+  } else {
+    return(NULL)
+  }
+}
+
+get_reach_result <- function(r) {
+  message(r)
+  # returns a merged data frame of results for all flows of a particular reach
+  flows |> 
+    future_lapply(function(q) get_reach_flow_result(r, q)) |> 
+    bind_rows() |>
+    transmute(discharge_cfs, reach=r, vid, depth_ft=wdepth_ft, velocity_fps=vel_mag) 
+}
+
+# COMBINE RESULT
+
+if(!file.exists(here::here("data-raw", "temp", "hsi_yuba.Rds"))) {
+
+  tic("calculate yuba hsi")
+yuba_result <- 
+  yuba_gdrive_ids$reach |>
+  lapply(get_reach_result) |> # don't use future_lapply here because get_reach_result is already parallelized
+  bind_rows() |>
+  mutate(across(everything(), function(x) if_else(x==-999,NA,x))) |>
+  mutate(
+    cover_hs = 1, # cover habitat suitability should be added here
+    inundated = depth_ft > 0,
+    hsi_simp = dvhsi(depth_ft, velocity_fps, method=0) * cover_hs,
+    hsi_frac = dvhsi(depth_ft, velocity_fps, method=1) * cover_hs,
+    hsi_sjrm = dvhsi(depth_ft, velocity_fps, method=2) * cover_hs,
+    hsi_shqt = dvhsi(depth_ft, velocity_fps, method=3) * cover_hs) |>
+  glimpse()
+  toc()
+
+  yuba_result |> saveRDS(here::here("data-raw", "temp", "hsi_yuba.Rds"))
+  
+} else {
+  
+  yuba_result <- readRDS(here::here("data-raw", "temp", "hsi_yuba.Rds")) |> glimpse()
+  
+}
+```
+
+```{r yuba-import-thiessen}
+yuba_domain <- bind_rows(lapply(yuba_gdrive_ids$domain, 
+                                function(x) st_read(drive_file_by_id(x))))
+
+yuba_vertices_files <- yuba_gdrive_ids$vertices |>
+  setNames(yuba_gdrive_ids$reach)
+
+yuba_thiessen_files <- yuba_gdrive_ids$thiessen |>
+  setNames(yuba_gdrive_ids$reach)
+
+yuba_get_thiessen <- function(reach) {
+  vertices <- yuba_vertices_files[[reach]] |>
+    drive_file_by_id() |> 
+    st_read(as_tibble=T) |>
+    mutate(vid=row_number()) |> 
+    select(vid)
+  message()
+  
+  thiessen <- yuba_thiessen_files[[reach]] |>
+    drive_file_by_id() |> 
+    st_read(as_tibble=T) |>
+    st_join(vertices, join=st_nearest_feature, left=FALSE) |>
+    select(vid) |>
+    group_by(vid) |> 
+    arrange(desc(st_area(geometry))) |> 
+    filter(row_number()==1) |>
+    ungroup() |>
+    #summarize() |>
+    arrange(vid)
+  
+  return(thiessen)
+}
+
+yuba_thiessen <- yuba_gdrive_ids$reach |>
+  setNames(yuba_gdrive_ids$reach) |>
+  future_lapply(yuba_get_thiessen, future.seed=TRUE) |>
+  bind_rows(.id="reach")
+
+```
+
+```{r yuba-import-durhsi}
+yuba_valley_lowland <- valley_lowland |> 
+  st_crop(ext(st_transform(yuba_domain, st_crs(valley_lowland)))) |>
+  st_transform(st_crs(yuba_domain))
+
+# first determine which vids are valley lowland vs foothill
+yuba_vid_lowland <- yuba_thiessen |> 
+  mutate(lowland = st_intersects(geometry, yuba_valley_lowland, sparse=F)[,1]) |>
+  select(reach, vid, lowland) |>
+  unnest(lowland) |>
+  st_drop_geometry()
+  
+# for each grid cell, what is the first flow at which the cell is inundated? 
+yuba_durhsi_by_vid <- yuba_result |>
+  filter(depth_ft>0) |>
+  group_by(reach, vid) |>
+  summarize(first_inundating_flow = min(discharge_cfs)) |>
+  left_join(durhsi_by_first_inundating_flow |> 
+              filter(river=="Lower Yuba River"), 
+            by=join_by(first_inundating_flow == model_q),
+            relationship="many-to-one") |> # issue: yuba_thiessen reach/vid combos not unique, causing join to fail
+  left_join(yuba_vid_lowland, by=join_by(reach, vid), relationship="one-to-one") |>
+  mutate(avg_durhsi = if_else(lowland, avg_durhsi_vl, avg_durhsi_vf)) |>
+  select(reach, vid, first_inundating_flow, avg_durhsi)
+```
+
+```{r yuba-baseflow-channel}
+# Natural Flows Database: median dry-season baseflow for USGS gage 11421000 at COMID 7981844 is 636 cfs
+# However, reaches that are all or partly above Deer Creek should use lower, est. 500 cfs
+# use 622 cfs result as baseflow channel for DGR and FR
+# use 450 cfs result as baseflow channel for HR and TBR
+# use 700 cfs result for EDR reach since that's the lowest available
+# combined and selected for only contiguous areas in ArcGIS
+
+yuba_bfc <- drive_file_by_id("1vX1NHgNLLt3BSMZX-dlRsxpLq7VoYqOP", vsizip=T) |>
+  st_read(as_tibble=T) |>
+  mutate(bfc = TRUE)
+
+yuba_bfc |> ggplot() + geom_sf(aes(color=bfc))
+```
+
+```{r yuba-calc-hsi}
+# IMPORT COMID REACH POLYGON DELINEATIONS
+
+# allow sufficient sized files to be passed through parallel nodes
+message(object.size(yuba_result))
+options(future.globals.maxSize = 8000 * 1024^2)
+
+yuba_comid <- drive_file_by_id("1-xSi142jtNZKQS9-VgXZT1yzTfH1KjyR", vsizip=T) |>
+  st_read(as_tibble=T) |> 
+  st_zm() |> 
+  janitor::clean_names()
+
+yuba_calc_comid_hsi <- function(g, q, r){
+  message(q)
+  yuba_thiessen |>
+    left_join(filter(yuba_result, discharge_cfs==q & reach==r), by=join_by(reach, vid)) |> 
+    left_join(filter(yuba_durhsi_by_vid, reach==r), by=join_by(reach, vid)) |>
+    mutate(avg_durhsi = coalesce(avg_durhsi, 0)) |>
+    st_intersection(g) |>
+    st_join(yuba_bfc) |>
+    mutate(bfc_mask = if_else(is.na(bfc), 1, 0),
+           area_ft2 = if_else(depth_ft>0, units::drop_units(st_area(geometry)), 0),
+           wua_simp = hsi_simp * area_ft2 * bfc_mask,
+           wua_frac = hsi_frac * area_ft2 * bfc_mask,
+           wua_sjrm = hsi_sjrm * area_ft2 * bfc_mask,
+           wua_shqt = hsi_shqt * area_ft2 * bfc_mask,
+           wua_simp_dur = hsi_simp * area_ft2 * bfc_mask * avg_durhsi,
+           wua_frac_dur = hsi_frac * area_ft2 * bfc_mask * avg_durhsi,
+           wua_sjrm_dur = hsi_sjrm * area_ft2 * bfc_mask * avg_durhsi,
+           wua_shqt_dur = hsi_shqt * area_ft2 * bfc_mask * avg_durhsi) |>
+    summarize(area_ft2 = sum(area_ft2),
+              wua_simp = sum(wua_simp),
+              wua_frac = sum(wua_frac),
+              wua_sjrm = sum(wua_sjrm),
+              wua_shqt = sum(wua_shqt),
+              wua_simp_dur = sum(wua_simp_dur),
+              wua_frac_dur = sum(wua_frac_dur),
+              wua_sjrm_dur = sum(wua_sjrm_dur),
+              wua_shqt_dur = sum(wua_shqt_dur)) |>
+    mutate(pcthab_simp = wua_simp / area_ft2,
+           pcthab_frac = wua_frac / area_ft2,
+           pcthab_sjrm = wua_sjrm / area_ft2,
+           pcthab_shqt = wua_shqt / area_ft2,
+           pcthab_simp_dur = wua_simp_dur / area_ft2,
+           pcthab_frac_dur = wua_frac_dur / area_ft2,
+           pcthab_sjrm_dur = wua_sjrm_dur / area_ft2,
+           pcthab_shqt_dur = wua_shqt_dur / area_ft2) |>
+    st_drop_geometry()
+}
+
+# r_q_combos <- yuba_result |> rename(flow_cfs = discharge_cfs) |> group_by(reach, flow_cfs) |> summarize() |> ungroup()
+
+# yuba_calc_reach_hsis <- function(r) {
+#   message(r)
+#   ids <- yuba_gdrive_ids |> filter(reach==r)
+#   
+#   # vertices
+#   v <- drive_file_by_id(ids[["vertices"]], vsizip=T) |>
+#     st_read(as_tibble=T) |> 
+#     mutate(vid=row_number()) |> 
+#     select(vid)
+#   
+#   # thiessen
+#   t <- drive_file_by_id(ids[["thiessen"]], vsizip=T) |>
+#     st_read(as_tibble=T) |> 
+#     st_join(v, join=st_nearest_feature) |>
+#     select(vid) |>
+#     arrange(vid)
+#   
+#     yuba_comid |>
+#     filter(reach_lyr==r) |>
+#     #expand_grid(flow_cfs = flows) |>
+#     inner_join(r_q_combos, by=join_by(reach_lyr==reach), relationship="many-to-many") |>
+#     mutate(result = future_map2(geometry, flow_cfs, function(g, q) yuba_calc_comid_hsi(st_sfc(g, crs=st_crs(yuba_comid)), q, t))) |>
+#     unnest_wider(result) |>
+#     st_as_sf() |>
+#     glimpse()
+# 
+# }
+
+if(!file.exists(here::here("data-raw", "temp", "fsa_yuba.Rds"))) {
+  
+  tic("calculate yuba fsa")
+  #fsa_yuba <-
+  #  yuba_gdrive_ids$reach |>
+  #  lapply(yuba_calc_reach_hsis) |> # don't use future_lapply here because yuba_calc_reach_hsis is already parallelized
+  #  bind_rows()
+  
+  fsa_yuba <- yuba_comid |>
+    rename(reach = reach_lyr) |>
+    #filter(reach_lyr==r) |>
+    #inner_join(r_q_combos, by=join_by(reach_lyr==reach), relationship="many-to-many") |>
+    expand_grid(flow_cfs = flows) |>
+    mutate(result = future_pmap(list(geometry, flow_cfs, reach), 
+                                function(g, q, r) yuba_calc_comid_hsi(st_sfc(g, crs=st_crs(yuba_comid)), q, r))) |>
+    unnest_wider(result) |>
+    st_as_sf() |>
+    glimpse()
+  
+  toc()
+    
+  fsa_yuba |> saveRDS(here::here("data-raw", "temp", "fsa_yuba.Rds"))
+  
+} else {
+  
+  fsa_yuba <- readRDS(here::here("data-raw", "temp", "fsa_yuba.Rds")) |> glimpse()
+  
+}
+
+yuba_calc_reach_hsis("HR")
+```
+
+```{r yuba-plot-hsi, fig.width=6.5, fig.height=4, dpi=300}
+fsa_yuba |> ggplot() + geom_line(aes(x = flow_cfs, y = pcthab_frac, color=factor(comid))) + theme(legend.position="none")
+```
+
+## Combined flow-to-suitable-area training set
+
+Combining the results of the above two imports into a consistent dataset. `fsa_combined.Rds` should be joined by `comid` with the flowlines and the predictor variables to use for modeling. 
+
+For now, just bringing over the simple threshold-based HSI calculation that uses depth and velocity thresholds (`(d>0.5 & d<=5.2) & (v>0.1 & v<=4.0)`). To be improved. 
+
+```{r}
+fsa_combined <- 
+  bind_rows(
+    deer_hsi_result |> 
+      st_drop_geometry() |>
+      transmute(dataset = "Deer Creek",
+                comid, 
+                flow_cfs, 
+                area_tot_ft2 = area_tot, 
+                area_wua_ft2 = area_wua,
+                hsi_frac = area_pct,
+                area_wua_ft2_hqt = area_wua_hqt,
+                hsi_frac_hqt = area_pct_hqt,
+                # duration versions
+                area_dwua_ft2 = area_wua_d,
+                dhsi_frac = area_pct_d,
+                area_dwua_ft2_hqt = area_wua_hqt_d,
+                dhsi_frac_hqt = area_pct_hqt_d),
+    fsa_stanislaus |> 
+      st_drop_geometry() |>
+      transmute(dataset = "Stanislaus River",
+                comid,
+                flow_cfs,
+                area_tot_ft2 = area_m2 * 3.281^2,
+                area_wua_ft2 = wua_simp * 3.281^2,
+                hsi_frac = pcthab_simp,
+                area_wua_ft2_hqt = wua_shqt * 3.281^2,
+                hsi_frac_hqt = pcthab_shqt,
+                # duration versions
+                area_dwua_ft2 = wua_simp_dur * 3.281^2,
+                dhsi_frac = pcthab_simp_dur,
+                area_dwua_ft2_hqt = wua_shqt_dur * 3.281^2,
+                dhsi_frac_hqt = pcthab_shqt_dur),
+    fsa_yuba |> 
+      st_drop_geometry() |>
+      transmute(dataset = "Lower Yuba River",
+                comid,
+                flow_cfs,
+                area_tot_ft2 = area_ft2,
+                area_wua_ft2 = wua_simp,
+                hsi_frac = pcthab_simp,
+                area_wua_ft2_hqt = wua_shqt,
+                hsi_frac_hqt = pcthab_shqt,
+                # duration versions
+                area_dwua_ft2 = wua_simp_dur,
+                dhsi_frac = pcthab_simp_dur,
+                area_dwua_ft2_hqt = wua_shqt_dur,
+                dhsi_frac_hqt = pcthab_shqt_dur)
+          ) |> 
+  arrange(dataset, comid, flow_cfs) |>
+  glimpse()
+
+# Optionally, swap out the original HSI ranges with the version using the HQT depth/velocity cutoffs
+# (TRUE) to use HQT depth/velocity ranges
+if(TRUE){
+  fsa_combined <- 
+    fsa_combined |>
+    transmute(dataset, comid, flow_cfs, area_tot_ft2,
+              area_wua_ft2 = area_wua_ft2_hqt,
+              hsi_frac = hsi_frac_hqt)
+}
+
+fsa_combined |> saveRDS(here::here("data-raw", "results", "fsa_combined.Rds"))
+
+wua_hydraulic <- fsa_combined
+wua_hydraulic |> usethis::use_data(overwrite = TRUE)
+
+```
+
+Preview training set
+
+```{r}
+fsa_combined |> 
+  left_join(flowline_attributes, by=join_by(comid)) |>
+  mutate(flow_norm_cfs = flow_cfs / erom_q_ma_cfs,
+         reach_length_ft = reach_length_km * 3280.84,
+         inundated_ft2_per_lf = area_tot_ft2 / reach_length_ft,
+         wua_ft2_per_lf = area_wua_ft2 / reach_length_ft) |>
+  ggplot() + 
+  geom_line(aes(x = flow_cfs, y = inundated_ft2_per_lf, group=comid), alpha=0.5) + 
+  facet_wrap(~dataset, ncol=1, scales="free_y") + 
+  scale_x_continuous(labels=scales::label_comma(), limits=c(0,15000)) + 
+  scale_y_continuous(labels=scales::label_comma()) + theme(panel.grid.minor = element_blank())
+```

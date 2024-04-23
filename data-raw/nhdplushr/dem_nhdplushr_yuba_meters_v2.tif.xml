@@ -1,2 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<metadata xml:lang="en"><Esri><CreaDate>20240108</CreaDate><CreaTime>11475300</CreaTime><ArcGISFormat>1.0</ArcGISFormat><SyncOnce>TRUE</SyncOnce><DataProperties><lineage><Process ToolSource="c:\program files\arcgis\pro\Resources\ArcToolbox\toolboxes\Image Analyst Tools.tbx\RasterCalculator" Date="20240108" Time="114753">RasterCalculator " "elev_cm.tif"/100" X:\GIS\Projects\095-01_SWC_Central_Valley_Salmon_Habitat_GIS\Geodata\Raster\DEM\Yuba\dem_nhdplushr_yuba_meters_v2.tif</Process></lineage></DataProperties></Esri></metadata>

@@ -48,9 +48,9 @@ The aquatic biodiversity summary combines the three measures of biodiversity dev
 ```{r aqu-spec, message=FALSE, warning=FALSE}
 
 # CDFW:
-drive_file_by_id("13S1YWYP_t7pb2SUmEWEprJA-tJ-8FM-V") 
 
-aquatic_cdfw_sf <- read_sf(here::here("data-raw", "temp", "Aquatic_Species_List_-_ACE_[ds2740].geojson")) |> 
+aquatic_cdfw_sf <- drive_file_by_id("13S1YWYP_t7pb2SUmEWEprJA-tJ-8FM-V") |>
+  read_sf(as_tibble = T) |> 
   janitor::clean_names() |> 
   st_transform(project_crs) 
 
@@ -83,7 +83,8 @@ richness <- read_csv(here::here("data-raw", "source", "ca_freshwater_species", "
   rename(huc_12 = au_id) |> 
   mutate(huc_12_aq = as.character(huc_12)) |> glimpse()
 
-analysis_units <- read_sf(here::here("data-raw", "source", "ca_freshwater_species", "AnalysisUnits.shp")) |> 
+analysis_units <- drive_file_by_id("1g9-3Dp0VonfwSRUYKkfiLx3_kt6FAdk9", vsizip=T) |>
+  read_sf(as_tibble = T) |> 
   janitor::clean_names() |> 
   rename(huc_12_aq = au_id) |> 
   mutate(huc_12_aq = as.character(huc_12_aq)) |> 

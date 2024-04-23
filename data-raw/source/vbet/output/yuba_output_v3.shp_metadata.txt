@@ -1,0 +1,23 @@
+network: data-raw/flowlines_with_cumarea_clip2_project.shp 
+dem: data-raw/dem_nhdplushr_yuba_meters_v2.tif 
+output: output/yuba_output_v3.shp 
+scratch workspace: scratch 
+large drainage area threshold: 250 
+medium drainage area threshold: 25 
+large slope threshold: 3 
+medium slope threshold: 4 
+small slope threshold: 5 
+large buffer: 1000 
+medium buffer: 1000 
+small buffer: 1000 
+minimum buffer: 10 
+drainage area field: tt_d_s_ 
+large depth: 3 
+medium depth: 2 
+small depth: 1.5 
+
+VBET-2 version 2.1.2
+
+Started: 08/01/2024 12:40:21 
+
+Finished: 08/01/2024 12:42:43 

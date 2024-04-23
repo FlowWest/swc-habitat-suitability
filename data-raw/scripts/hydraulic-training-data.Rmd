@@ -134,20 +134,25 @@ dvhsi <- function(d, v, method=0) {
 Import SRH2D model data for Stanislaus (unlike HEC-RAS, the SRH2D outputs are natively vector format)
 
 ```{r stan-import, message=FALSE, warning=FALSE}
+dir.create(here::here("data-raw", "temp", "stanislaus_training_data"), recursive = TRUE)
+drive_file_by_id("1J7Iw-PHdGuy5o-VdilwZzkv02Qn7ajks", 
+                 dir = here::here("data-raw", "temp", "stanislaus_training_data")) |>
+  zip::unzip(overwrite = T, exdir = here::here("data-raw", "temp", "stanislaus_training_data"))
+
 # SRH2D model domain, dissolved from SRH2D mesh faces using QGIS
-stan_domain <- st_read(file.path("/vsizip", here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_Domain.shp.zip")), as_tibble=T)
+stan_domain <- st_read(file.path("/vsizip", here::here("data-raw", "temp", "stanislaus_training_data", "StanMesh072313_Domain.shp.zip")), as_tibble=T)
 
 # SRH2D model domain, manually split into polygons aligning with COMID segments
-stan_comid <- st_read(file.path("/vsizip", here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_Domain_COMID.shp.zip")), as_tibble=T) |>
+stan_comid <- st_read(file.path("/vsizip", here::here("data-raw", "temp", "stanislaus_training_data", "StanMesh072313_Domain_COMID.shp.zip")), as_tibble=T) |>
   st_zm() |> janitor::clean_names()
 
 # SRH2D mesh vertices, converted from 2DM using QGIS 
-stan_vertices <- st_read(file.path("/vsizip", here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_Vertices.shp.zip")), as_tibble=T) |>
+stan_vertices <- st_read(file.path("/vsizip", here::here("data-raw", "temp", "stanislaus_training_data", "StanMesh072313_Vertices.shp.zip")), as_tibble=T) |>
   mutate(vid = row_number()) |>
   select(vid)
 
 # Thiessen (aka Voronoi) polygons for mesh vertices, generated using QGIS
-stan_thiessen <- st_read(file.path("/vsizip", here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_Thiessen.shp.zip")), as_tibble=T) |>
+stan_thiessen <- st_read(file.path("/vsizip", here::here("data-raw", "temp", "stanislaus_training_data", "StanMesh072313_Thiessen.shp.zip")), as_tibble=T) |>
   #mutate(vid = row_number()) # row order doesn't match the SRH2D outputs so need to spatial join
   st_join(stan_vertices, join=st_nearest_feature) |>
   select(vid) |>
@@ -156,19 +161,19 @@ stan_thiessen <- st_read(file.path("/vsizip", here::here("data-raw", "source", "
 # ggplot() + geom_sf(data=stan_thiessen|>filter(vid<50)) + geom_sf(data=stan_vertices|>filter(vid<50)) 
 
 # Bed elevations, extracted from mesh using QGIS "Export time series values from points of a mesh dataset"
-stan_elev <- read_csv(here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_BedElevation.csv.gz")) |>
+stan_elev <- read_csv(here::here("data-raw", "temp", "stanislaus_training_data", "StanMesh072313_BedElevation.csv.gz")) |>
   janitor::clean_names() |>
   mutate(vid = row_number()) |>
   select(vid, bed_elevation)
 
 # Material Manning coefficients, extracted from SRH2D DAT files for runs
 stan_material_n <-
-  read_delim(here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/manning_coef.txt"), delim="\t", col_names=c("manning_coef")) |>
+  read_delim(here::here("data-raw", "temp", "stanislaus_training_data", "manning_coef.txt"), delim="\t", col_names=c("manning_coef")) |>
   mutate(material_id = row_number())
 
 # Material IDs (Manning's roughness classes) extracted from mesh using QGIS "Export time series values from points of a mesh dataset"
 stan_material <- 
-  read_csv(here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_MaterialID.csv.gz")) |>
+  read_csv(here::here("data-raw", "temp", "stanislaus_training_data", "StanMesh072313_MaterialID.csv.gz")) |>
   janitor::clean_names() |>
   mutate(vid = row_number()) |>
   select(vid, material_id) |>
@@ -185,16 +190,20 @@ stan_material <-
 
 # SRH2D results by vertex point, incl. depth, velocity, shear stress, froude
 stan_result_filenames <- c(
-   "500" = here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/500cfs_072313.csv.gz"),
-   "750" = here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/750cfs_072413.csv.gz"),
-  "1000" = here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/1000cfs_072413.csv.gz"),
-  "1250" = here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/1250cfs_090313.csv.gz"),
-  "1500" = here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/1500cfs_071013.csv.gz"),
-  "1750" = here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/1750cfs_090313.csv.gz"),
-  "2250" = here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/2250cfs_121713.csv.gz"),
-  "3000" = here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/3000cfs_061913.csv.gz"),
-  "5000" = here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/5000cfs_071113.csv.gz")
+   "500" = "stanislaus_srh2d_2013/500cfs_072313.csv.gz",
+   "750" = "stanislaus_srh2d_2013/750cfs_072413.csv.gz",
+  "1000" = "stanislaus_srh2d_2013/1000cfs_072413.csv.gz",
+  "1250" = "stanislaus_srh2d_2013/1250cfs_090313.csv.gz",
+  "1500" = "stanislaus_srh2d_2013/1500cfs_071013.csv.gz",
+  "1750" = "stanislaus_srh2d_2013/1750cfs_090313.csv.gz",
+  "2250" = "stanislaus_srh2d_2013/2250cfs_121713.csv.gz",
+  "3000" = "stanislaus_srh2d_2013/3000cfs_061913.csv.gz",
+  "5000" = "stanislaus_srh2d_2013/5000cfs_071113.csv.gz"
 )
+
+stan_result_filenames <- here::here("data-raw", "temp", "stanislaus_training_data", stan_result_filenames) |>
+  setNames(names(stan_result_filenames))
+
 stan_result_cols <- c("x_m"="n", "y_m"="n", "z_m"="n", 
                       "wse_m"="n", "wdepth_m"="n", 
                       "vel_x"="n", "vel_y"="n", "vel_mag"="n", 
@@ -252,7 +261,7 @@ if(FALSE){
 
 ```{r fig.width=15, fig.height=10, dpi=300, eval=FALSE, include=FALSE}
 # confirm that using row order is equivalent to spatial joining
-read_csv(here::here("data-raw", "source", "hydraulic_model_data/stanislaus_srh2d_2013/StanMesh072313_MaterialID.csv.gz")) |>
+read_csv(here::here("data-raw", "temp", "stanislaus_training_data", "StanMesh072313_MaterialID.csv.gz")) |>
   janitor::clean_names() |>
   mutate(vid = row_number()) |>
   st_as_sf(coords = c("x","y")) |>
@@ -412,7 +421,7 @@ Import 2018 HEC-RAS 2D model outputs for Deer Creek
 # get land cover data
 dir.create(here::here("data-raw", "temp", "deer_land_cover"), recursive = TRUE)
 drive_file_by_id("1OMJzuVoFdt1hygfMVPWrQBGr2BIuxSZj") |>
-  archive::archive_extract(dir="temp/deer_land_cover")
+  archive::archive_extract(dir=here::here("data-raw", "temp", "deer_land_cover"))
 deer_lcc <- terra::rast(here::here("data-raw", "temp", "deer_land_cover", "existing_landcover_20181109.tif"))
 terra::cats(deer_lcc)[[1]] |> glimpse()
 ggplot() + tidyterra::geom_spatraster(data=deer_lcc)

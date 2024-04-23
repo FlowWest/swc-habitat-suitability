@@ -32,7 +32,7 @@ flow <-
   st_zm()
 
 levees <- 
-  st_read("/vsizip/levees/nld_ca_levees.shp.zip") |>
+  st_read(file.path("/vsizip", here::here("data-raw", "source", "levees", "nld_ca_levees.shp.zip"))) |>
   janitor::clean_names() |>
   st_transform(project_crs)
 

@@ -1715,3 +1715,137 @@ wua_predicted |> usethis::use_data(overwrite = TRUE)
 # usethis::use_data(hs_predictions, overwrite = T)
 ```
 
+## Yuba Comparison
+
+Non-temporal comparison
+
+```{r yuba-comparison, fig.width = 6.5, fig.height = 4, dpi = 300}
+lyr_cbec_reaches <- tribble(
+  ~reach_id, ~reach_name, ~length_lf, ~rm_ds, ~rm_us,
+  "FR", "Feather River", 31680, 0.2, 6.2,
+  "DGR", "Daguerre Point Dam", 28512, 6.2, 11.6,
+  "HR", "Hammon", 36960, 11.6, 18.6,
+  "TBR", "Timbuctoo Bend", 19536, 18.6, 22.3,
+  "NR", "Narrows", 5808, 22.3, 23.4,
+  "EDR", "Englebright Dam", 3696, 23.4, 24.1) |>
+  mutate(reach_name = as_factor(reach_name),
+         reach_id = as_factor(reach_id))
+  
+lyr_cbec_nontemporal <- 
+  read_csv(here::here("data-raw", "source", "hydraulic_model_data", "yuba_srh2d_2020", "LYR_WUA_Discharge_2020_06_30_Nontemporal_WUA_by_Domain.csv")) |>
+  select(-"Total WUA") |>
+  rename(flow_cfs = Discharge) |>
+  pivot_longer(cols = ends_with("WUA"),
+               names_to = "lyr_reach",
+               values_to = "wua_ac",
+               names_transform = function(x) str_replace_all(x, " WUA", "")) |>
+  inner_join(lyr_cbec_reaches, by=join_by(lyr_reach == reach_id)) |>
+  mutate(wua_ft2 = wua_ac * 43560,
+         wua_ft2_per_lf = wua_ft2 / length_lf)
+
+lyr_cbec_nontemporal_summary <-
+  lyr_cbec_nontemporal |> 
+  group_by(flow_cfs) |> 
+  summarize(across(c(wua_ac, wua_ft2, length_lf), sum)) |>
+  mutate(wua_ft2_per_lf = wua_ft2 / length_lf)
+
+yuba_wua_predicted <-
+  wua_predicted |> 
+  select(comid, flow_cfs, starts_with("wua_per_lf")) |>
+  filter(comid %in% filter(mainstems_comid, river=="Yuba River")$comid) |>
+  filter(!is.na(wua_per_lf_actual)) |>
+  inner_join(flowline_attributes |> transmute(comid, length_ft = reach_length_km*3280.84), by=join_by(comid))
+
+yuba_wua_predicted_summary <- 
+  yuba_wua_predicted |> 
+  group_by(flow_cfs) |>
+  mutate(across(starts_with("wua_per_lf"), function(x) x * length_ft)) |>
+  summarize(across(c(length_ft, starts_with("wua_per_lf")), sum)) |>
+  mutate(across(starts_with("wua_per_lf"), function(x) x / length_ft))
+
+yuba_dsmhabitat_summary <-
+  dsm_habitat_wua_per_lf |> 
+  filter(river=="Yuba River") |>
+  mutate(name = str_replace(name, " ", "_")) |>
+  pivot_wider() |>
+  mutate(total_DSMhabitat = instream_DSMhabitat + floodplain_DSMhabitat)
+
+ggplot() + 
+  geom_line(data = yuba_wua_predicted_summary,
+            aes(x = flow_cfs, y = wua_per_lf_actual, color = "Habistat Training (LYR SRH2D)", linetype = "instream + floodplain")) +
+  geom_line(data = yuba_wua_predicted_summary,
+            aes(x = flow_cfs, y = wua_per_lf_pred_sd, color = "Habistat Model 1", linetype = "instream + floodplain")) +
+  geom_line(data = yuba_wua_predicted_summary,
+            aes(x = flow_cfs, y = wua_per_lf_pred_si2, color = "Habistat Model 2", linetype = "instream + floodplain")) +
+  geom_line(data = lyr_cbec_nontemporal_summary,
+            aes(x = flow_cfs, y = wua_ft2_per_lf, color = "CBEC Study (LYR SRH2D)", linetype = "instream + floodplain")) +
+  geom_line(data = yuba_dsmhabitat_summary,
+            aes(x = flow_cfs, y = total_DSMhabitat, color = "DSMhabitat", linetype = "instream + floodplain")) +
+  geom_line(data = yuba_dsmhabitat_summary,
+            aes(x = flow_cfs, y = instream_DSMhabitat, color = "DSMhabitat", linetype = "instream")) +
+  geom_line(data = yuba_dsmhabitat_summary,
+            aes(x = flow_cfs, y = floodplain_DSMhabitat, color = "DSMhabitat", linetype = "floodplain")) + 
+  scale_x_log10(labels = scales::label_comma(), limits = c(NA, 15000)) + 
+  scale_y_continuous(limits = c(0, 60), expand = c(0, 0)) +
+  scale_linetype_manual(name = "domain", 
+                        values = c("instream + floodplain" = "solid", 
+                                   "instream" = "dashed", 
+                                   "floodplain" = "dotted")) +
+  xlab("Flow (cfs)") + ylab("Suitable habitat area (ft2) per linear ft") +
+  theme(panel.grid.minor = element_blank()) + annotation_logticks(sides = "b") +
+  ggtitle("WUA Estimates: HabiStat vs CBEC vs DSMhabitat")
+  
+```
+
+```{r yuba-comparison-temporal, fig.width = 6.5, fig.height = 4, dpi = 300}
+lyr_cbec_temporal <- 
+  read_csv(here::here("data-raw", "source", "hydraulic_model_data", "yuba_srh2d_2020", "LYR_WUA_Discharge_2020_06_30_Temporal_WUA_by_Domain_by_WY.csv")) |>
+  mutate(Date_Time = mdy(Date_Time)) |>
+  select(-"Total WUA") |>
+  rename(flow_cfs = Flow_cfs, date_time = Date_Time, wy_day = Day) |>
+  mutate(water_year = if_else(month(date_time)>=10, year(date_time)+1, year(date_time))) |>
+  pivot_longer(cols = ends_with("WUA"),
+               names_to = "lyr_reach",
+               values_to = "wua_ac",
+               names_transform = function(x) str_replace_all(x, " WUA", "")) |>
+  inner_join(lyr_cbec_reaches, by=join_by(lyr_reach == reach_id)) |>
+  mutate(wua_ft2 = wua_ac * 43560,
+         wua_ft2_per_lf = wua_ft2 / length_lf)
+
+lyr_cbec_temporal_summary <-
+  lyr_cbec_temporal |> 
+  group_by(water_year, date_time, flow_cfs) |> 
+  summarize(across(c(wua_ac, wua_ft2, length_lf), sum)) |>
+  mutate(wua_ft2_per_lf = wua_ft2 / length_lf)
+
+yuba_wua_predicted_temporal <- 
+  readRDS(here::here("data-raw", "results", "dhsi_applied_to_comid.Rds")) |>
+  filter(dataset == "Lower Yuba River") |>
+  filter(water_year %in% unique(lyr_cbec_temporal$water_year)) |>
+  select(comid, water_year, flow_cfs = q, wua, durwua) |>
+  inner_join(flowline_attributes |> transmute(comid, length_ft = reach_length_km*3280.84), by=join_by(comid))
+
+yuba_wua_predicted_temporal_summary <- 
+  yuba_wua_predicted_temporal |> 
+  group_by(flow_cfs, water_year) |>
+  summarize(wua = sum(wua * length_ft) / sum(length_ft), 
+            durwua = sum(durwua * length_ft) / sum(length_ft))
+
+ggplot() + 
+  geom_point(data = lyr_cbec_temporal_summary,
+            aes(x = flow_cfs, y = wua_ft2_per_lf, color = "CBEC Study (LYR SRH2D)"), size = 0.25, stroke = 0) +
+  geom_line(data = lyr_cbec_nontemporal_summary,
+            aes(x = flow_cfs, y = wua_ft2_per_lf, color = "CBEC Study (LYR SRH2D)", linetype = "Non-temporal", linewidth = "Non-temporal")) +
+  geom_line(data = yuba_wua_predicted_temporal_summary,
+            aes(x = flow_cfs, y = durwua, group = water_year, color = "Habistat Model 1", linetype = "Temporal", linewidth = "Temporal")) +
+  geom_line(data = yuba_wua_predicted_temporal_summary,
+            aes(x = flow_cfs, y = wua, color = "Habistat Model 1", linetype = "Non-temporal", linewidth = "Non-temporal")) +
+  scale_x_log10(labels = scales::label_comma(), limits = c(NA, 15000)) + 
+  scale_y_continuous(limits = c(0, 60), expand = c(0, 0)) +
+  xlab("Flow (cfs)") + ylab("Suitable habitat area (ft2) per linear ft") +
+  theme(panel.grid.minor = element_blank()) + annotation_logticks(sides = "b") +
+  scale_linewidth_manual(name = "model type", values = c("Non-temporal" = 1, "Temporal" = 0.5)) +
+  scale_linetype_manual(name = "model type", values = c("Non-temporal" = "solid", "Temporal" = "dashed")) + 
+  ggtitle("Temporal WUA Estimates: HabiStat vs CBEC")
+```
+

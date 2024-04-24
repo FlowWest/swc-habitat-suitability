@@ -30,10 +30,10 @@ pal <- function(x, n = 10,
 
 theme_set(theme_minimal())
 
-ihs <- trans_new("ihs",
-                 transform = function(x) asinh(x),
-                 inverse = function(y) sinh(y),
-                 breaks = function(i) scales::breaks_log(n=5, base=10)(pmax(i,0.01)),
-                 #minor_breaks = scales::minor_breaks_n(n = 0),
-                 domain=c(0, Inf),
-                 format = scales::label_comma())
+ihs <- scales::trans_new("ihs",
+                         transform = function(x) asinh(x),
+                         inverse = function(y) sinh(y),
+                         breaks = function(i) scales::breaks_log(n=5, base=10)(pmax(i,0.01)),
+                         #minor_breaks = scales::minor_breaks_n(n = 0),
+                         domain=c(0, Inf),
+                         format = scales::label_comma())

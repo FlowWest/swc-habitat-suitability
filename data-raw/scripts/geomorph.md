@@ -1,37 +1,15 @@
----
-title: "Predictor Data Prep: Geomorphology and Soils"
-author: "[Skyler Lewis](mailto:slewis@flowwest.com)"
-date: "`r Sys.Date()`"
-output: 
-  github_document:
-    toc: true
-    toc_depth: 3
-    number_sections: false
-    math_method:
-      engine: webtex
-      url: https://latex.codecogs.com/svg.image?
----
+Predictor Data Prep: Geomorphology and Soils
+================
+[Skyler Lewis](mailto:slewis@flowwest.com)
+2024-04-26
 
-
-```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
-library(tidyverse)
-library(sf)
-library(stars)
-library(tidymodels)
-
-theme_set(theme_minimal())
-
-source(here::here("data-raw", "scripts", "data-functions.R"))
-
-flowlines <- readRDS(here::here("data-raw", "results", "flowline_geometries_proj.Rds"))
-flowlines_gcs <- readRDS(here::here("data-raw", "results", "flowline_geometries.Rds"))
-
-flowline_attributes <- readRDS(here::here("data-raw", "results", "flowline_attributes.Rds"))
-```
+- [Soils](#soils)
+- [UCD Geomorphology classes
+  (experimental)](#ucd-geomorphology-classes-experimental)
 
 ## Soils
 
-```{r soils-data}
+``` r
 soils <- 
   st_read(file.path("/vsizip", here::here("data-raw", "source", "soils", "Cal_STATSGO2.shp.zip")), as_tibble=T) |>
   st_transform(project_crs) |>
@@ -55,7 +33,18 @@ soils <-
                                             str_detect(word(texture,1), "clayey") ~ "loamy",
                                             str_detect(word(texture,1), "clayey") ~ "fine"
                                             ) |> factor())
+```
 
+    ## Reading layer `Cal_STATSGO2' from data source 
+    ##   `/vsizip/C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/source/soils/Cal_STATSGO2.shp.zip' 
+    ##   using driver `ESRI Shapefile'
+    ## Simple feature collection with 4235 features and 19 fields
+    ## Geometry type: MULTIPOLYGON
+    ## Dimension:     XY
+    ## Bounding box:  xmin: -13849240 ymin: 3833661 xmax: -12705030 ymax: 5162405
+    ## Projected CRS: WGS 84 / Pseudo-Mercator
+
+``` r
 soils_comid <-
   flowlines_gcs |>
   select(comid) |>
@@ -64,15 +53,34 @@ soils_comid <-
   st_join(soils) |>
   st_drop_geometry() |>
   glimpse()
+```
 
+    ## Warning: st_point_on_surface assumes attributes are constant over geometries
+
+    ## Warning in st_point_on_surface.sfc(st_geometry(x)): st_point_on_surface may not
+    ## give correct results for longitude/latitude data
+
+    ## Rows: 178,868
+    ## Columns: 8
+    ## $ comid               <int> 20245062, 24085230, 22226684, 22226720, 22226732, …
+    ## $ soil_drainage       <fct> NA, NA, Well drained, Well drained, Well drained, …
+    ## $ soil_hsg            <fct> NA, NA, B, B, B, B, B, D, D, D, D, D, D, D, D, D, …
+    ## $ soil_salt_accum     <fct> NA, NA, nonacid, nonacid, NA, nonacid, nonacid, NA…
+    ## $ soil_climate        <fct> NA, NA, mesic, mesic, isomesic, mesic, mesic, isom…
+    ## $ soil_minerology     <fct> NA, NA, superactive, superactive, NA, superactive,…
+    ## $ soil_volcanic       <dbl> NA, NA, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, …
+    ## $ soil_texture_simple <fct> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA…
+
+``` r
 soils_comid |> saveRDS(here::here("data-raw", "results", "attr_soils.Rds"))
 ```
 
 ## UCD Geomorphology classes (experimental)
 
-This is a very rough generalization of spot classifications to the entire basin. Use with caution!
+This is a very rough generalization of spot classifications to the
+entire basin. Use with caution!
 
-```{r geomorph-data-import}
+``` r
 geomorph_site_data <- 
   tibble(result=rjson::fromJSON(file=here::here("data-raw", "source", "ucd_geomorph", "geoSites.json"))) |> 
   unnest_wider(result) |> 
@@ -101,15 +109,34 @@ geomorph_site_data <-
   inner_join(read_csv(here::here("data-raw", "source", "ucd_geomorph", "geomorph_site_attributes.csv")), by=join_by(identity)) |>
   st_transform(project_crs) |> 
   st_join(flowlines |> select(comid), join=st_nearest_feature)
+```
 
+    ## Rows: 288 Columns: 14
+    ## ── Column specification ────────────────────────────────────────────────────────
+    ## Delimiter: ","
+    ## chr  (1): identity
+    ## dbl (13): Ac, s, d, w, w/d, d/D50, CVd, CVw, k, D50, D84, Cv, Ls
+    ## 
+    ## ℹ Use `spec()` to retrieve the full column specification for this data.
+    ## ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+
+``` r
 geomorph_site_data |> ggplot() + geom_sf(aes(color=geomorph_class))
+```
 
+![](geomorph_files/figure-gfm/geomorph-data-import-1.png)<!-- -->
+
+``` r
 flowlines_gcs |> 
   inner_join(geomorph_site_data |> st_drop_geometry()) |> 
   ggplot() + geom_sf(aes(color=geomorph_class))
 ```
 
-```{r geomorph-fill-gaps}
+    ## Joining with `by = join_by(comid)`
+
+![](geomorph_files/figure-gfm/geomorph-data-import-2.png)<!-- -->
+
+``` r
 geomorph_training_data <- 
   geomorph_site_data |>
   left_join(flowline_attributes |> select(-starts_with("geomorph_")), by=join_by(comid)) |>
@@ -158,19 +185,35 @@ geomorph_pred |> select(comid, geomorph_class) |>
 flowlines_gcs |> 
   inner_join(geomorph_pred, by=join_by(comid)) |> 
   ggplot() + geom_sf(aes(color=geomorph_class))
+```
 
+![](geomorph_files/figure-gfm/geomorph-fill-gaps-1.png)<!-- -->
+
+``` r
 flowlines_gcs |> 
   inner_join(geomorph_pred, by=join_by(comid)) |> 
   ggplot() + geom_sf(aes(color=geomorph_confined))
+```
 
+![](geomorph_files/figure-gfm/geomorph-fill-gaps-2.png)<!-- -->
+
+``` r
 flowlines_gcs |> 
   inner_join(geomorph_pred, by=join_by(comid)) |> 
   ggplot() + geom_sf(aes(color=geomorph_steppool))
+```
 
+![](geomorph_files/figure-gfm/geomorph-fill-gaps-3.png)<!-- -->
+
+``` r
 flowlines_gcs |> 
   inner_join(geomorph_pred, by=join_by(comid)) |> 
   ggplot() + geom_sf(aes(color=geomorph_riffles))
+```
 
+![](geomorph_files/figure-gfm/geomorph-fill-gaps-4.png)<!-- -->
+
+``` r
 # # validation matrix
 # geomorph_training_data |>
 #   select(comid, geomorph_class_actual=geomorph_class) |>
@@ -179,6 +222,4 @@ flowlines_gcs |>
 #   tally() |> 
 #   mutate(n=coalesce(n,0)) |>
 #   spread(geomorph_class_actual, n)
-  
 ```
-

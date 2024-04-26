@@ -40,6 +40,23 @@ oom_range <- function(from, to) {
   result <- expanded[which(expanded>=signif(from,1) & expanded<=signif(to,1))]
   return(if (from == 0) c(0, result) else result)
 }
+
+hex_color_blend <- function(x, y){
+  hex_r <- as.character.hexmode((strtoi(substr(x,2,3), base=16L) + strtoi(substr(y,2,3), base=16L)) / 2)
+  hex_g <- as.character.hexmode((strtoi(substr(x,4,5), base=16L) + strtoi(substr(y,4,5), base=16L)) / 2)
+  hex_b <- as.character.hexmode((strtoi(substr(x,6,7), base=16L) + strtoi(substr(y,6,7), base=16L)) / 2)
+  return(paste0("#", hex_r, hex_g, hex_b))
+}
+
+palette_dsmhabitat_comparison <- 
+  c("habistat prediction" = "#ffae34", 
+    "DSMhabitat instream" = "#6388b4",
+    "DSMhabitat floodplain" = "#8cc2ca")
+
+palette_hqt_gradient_class <- 
+  c("Valley Lowland"  = "#6388b4", #hex_color_blend("#6388b4","#55ad89"),
+    "Valley Foothill" = "#55ad89", #hex_color_blend("#55ad89","#c3bc3f"),
+    "Bedrock"         = "#bb7693") #hex_color_blend("#c3bc3f","#ffae34"))
 ```
 
 ## Import and Preprocess Training Data
@@ -56,9 +73,14 @@ flowline_attributes <- readRDS(here::here("data-raw", "results", "flowline_attri
 flow_to_suitable_area <- readRDS(here::here("data-raw", "results", "fsa_combined.Rds"))
 ```
 
-```{r import-step2}
+```{r import-step2, fig.width=4, fig.height=6.5, dpi=300}
 # Limit to a specified flow range and interpolate gaps
 interp_flows <- seq(300,15000,100)
+
+#interp_flows <- seq(300,40000,100)
+
+# Use this alternative to bring in flows alll the way up to 85000 cfs
+#interp_flows <- c(seq(300,950,50), seq(1000,9500,500), seq(10000,85000,5000))
 
 flow_to_suitable_area <- 
   flow_to_suitable_area |>
@@ -77,10 +99,37 @@ train_data <- flowlines |> st_drop_geometry() |>
   # filter(erom_q_ma_cfs>10) |>
   glimpse()
 
-flowlines |> st_zm() |>
+flowlines_gcs <- readRDS(here::here("data-raw", "results", "flowline_geometries.Rds"))
+train_flowlines <- flowlines_gcs |>
   filter(comid %in% unique(flow_to_suitable_area$comid)) |>
-  left_join(flowline_attributes, by=join_by("comid"), relationship="one-to-one") |>
-  ggplot() + geom_sf(aes(color = hqt_gradient_class)) + theme(legend.title=element_blank())
+  left_join(flowline_attributes, by=join_by("comid"), relationship="one-to-one") 
+
+training_reach_labels <- train_flowlines |>
+  group_by(gnis_name) |>
+  summarize() |>
+  st_centroid() |>
+  filter(!is.na(gnis_name)) %>%
+  mutate(coord_x = st_coordinates(geometry)[,1],
+         coord_y = st_coordinates(geometry)[,2])
+
+hqt_poly <- readRDS(here::here("data-raw", "source", "hqt", "hqt_valley_lowland.Rds"))
+central_valley <- st_read(file.path("/vsizip",here::here("data-raw", "source", "hqt", "Alluvial_Bnd.shp.zip"))) |> st_transform("+proj=longlat +datum=NAD83")
+
+ggplot() + 
+  geom_sf(data=central_valley, aes(fill="Valley Foothill"), color=NA) +
+  geom_sf(data=hqt_poly, aes(fill="Valley Lowland"), color=NA) +
+  geom_sf(data = flowlines_gcs |> 
+            inner_join(flowline_attributes |> 
+                         filter(da_area_sq_km>100) |>
+                         filter(substr(reachcode,1, 4) %in% c("1802", "1803", "1804"))), color="black", alpha=0.1, linewidth=0.5) +
+  geom_sf(data = train_flowlines, aes(color = hqt_gradient_class), linewidth=1) + 
+  geom_text(data = training_reach_labels, aes(x=coord_x, y=coord_y, label=gnis_name), vjust=-1, size=9/.pt) + 
+  theme(legend.title=element_blank(), legend.position = "top", axis.title = element_blank(), legend.box="vertical") +
+  scale_color_manual(name="Gradient Class", 
+                     values = palette_hqt_gradient_class) +
+  scale_fill_manual(name="Gradient Class",
+                    values = c("Valley Foothill" = hex_color_blend("#55ad89","#ffffff"), 
+                               "Valley Lowland" = hex_color_blend("#6388b4", "#ffffff"))) 
 ```
 
 ### Exploration and PCA
@@ -319,7 +368,7 @@ sd_rec <- recipe(data=training(td_split),
   step_interact(terms = ~flow_cfs:all_predictors()) |>
   step_naomit(all_predictors()) |>
   step_zv(all_predictors()) |>
-  step_normalize(all_numeric_predictors())
+  step_normalize(all_numeric_predictors()) 
 ```
 
 #### Linear Regression
@@ -1091,6 +1140,7 @@ rfr_si2_res |> filter(comid %in% test_comids) |>
 pd_attr <- flowline_attributes |> 
   # select just major streams
   filter_variable_ranges() |> #stream_level<=4 & !is.na(gnis_name) 
+      filter(substr(reachcode,1, 4) %in% c("1802", "1803", "1804")) |> # Central Valley basin only
   # # filter out Valley Lowland areas
   # filter(hqt_gradient_class != "Valley Lowland") |>
   # # filter for just the areas that are hydrologically similar to the training data
@@ -1113,12 +1163,12 @@ pd <- pd_attr |>
   arrange(comid, flow_cfs) |>
   glimpse()
 
-flowlines |> st_zm() |>
+flowlines_gcs |>
   inner_join(pd_attr, by=join_by(comid)) |>
   ggplot() + geom_sf(aes(color = da_area_sq_km)) + 
   scale_color_viridis_c(name = "Drainage area (km2)", trans="sqrt", breaks = scales::breaks_log(6), direction = -1)
 
-flowlines |> st_zm() |>
+flowlines_gcs |>
   inner_join(pd_attr, by=join_by(comid)) |>
   ggplot() + geom_sf(aes(color = hyd_cls)) +
   scale_color_manual(name = "eFlows hydrologic class",
@@ -1151,7 +1201,7 @@ sd_pred <-
             wua_per_lf_pred = sinh(ihs_wua_per_lf_pred)) |>
   glimpse()
 
-flowlines |> st_zm() |>
+flowlines_gcs |>
   inner_join(sd_pred |> filter(round(flow_cfs)==800), by=join_by(comid)) |>
   mutate(wua_per_lf_pred = if_else(wua_per_lf_pred <1, 1, wua_per_lf_pred)) |> # for visualization only
   ggplot() + geom_sf(aes(color = wua_per_lf_pred)) + 
@@ -1193,7 +1243,7 @@ si2_pred <-
          wua_per_lf_pred = wua_per_lf_norm_pred * !!norm_var) |>
   glimpse()
 
-flowlines |> st_zm() |>
+flowlines_gcs |>
   inner_join(si2_pred |> filter(round(flow_cfs)==800), by=join_by(comid)) |>
   mutate(wua_per_lf_pred = if_else(wua_per_lf_pred <1, 1, wua_per_lf_pred)) |> # for visualization only
   ggplot() + geom_sf(aes(color = wua_per_lf_pred)) + 
@@ -1249,7 +1299,7 @@ sd2si_pred <-
   mutate(wua_per_lf_pred = hsi_frac_pred * tot_area_per_lf_pred) |>
   glimpse()
 
-flowlines |> st_zm() |>
+flowlines_gcs |>
   inner_join(sd2si_pred |> filter(round(flow_cfs)==800), by=join_by(comid)) |>
   mutate(wua_per_lf_pred = if_else(wua_per_lf_pred <1, 1, wua_per_lf_pred)) |> # for visualization only
   ggplot() + geom_sf(aes(color = wua_per_lf_pred)) + 
@@ -1268,6 +1318,8 @@ prediction_flows <- readRDS(here::here("data-raw", "results", "watershed_flow_su
   select(watershed, flow_cfs) |>
   unnest(flow_cfs) |>
   glimpse()
+
+#prediction_flows |> group_by(watershed) |> summarize(max_flow = max(flow_cfs)) |> arrange(-max_flow) 
 ```
 
 ```{r dsmhabitat-prep, fig.width=6.5, fig.height=6.5, dpi=300}
@@ -1355,14 +1407,14 @@ dsm_habitat_combined <- mainstems |>
 dsm_habitat_wua_per_lf <- dsm_habitat_combined |>
   select(river, flow_cfs, instream_wua_per_lf, floodplain_wua_per_lf) |>
   pivot_longer(cols=c(instream_wua_per_lf, floodplain_wua_per_lf)) |>
-  mutate(name = str_replace(name, "_wua_per_lf", " DSMhabitat"),
+  mutate(name = paste("DSMhabitat", str_replace(name, "_wua_per_lf", "")),
          value = if_else(value>0, value, NA))
 
 dsm_habitat_suitable_ac <- dsm_habitat_combined |>
   select(river, flow_cfs, instream_suitable_ac, floodplain_suitable_ac) |>
   pivot_longer(cols=c(instream_suitable_ac, floodplain_suitable_ac))  |>
   mutate(value = if_else(value>0, value, NA)) |>
-  mutate(name = str_replace(name, "_suitable_ac", " DSMhabitat"),
+  mutate(name = paste("DSMhabitat", str_replace(name, "_suitable_ac", "")),
          value = if_else(value>0, value, NA))
 ```
 
@@ -1398,17 +1450,6 @@ pd_rf_by_mainstem <-
          wua_per_lf_pred = coalesce(wua_per_lf_pred,0),
          wua_ft2_pred = wua_per_lf_pred * length_ft) 
 
-pd_rf_by_mainstem |>
-  ggplot(aes(x = flow_cfs, y = wua_per_lf_pred, color = hqt_gradient_class)) + 
-  geom_line(aes(group = comid), alpha=0.5) + geom_smooth(method="loess", se=F) +
-  facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
-  scale_y_continuous() + 
-  theme(legend.position="top", 
-        panel.grid.minor = element_blank(),
-        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
-
 pd_rf_by_mainstem_summary <- pd_rf_by_mainstem |>
   group_by(river, flow_cfs) |>
   summarize(tot_length_ft = sum(length_ft),
@@ -1416,6 +1457,19 @@ pd_rf_by_mainstem_summary <- pd_rf_by_mainstem |>
             tot_wua_ac = tot_wua_ft2 / 43560,
             avg_wua_ft2_per_lf = tot_wua_ft2 / tot_length_ft,
             avg_wua_ft2_per_1000ft = 1000 * avg_wua_ft2_per_lf)
+
+pd_rf_by_mainstem |>
+  ggplot(aes(x = flow_cfs)) + 
+  geom_line(aes(y = wua_per_lf_pred, group = comid, color = hqt_gradient_class), alpha=0.5) + 
+  geom_line(data=pd_rf_by_mainstem_summary, aes(y = avg_wua_ft2_per_lf), linewidth=1.0) + #geom_smooth(method="loess", se=F, color="black") +
+  facet_wrap(~river, scales="free_y") + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_y_continuous() + 
+  theme(legend.position="top", 
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)") +
+  scale_color_manual(values = palette_hqt_gradient_class)
 
 pd_rf_by_mainstem_summary |>
   ggplot() + 
@@ -1443,7 +1497,7 @@ pd_rf_by_mainstem_summary |>
   #inner_join(dsm_habitat_floodplain, by=join_by(river==river, flow_cfs==flow_cfs)) |> 
   #filter(river == "American River") |> 
   ggplot() +
-  geom_line(aes(x = flow_cfs, y = tot_wua_ac, color='modeled')) + 
+  geom_line(aes(x = flow_cfs, y = tot_wua_ac, color="habistat prediction")) + 
   geom_line(data=dsm_habitat_suitable_ac, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
   scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
@@ -1451,12 +1505,13 @@ pd_rf_by_mainstem_summary |>
   theme(legend.position="top", legend.title=element_blank(),
         panel.grid.minor = element_blank(),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  xlab("Flow (cfs)") + ylab("Total WUA (ac)")
+  xlab("Flow (cfs)") + ylab("Total WUA (ac)") +
+  scale_color_manual(values = palette_dsmhabitat_comparison)
 
 pd_rf_by_mainstem_summary |> 
   #inner_join(dsm_habitat_instream, by=join_by(river==river, flow_cfs==flow_cfs)) |> 
   ggplot() +
-  geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color='modeled')) + 
+  geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color="habistat prediction")) + 
   geom_line(data=dsm_habitat_wua_per_lf, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
   scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
@@ -1464,7 +1519,8 @@ pd_rf_by_mainstem_summary |>
   theme(legend.position="top", legend.title=element_blank(),
         panel.grid.minor = element_blank(),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)") +
+  scale_color_manual(values = palette_dsmhabitat_comparison)
 ```
 
 ### One-step model, scale-independent: WUA/LF vs normalized flow
@@ -1500,17 +1556,6 @@ pd_rf_by_mainstem <-
          wua_per_lf_pred = coalesce(wua_per_lf_pred,0),
          wua_ft2_pred = wua_per_lf_pred * length_ft) 
 
-pd_rf_by_mainstem |>
-  ggplot(aes(x = flow_cfs, y = wua_per_lf_pred, color = hqt_gradient_class)) + 
-  geom_line(aes(group = comid), alpha=0.5) + geom_smooth(method="loess", se=F) +
-  facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
-  scale_y_continuous() + 
-  theme(legend.position="top", 
-        panel.grid.minor = element_blank(),
-        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
-
 pd_rf_by_mainstem_summary <- pd_rf_by_mainstem |>
   group_by(river, flow_cfs) |>
   summarize(tot_length_ft = sum(length_ft),
@@ -1518,6 +1563,19 @@ pd_rf_by_mainstem_summary <- pd_rf_by_mainstem |>
             tot_wua_ac = tot_wua_ft2 / 43560,
             avg_wua_ft2_per_lf = tot_wua_ft2 / tot_length_ft,
             avg_wua_ft2_per_1000ft = 1000 * avg_wua_ft2_per_lf)
+
+pd_rf_by_mainstem |>
+  ggplot(aes(x = flow_cfs)) + 
+  geom_line(aes(y = wua_per_lf_pred, group = comid, color = hqt_gradient_class), alpha=0.5) + 
+  geom_line(data=pd_rf_by_mainstem_summary, aes(y = avg_wua_ft2_per_lf), linewidth=1.0) + #geom_smooth(method="loess", se=F, color="black") +
+  facet_wrap(~river, scales="free_y") + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_y_continuous() + 
+  theme(legend.position="top", 
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)") +
+  scale_color_manual(values = palette_hqt_gradient_class)
   
 pd_rf_by_mainstem_summary |>
   ggplot() + 
@@ -1545,7 +1603,7 @@ pd_rf_by_mainstem_summary |>
   #inner_join(dsm_habitat_floodplain, by=join_by(river==river, flow_cfs==flow_cfs)) |> 
   #filter(river == "American River") |> 
   ggplot() +
-  geom_line(aes(x = flow_cfs, y = tot_wua_ac, color='modeled')) + 
+  geom_line(aes(x = flow_cfs, y = tot_wua_ac, color="habistat prediction")) + 
   geom_line(data=dsm_habitat_suitable_ac, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
   scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
@@ -1553,12 +1611,13 @@ pd_rf_by_mainstem_summary |>
   theme(legend.position="top", legend.title=element_blank(),
         panel.grid.minor = element_blank(),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  xlab("Flow (cfs)") + ylab("Total WUA (ac)")
+  xlab("Flow (cfs)") + ylab("Total WUA (ac)") +
+  scale_color_manual(values = palette_dsmhabitat_comparison)
 
 pd_rf_by_mainstem_summary |> 
   #inner_join(dsm_habitat_instream, by=join_by(river==river, flow_cfs==flow_cfs)) |> 
   ggplot() +
-  geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color='modeled')) + 
+  geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color="habistat prediction")) + 
   geom_line(data=dsm_habitat_wua_per_lf, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
   scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
@@ -1566,7 +1625,8 @@ pd_rf_by_mainstem_summary |>
   theme(legend.position="top", legend.title=element_blank(),
         panel.grid.minor = element_blank(),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)") +
+  scale_color_manual(values = palette_dsmhabitat_comparison)
 ```
 
 ### Two-step model: (%HSI vs normalized flow) \* (Total Area/LF vs flow)
@@ -1624,17 +1684,6 @@ pd_rf_by_mainstem <-
          wua_per_lf_pred = coalesce(wua_per_lf_pred,0),
          wua_ft2_pred = wua_per_lf_pred * length_ft) 
 
-pd_rf_by_mainstem |>
-  ggplot(aes(x = flow_cfs, y = wua_per_lf_pred, color = hqt_gradient_class)) + 
-  geom_line(aes(group = comid), alpha=0.5) + geom_smooth(method="loess", se=F) +
-  facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
-  scale_y_continuous() + 
-  theme(legend.position="top", 
-        panel.grid.minor = element_blank(),
-        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
-
 pd_rf_by_mainstem_summary <- pd_rf_by_mainstem |>
   group_by(river, flow_cfs) |>
   summarize(tot_length_ft = sum(length_ft),
@@ -1642,6 +1691,19 @@ pd_rf_by_mainstem_summary <- pd_rf_by_mainstem |>
             tot_wua_ac = tot_wua_ft2 / 43560,
             avg_wua_ft2_per_lf = tot_wua_ft2 / tot_length_ft,
             avg_wua_ft2_per_1000ft = 1000 * avg_wua_ft2_per_lf)
+
+pd_rf_by_mainstem |>
+  ggplot(aes(x = flow_cfs)) + 
+  geom_line(aes(y = wua_per_lf_pred, group = comid, color = hqt_gradient_class), alpha=0.5) + 
+  geom_line(data=pd_rf_by_mainstem_summary, aes(y = avg_wua_ft2_per_lf), linewidth=1.0) + #geom_smooth(method="loess", se=F, color="black") +
+  facet_wrap(~river, scales="free_y") + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_y_continuous() + 
+  theme(legend.position="top", 
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)") +
+  scale_color_manual(values = palette_hqt_gradient_class)
 
 pd_rf_by_mainstem_summary |>
   ggplot() + 
@@ -1669,7 +1731,7 @@ pd_rf_by_mainstem_summary |>
   #inner_join(dsm_habitat_floodplain, by=join_by(river==river, flow_cfs==flow_cfs)) |> 
   #filter(river == "American River") |> 
   ggplot() +
-  geom_line(aes(x = flow_cfs, y = tot_wua_ac, color='modeled')) + 
+  geom_line(aes(x = flow_cfs, y = tot_wua_ac, color="habistat prediction")) + 
   geom_line(data=dsm_habitat_suitable_ac, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
   scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
@@ -1677,12 +1739,13 @@ pd_rf_by_mainstem_summary |>
   theme(legend.position="top", legend.title=element_blank(),
         panel.grid.minor = element_blank(),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  xlab("Flow (cfs)") + ylab("Total WUA (ac)")
+  xlab("Flow (cfs)") + ylab("Total WUA (ac)") +
+  scale_color_manual(values = palette_dsmhabitat_comparison)
 
 pd_rf_by_mainstem_summary |> 
   #inner_join(dsm_habitat_instream, by=join_by(river==river, flow_cfs==flow_cfs)) |> 
   ggplot() +
-  geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color='modeled')) + 
+  geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color="habistat prediction")) + 
   geom_line(data=dsm_habitat_wua_per_lf, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
   scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
@@ -1690,7 +1753,8 @@ pd_rf_by_mainstem_summary |>
   theme(legend.position="top", legend.title=element_blank(),
         panel.grid.minor = element_blank(),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
+  xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)") +
+  scale_color_manual(values = palette_dsmhabitat_comparison)
 ```
 
 ## Results Export
@@ -1768,23 +1832,23 @@ yuba_dsmhabitat_summary <-
   filter(river=="Yuba River") |>
   mutate(name = str_replace(name, " ", "_")) |>
   pivot_wider() |>
-  mutate(total_DSMhabitat = instream_DSMhabitat + floodplain_DSMhabitat)
+  mutate(DSMhabitat_total = coalesce(DSMhabitat_instream,0) + coalesce(DSMhabitat_floodplain,0))
 
 ggplot() + 
   geom_line(data = yuba_wua_predicted_summary,
-            aes(x = flow_cfs, y = wua_per_lf_actual, color = "Habistat Training (LYR SRH2D)", linetype = "instream + floodplain")) +
+            aes(x = flow_cfs, y = wua_per_lf_actual, color = "Habistat Training (LYR SRH2D)", linetype = "instream + floodplain"), linewidth=1) +
   geom_line(data = yuba_wua_predicted_summary,
-            aes(x = flow_cfs, y = wua_per_lf_pred_sd, color = "Habistat Model 1", linetype = "instream + floodplain")) +
+            aes(x = flow_cfs, y = wua_per_lf_pred_sd, color = "Habistat Model 1", linetype = "instream + floodplain"), linewidth=1) +
   geom_line(data = yuba_wua_predicted_summary,
-            aes(x = flow_cfs, y = wua_per_lf_pred_si2, color = "Habistat Model 2", linetype = "instream + floodplain")) +
+            aes(x = flow_cfs, y = wua_per_lf_pred_si2, color = "Habistat Model 2", linetype = "instream + floodplain"), linewidth=1) +
   geom_line(data = lyr_cbec_nontemporal_summary,
-            aes(x = flow_cfs, y = wua_ft2_per_lf, color = "CBEC Study (LYR SRH2D)", linetype = "instream + floodplain")) +
+            aes(x = flow_cfs, y = wua_ft2_per_lf, color = "CBEC Study (LYR SRH2D)", linetype = "instream + floodplain"), linewidth=1) +
   geom_line(data = yuba_dsmhabitat_summary,
-            aes(x = flow_cfs, y = total_DSMhabitat, color = "DSMhabitat", linetype = "instream + floodplain")) +
+            aes(x = flow_cfs, y = DSMhabitat_total, color = "DSMhabitat", linetype = "instream + floodplain"), linewidth=1) +
   geom_line(data = yuba_dsmhabitat_summary,
-            aes(x = flow_cfs, y = instream_DSMhabitat, color = "DSMhabitat", linetype = "instream")) +
+            aes(x = flow_cfs, y = DSMhabitat_instream, color = "DSMhabitat", linetype = "instream"), linewidth=1) +
   geom_line(data = yuba_dsmhabitat_summary,
-            aes(x = flow_cfs, y = floodplain_DSMhabitat, color = "DSMhabitat", linetype = "floodplain")) + 
+            aes(x = flow_cfs, y = DSMhabitat_floodplain, color = "DSMhabitat", linetype = "floodplain"), linewidth=1) + 
   scale_x_log10(labels = scales::label_comma(), limits = c(NA, 15000)) + 
   scale_y_continuous(limits = c(0, 60), expand = c(0, 0)) +
   scale_linetype_manual(name = "domain", 
@@ -1793,7 +1857,13 @@ ggplot() +
                                    "floodplain" = "dotted")) +
   xlab("Flow (cfs)") + ylab("Suitable habitat area (ft2) per linear ft") +
   theme(panel.grid.minor = element_blank()) + annotation_logticks(sides = "b") +
-  ggtitle("WUA Estimates: HabiStat vs CBEC vs DSMhabitat")
+  ggtitle("WUA Estimates: HabiStat vs CBEC vs DSMhabitat") +
+  scale_color_manual(name = "dataset", 
+                     values = c("DSMhabitat" = "#8cc2ca",
+                                "CBEC Study (LYR SRH2D)" = "#6388b4",
+                                "Habistat Training (LYR SRH2D)" = "#55ad79",
+                                "Habistat Model 1" = "#ffae34",
+                                "Habistat Model 2" = "#c3bc3f"))
   
 ```
 
@@ -1833,7 +1903,7 @@ yuba_wua_predicted_temporal_summary <-
 
 ggplot() + 
   geom_point(data = lyr_cbec_temporal_summary,
-            aes(x = flow_cfs, y = wua_ft2_per_lf, color = "CBEC Study (LYR SRH2D)"), size = 0.25, stroke = 0) +
+            aes(x = flow_cfs, y = wua_ft2_per_lf, color = "CBEC Study (LYR SRH2D)"), size = 0.7, stroke = 0) +
   geom_line(data = lyr_cbec_nontemporal_summary,
             aes(x = flow_cfs, y = wua_ft2_per_lf, color = "CBEC Study (LYR SRH2D)", linetype = "Non-temporal", linewidth = "Non-temporal")) +
   geom_line(data = yuba_wua_predicted_temporal_summary,
@@ -1844,8 +1914,11 @@ ggplot() +
   scale_y_continuous(limits = c(0, 60), expand = c(0, 0)) +
   xlab("Flow (cfs)") + ylab("Suitable habitat area (ft2) per linear ft") +
   theme(panel.grid.minor = element_blank()) + annotation_logticks(sides = "b") +
-  scale_linewidth_manual(name = "model type", values = c("Non-temporal" = 1, "Temporal" = 0.5)) +
+  scale_linewidth_manual(name = "model type", values = c("Non-temporal" = 1, "Temporal" = 0.7)) +
   scale_linetype_manual(name = "model type", values = c("Non-temporal" = "solid", "Temporal" = "dashed")) + 
-  ggtitle("Temporal WUA Estimates: HabiStat vs CBEC")
+  ggtitle("Temporal WUA Estimates: HabiStat vs CBEC")  +
+  scale_color_manual(name = "dataset", 
+                     values = c("CBEC Study (LYR SRH2D)" = "#6388b4",
+                                "Habistat Model 1" = "#ffae34"))
 ```
 

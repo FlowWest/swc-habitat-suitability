@@ -1,3 +1,0 @@
-<?xml version="1.0"?>
-<!--<!DOCTYPE metadata SYSTEM "http://www.esri.com/metadata/esriprof80.dtd">-->
-<metadata xml:lang="en"><Esri><MetaID>{7884614A-2089-4F3F-9748-6A898619AE75}</MetaID><CreaDate>20111215</CreaDate><CreaTime>14541300</CreaTime><SyncOnce>TRUE</SyncOnce><DataProperties><lineage><Process ToolSource="C:\Program Files (x86)\ArcGIS\ArcToolbox\Toolboxes\Spatial Analyst Tools.tbx\SingleOutputMapAlgebra" Date="20111215" Time="145413">SingleOutputMapAlgebra "int (('tmpdemprj' * 100) + 0.5)" D:\Al\Reg18Step13\ned18b\elev_cm #</Process></lineage></DataProperties></Esri></metadata>

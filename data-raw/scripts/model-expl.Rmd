@@ -1901,9 +1901,25 @@ yuba_wua_predicted_temporal_summary <-
   summarize(wua = sum(wua * length_ft) / sum(length_ft), 
             durwua = sum(durwua * length_ft) / sum(length_ft))
 
+
+yuba_wua_predicted_temporal_ts <-
+  readRDS(here::here("data-raw", "results", "durhsi_applied_to_comid_ts.Rds")) |>
+  ungroup() |>
+    filter(river == "Lower Yuba River") |>
+  filter(water_year %in% unique(lyr_cbec_temporal$water_year)) |>
+  select(comid, water_year, flow_cfs = q, durwua, date) |>
+  inner_join(flowline_attributes |> transmute(comid, length_ft = reach_length_km*3280.84), by=join_by(comid))
+
+yuba_wua_predicted_temporal_ts_summary <- 
+  yuba_wua_predicted_temporal_ts |> 
+  group_by(flow_cfs, water_year, date) |>
+  summarize(durwua = sum(durwua * length_ft) / sum(length_ft))
+
 ggplot() + 
   geom_point(data = lyr_cbec_temporal_summary,
             aes(x = flow_cfs, y = wua_ft2_per_lf, color = "CBEC Study (LYR SRH2D)"), size = 0.7, stroke = 0) +
+#    geom_point(data = yuba_wua_predicted_temporal_ts_summary,
+#            aes(x = flow_cfs, y = durwua, color = "Habistat Model 1"), size = 0.7, stroke = 0) +
   geom_line(data = lyr_cbec_nontemporal_summary,
             aes(x = flow_cfs, y = wua_ft2_per_lf, color = "CBEC Study (LYR SRH2D)", linetype = "Non-temporal", linewidth = "Non-temporal")) +
   geom_line(data = yuba_wua_predicted_temporal_summary,

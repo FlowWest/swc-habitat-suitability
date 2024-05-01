@@ -805,3 +805,54 @@ batch_res |> saveRDS(here::here("data-raw", "results", "dhsi_applied_to_comid.Rd
 
 ```
 
+Result applied to individual dates
+
+```{r}
+# apply a rating curve to a time series
+extract_durwua_time_series <- function(gauge_ts, q_durwua) {
+  if(!is.null(gauge_ts) & !is.null(q_durwua)) {
+    full_join(gauge_ts, q_durwua, by=join_by(q)) |>
+      arrange(q) |>
+      mutate(durwua = zoo::na.approx(durwua, x = q, na.rm=F)) |>
+      filter(!is.na(date)) |>
+      arrange(date)
+  } else {
+    tibble(q = numeric(0), durwua = numeric(0))
+  }
+}
+
+# apply all COMID's rating curves to all dates of flow time series
+batch_res_ts <- full_join(
+    training_cdec_data |> 
+      select(river, water_year, date, q = q_gauge) |> 
+      nest(gauge_ts = c(date, q)),
+    batch_res |> 
+      select(dataset, comid, water_year, q, durwua) |> 
+      nest(q_durwua = c(q, durwua)),
+    by=join_by(river==dataset, water_year)) |>
+  mutate(result = map2(gauge_ts, q_durwua, extract_durwua_time_series)) |>
+  select(-gauge_ts, -q_durwua) |>
+  unnest(result)
+
+batch_res_ts |>
+  saveRDS(here::here("data-raw", "results", "durhsi_applied_to_comid_ts.Rds"))
+
+# aggregate result across comids and plot
+reach_lengths <- flowline_attributes |> 
+  transmute(comid, length_ft = reach_length_km/0.0003048)
+
+batch_res_ts |>
+  inner_join(reach_lengths, by = join_by(comid)) |>
+  filter(durwua>0) |>
+  group_by(river, water_year, date, q) |>
+  summarize(durwua_ac = sum(durwua * length_ft) / 43560) |>
+  ggplot() +
+  facet_wrap(~river, ncol=1, scales="free") +
+  geom_point(aes(x = q, y = durwua_ac), size=1) +
+  geom_line(data = batch_res |>
+                     rename(river = dataset) |>
+                     inner_join(reach_lengths, by = join_by(comid)) |>
+                     group_by(river, water_year, q) |>
+                     summarize(wua_ac = sum(wua * length_ft) / 43560),
+            aes(x = q, y = wua_ac))
+```

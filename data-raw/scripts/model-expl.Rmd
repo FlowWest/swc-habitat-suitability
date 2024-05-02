@@ -1521,6 +1521,21 @@ pd_rf_by_mainstem_summary |>
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)") +
   scale_color_manual(values = palette_dsmhabitat_comparison)
+
+pd_rf_by_mainstem_summary |> filter(flow_cfs>=min(interp_flows)) |>
+  ggplot() +
+  geom_line(aes(x = flow_cfs, y = tot_wua_ac, color="habistat prediction")) + 
+  geom_line(data=dsm_habitat_suitable_ac, aes(x = flow_cfs, y = value, color = name)) +  
+  facet_wrap(~river, scales="free_y") + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
+  scale_y_continuous(labels=scales::comma_format(), expand=c(0,0), limits=c(0,NA)) + 
+  theme(legend.position="top", legend.title=element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  xlab("Flow (cfs)") + ylab("Total WUA (ac)") +
+  scale_color_manual(values = palette_dsmhabitat_comparison)
+
 ```
 
 ### One-step model, scale-independent: WUA/LF vs normalized flow
@@ -1627,6 +1642,21 @@ pd_rf_by_mainstem_summary |>
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)") +
   scale_color_manual(values = palette_dsmhabitat_comparison)
+
+pd_rf_by_mainstem_summary |> filter(flow_cfs>=min(interp_flows)) |>
+  ggplot() +
+  geom_line(aes(x = flow_cfs, y = tot_wua_ac, color="habistat prediction")) + 
+  geom_line(data=dsm_habitat_suitable_ac, aes(x = flow_cfs, y = value, color = name)) +  
+  facet_wrap(~river, scales="free_y") + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
+  scale_y_continuous(labels=scales::comma_format(), expand=c(0,0), limits=c(0,NA)) + 
+  theme(legend.position="top", legend.title=element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  xlab("Flow (cfs)") + ylab("Total WUA (ac)") +
+  scale_color_manual(values = palette_dsmhabitat_comparison)
+
 ```
 
 ### Two-step model: (%HSI vs normalized flow) \* (Total Area/LF vs flow)
@@ -1755,6 +1785,21 @@ pd_rf_by_mainstem_summary |>
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)") +
   scale_color_manual(values = palette_dsmhabitat_comparison)
+
+pd_rf_by_mainstem_summary |> filter(flow_cfs>=min(interp_flows)) |>
+  ggplot() +
+  geom_line(aes(x = flow_cfs, y = tot_wua_ac, color="habistat prediction")) + 
+  geom_line(data=dsm_habitat_suitable_ac, aes(x = flow_cfs, y = value, color = name)) +  
+  facet_wrap(~river, scales="free_y") + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
+  scale_y_continuous(labels=scales::comma_format(), expand=c(0,0), limits=c(0,NA)) + 
+  theme(legend.position="top", legend.title=element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  xlab("Flow (cfs)") + ylab("Total WUA (ac)") +
+  scale_color_manual(values = palette_dsmhabitat_comparison)
+
 ```
 
 ## Results Export

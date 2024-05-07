@@ -1,7 +1,7 @@
 Statistical Modeling to Predict Flow-to-Suitable-Area Curves
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-04-25
+2024-05-07
 
 - [Import and Preprocess Training
   Data](#import-and-preprocess-training-data)
@@ -1900,10 +1900,11 @@ prediction_flows <- readRDS(here::here("data-raw", "results", "watershed_flow_su
   mutate(flow_cfs = map2(min_cfs, max_cfs, function(x, y) oom_range(x, y))) |>
   select(watershed, flow_cfs) |>
   unnest(flow_cfs) |>
+  filter(flow_cfs >= min(interp_flows) & flow_cfs <= max(interp_flows)) |>
   glimpse()
 ```
 
-    ## Rows: 587
+    ## Rows: 336
     ## Columns: 2
     ## $ watershed <chr> "American River", "American River", "American River", "Ameri…
     ## $ flow_cfs  <dbl> 500, 600, 700, 800, 900, 1000, 2000, 3000, 4000, 5000, 6000,…
@@ -2105,9 +2106,6 @@ pd_rf_by_mainstem |>
   scale_color_manual(values = palette_hqt_gradient_class)
 ```
 
-    ## Warning: Transformation introduced infinite values in continuous x-axis
-    ## Transformation introduced infinite values in continuous x-axis
-
 ![](model-expl_files/figure-gfm/dsmhabitat-sd-val-1.png)<!-- -->
 
 ``` r
@@ -2123,8 +2121,6 @@ pd_rf_by_mainstem_summary |>
   xlab("Flow (cfs)") + ylab("Total WUA (ac)")
 ```
 
-    ## Warning: Transformation introduced infinite values in continuous x-axis
-
 ![](model-expl_files/figure-gfm/dsmhabitat-sd-val-2.png)<!-- -->
 
 ``` r
@@ -2139,8 +2135,6 @@ pd_rf_by_mainstem_summary |>
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
 ```
-
-    ## Warning: Transformation introduced infinite values in continuous x-axis
 
 ![](model-expl_files/figure-gfm/dsmhabitat-sd-val-3.png)<!-- -->
 
@@ -2162,7 +2156,6 @@ pd_rf_by_mainstem_summary |>
 ```
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
-    ## Transformation introduced infinite values in continuous x-axis
 
     ## Warning: Removed 25 rows containing missing values (`geom_line()`).
 
@@ -2185,12 +2178,31 @@ pd_rf_by_mainstem_summary |>
 ```
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
+    ## Removed 25 rows containing missing values (`geom_line()`).
+
+![](model-expl_files/figure-gfm/dsmhabitat-sd-val-5.png)<!-- -->
+
+``` r
+pd_rf_by_mainstem_summary |> filter(flow_cfs>=min(interp_flows)) |>
+  ggplot() +
+  geom_line(aes(x = flow_cfs, y = tot_wua_ac, color="habistat prediction")) + 
+  geom_line(data=dsm_habitat_suitable_ac, aes(x = flow_cfs, y = value, color = name)) +  
+  facet_wrap(~river, scales="free_y") + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
+  scale_y_continuous(labels=scales::comma_format(), expand=c(0,0), limits=c(0,NA)) + 
+  theme(legend.position="top", legend.title=element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  xlab("Flow (cfs)") + ylab("Total WUA (ac)") +
+  scale_color_manual(values = palette_dsmhabitat_comparison)
+```
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
 
-    ## Warning: Removed 25 rows containing missing values (`geom_line()`).
+    ## Warning: Removed 26 rows containing missing values (`geom_line()`).
 
-![](model-expl_files/figure-gfm/dsmhabitat-sd-val-5.png)<!-- -->
+![](model-expl_files/figure-gfm/dsmhabitat-sd-val-6.png)<!-- -->
 
 ### One-step model, scale-independent: WUA/LF vs normalized flow
 
@@ -2252,9 +2264,6 @@ pd_rf_by_mainstem |>
   scale_color_manual(values = palette_hqt_gradient_class)
 ```
 
-    ## Warning: Transformation introduced infinite values in continuous x-axis
-    ## Transformation introduced infinite values in continuous x-axis
-
 ![](model-expl_files/figure-gfm/dsmhabitat-si2-val-1.png)<!-- -->
 
 ``` r
@@ -2270,8 +2279,6 @@ pd_rf_by_mainstem_summary |>
   xlab("Flow (cfs)") + ylab("Total WUA (ac)")
 ```
 
-    ## Warning: Transformation introduced infinite values in continuous x-axis
-
 ![](model-expl_files/figure-gfm/dsmhabitat-si2-val-2.png)<!-- -->
 
 ``` r
@@ -2286,8 +2293,6 @@ pd_rf_by_mainstem_summary |>
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
 ```
-
-    ## Warning: Transformation introduced infinite values in continuous x-axis
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si2-val-3.png)<!-- -->
 
@@ -2309,7 +2314,6 @@ pd_rf_by_mainstem_summary |>
 ```
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
-    ## Transformation introduced infinite values in continuous x-axis
 
     ## Warning: Removed 25 rows containing missing values (`geom_line()`).
 
@@ -2332,12 +2336,31 @@ pd_rf_by_mainstem_summary |>
 ```
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
+    ## Removed 25 rows containing missing values (`geom_line()`).
+
+![](model-expl_files/figure-gfm/dsmhabitat-si2-val-5.png)<!-- -->
+
+``` r
+pd_rf_by_mainstem_summary |> filter(flow_cfs>=min(interp_flows)) |>
+  ggplot() +
+  geom_line(aes(x = flow_cfs, y = tot_wua_ac, color="habistat prediction")) + 
+  geom_line(data=dsm_habitat_suitable_ac, aes(x = flow_cfs, y = value, color = name)) +  
+  facet_wrap(~river, scales="free_y") + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
+  scale_y_continuous(labels=scales::comma_format(), expand=c(0,0), limits=c(0,NA)) + 
+  theme(legend.position="top", legend.title=element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  xlab("Flow (cfs)") + ylab("Total WUA (ac)") +
+  scale_color_manual(values = palette_dsmhabitat_comparison)
+```
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
 
-    ## Warning: Removed 25 rows containing missing values (`geom_line()`).
+    ## Warning: Removed 26 rows containing missing values (`geom_line()`).
 
-![](model-expl_files/figure-gfm/dsmhabitat-si2-val-5.png)<!-- -->
+![](model-expl_files/figure-gfm/dsmhabitat-si2-val-6.png)<!-- -->
 
 ### Two-step model: (%HSI vs normalized flow) \* (Total Area/LF vs flow)
 
@@ -2421,9 +2444,6 @@ pd_rf_by_mainstem |>
   scale_color_manual(values = palette_hqt_gradient_class)
 ```
 
-    ## Warning: Transformation introduced infinite values in continuous x-axis
-    ## Transformation introduced infinite values in continuous x-axis
-
 ![](model-expl_files/figure-gfm/dsmhabitat-si-val-1.png)<!-- -->
 
 ``` r
@@ -2439,8 +2459,6 @@ pd_rf_by_mainstem_summary |>
   xlab("Flow (cfs)") + ylab("Total WUA (ac)")
 ```
 
-    ## Warning: Transformation introduced infinite values in continuous x-axis
-
 ![](model-expl_files/figure-gfm/dsmhabitat-si-val-2.png)<!-- -->
 
 ``` r
@@ -2455,8 +2473,6 @@ pd_rf_by_mainstem_summary |>
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
 ```
-
-    ## Warning: Transformation introduced infinite values in continuous x-axis
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si-val-3.png)<!-- -->
 
@@ -2478,7 +2494,6 @@ pd_rf_by_mainstem_summary |>
 ```
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
-    ## Transformation introduced infinite values in continuous x-axis
 
     ## Warning: Removed 25 rows containing missing values (`geom_line()`).
 
@@ -2501,12 +2516,31 @@ pd_rf_by_mainstem_summary |>
 ```
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
+    ## Removed 25 rows containing missing values (`geom_line()`).
+
+![](model-expl_files/figure-gfm/dsmhabitat-si-val-5.png)<!-- -->
+
+``` r
+pd_rf_by_mainstem_summary |> filter(flow_cfs>=min(interp_flows)) |>
+  ggplot() +
+  geom_line(aes(x = flow_cfs, y = tot_wua_ac, color="habistat prediction")) + 
+  geom_line(data=dsm_habitat_suitable_ac, aes(x = flow_cfs, y = value, color = name)) +  
+  facet_wrap(~river, scales="free_y") + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
+  scale_y_continuous(labels=scales::comma_format(), expand=c(0,0), limits=c(0,NA)) + 
+  theme(legend.position="top", legend.title=element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  xlab("Flow (cfs)") + ylab("Total WUA (ac)") +
+  scale_color_manual(values = palette_dsmhabitat_comparison)
+```
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
 
-    ## Warning: Removed 25 rows containing missing values (`geom_line()`).
+    ## Warning: Removed 26 rows containing missing values (`geom_line()`).
 
-![](model-expl_files/figure-gfm/dsmhabitat-si-val-5.png)<!-- -->
+![](model-expl_files/figure-gfm/dsmhabitat-si-val-6.png)<!-- -->
 
 ## Results Export
 
@@ -2698,9 +2732,29 @@ yuba_wua_predicted_temporal_summary <-
     ## `.groups` argument.
 
 ``` r
+yuba_wua_predicted_temporal_ts <-
+  readRDS(here::here("data-raw", "results", "durhsi_applied_to_comid_ts.Rds")) |>
+  ungroup() |>
+    filter(river == "Lower Yuba River") |>
+  filter(water_year %in% unique(lyr_cbec_temporal$water_year)) |>
+  select(comid, water_year, flow_cfs = q, durwua, date) |>
+  inner_join(flowline_attributes |> transmute(comid, length_ft = reach_length_km*3280.84), by=join_by(comid))
+
+yuba_wua_predicted_temporal_ts_summary <- 
+  yuba_wua_predicted_temporal_ts |> 
+  group_by(flow_cfs, water_year, date) |>
+  summarize(durwua = sum(durwua * length_ft) / sum(length_ft))
+```
+
+    ## `summarise()` has grouped output by 'flow_cfs', 'water_year'. You can override
+    ## using the `.groups` argument.
+
+``` r
 ggplot() + 
   geom_point(data = lyr_cbec_temporal_summary,
             aes(x = flow_cfs, y = wua_ft2_per_lf, color = "CBEC Study (LYR SRH2D)"), size = 0.7, stroke = 0) +
+#    geom_point(data = yuba_wua_predicted_temporal_ts_summary,
+#            aes(x = flow_cfs, y = durwua, color = "Habistat Model 1"), size = 0.7, stroke = 0) +
   geom_line(data = lyr_cbec_nontemporal_summary,
             aes(x = flow_cfs, y = wua_ft2_per_lf, color = "CBEC Study (LYR SRH2D)", linetype = "Non-temporal", linewidth = "Non-temporal")) +
   geom_line(data = yuba_wua_predicted_temporal_summary,

@@ -1317,6 +1317,7 @@ prediction_flows <- readRDS(here::here("data-raw", "results", "watershed_flow_su
   mutate(flow_cfs = map2(min_cfs, max_cfs, function(x, y) oom_range(x, y))) |>
   select(watershed, flow_cfs) |>
   unnest(flow_cfs) |>
+  filter(flow_cfs >= min(interp_flows) & flow_cfs <= max(interp_flows)) |>
   glimpse()
 
 #prediction_flows |> group_by(watershed) |> summarize(max_flow = max(flow_cfs)) |> arrange(-max_flow) 

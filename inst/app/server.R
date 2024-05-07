@@ -12,7 +12,13 @@ function(input, output, session){
     flowlines_gcs |>
       inner_join(active_predictions(),
                  by=join_by(comid),
-                 relationship="one-to-one")
+                 relationship="one-to-one") |>
+      mutate(tooltip_html = paste0("<strong>", comid, " ", gnis_name, "</strong>", "<br />",
+                                   "Scale-dependent model: ", round(wua_per_lf_pred_sd,2), " ft2/ft", "<br />",
+                                   "Scale-normalized model: ", round(wua_per_lf_pred_si2,2), " ft2/ft", "<br />",
+                                   "Two-step model: ", round(wua_per_lf_pred_sd2si,2), " ft2/ft",
+                                   if_else(!is.na(wua_per_lf_actual),
+                                           paste0("<br />", "Actual: ", round(wua_per_lf_actual,2), " ft2/ft"), "")))
     })
 
   # SELECTED COMID OBSERVER ----------------------------------------------------
@@ -51,6 +57,7 @@ function(input, output, session){
   })
 
   output$fsa_plot <- renderPlot({
+    if (!is.null(selected_point$object_id)) {
     predictions_table |>
       filter(comid == selected_point$comid) |>
       ggplot(aes(x = flow_cfs)) +
@@ -63,6 +70,9 @@ function(input, output, session){
         #scale_y_continuous(trans = ihs, labels = scales::label_comma(), limits = c(0, NA)) +
         theme_minimal() + theme(panel.grid.minor = element_blank(), legend.position = "top") +
         xlab("Flow (cfs)") + ylab("WUA (ft2) per linear ft")
+    } else {
+      NULL
+    }
   })
 
   # LEAFLET MAP FUNCTIONS ------------------------------------------------------
@@ -108,11 +118,8 @@ function(input, output, session){
 
       m |> leaflet::addPolylines(data = active_geom(),
                                  layerId = ~object_id,
-                                 label = ~lapply(paste0("<strong>", comid, " ", gnis_name, "</strong>", "<br />",
-                                                        "Scale-dependent model: ", round(wua_per_lf_pred_sd,2), " ft2/ft", "<br />",
-                                                        "Scale-normalized model: ", round(wua_per_lf_pred_si2,2), " ft2/ft", "<br />",
-                                                        "Two-step model: ", round(wua_per_lf_pred_sd2si,2), " ft2/ft", "<br />",
-                                                        "Actual: ", round(wua_per_lf_actual,2), " ft2/ft"), htmltools::HTML),
+                                 popup = ~tooltip_html,
+                                 label = ~lapply(tooltip_html, htmltools::HTML),
                                  color = ~pal(wua_per_lf), #pal(wua_per_lf),
                                  opacity = 1,
                                  weight = 2,

@@ -1,5 +1,5 @@
 ---
-title: "Statistical Modeling to Predict Flow-to-Suitable-Area Curves"
+title: "Statistical Modeling to Predict Flow-to-Suitable-Area Curves: Functional Regression"
 author: "[Skyler Lewis](mailto:slewis@flowwest.com)"
 date: "`r Sys.Date()`"
 output: 
@@ -25,9 +25,9 @@ Set up FREE package
 ```{r setup-FREE}
 #devtools::install_github("jdyen/FREE")
 
-# forked version fixing compile error
+# use forked version fixing compile error
 # replaced PI with (2.0 * asin(1.0)) in spline_model_sampler.cpp and spline_update_betas.cpp
-devtools::install(r"(C:\Users\skylerlewis\Github\FREE)")
+# devtools::install(r"(C:\Users\skylerlewis\Github\FREE)")
 ```
 
 ```{r data-import}
@@ -49,7 +49,13 @@ flow_to_suitable_area <-
   filter(flow_cfs %in% interp_flows) |>
   filter(!is.na(hsi_frac)) |>
   inner_join(flowline_attributes |> transmute(comid, length_ft = reach_length_km*3280.84), by=join_by(comid)) |>
-  mutate(wua_per_lf = area_wua_ft2 / length_ft)
+  mutate(wua_per_lf = area_wua_ft2 / length_ft) |>
+  # filter out comids with outlier WUA/LF
+  ungroup() |>
+  mutate(outlier_filter = wua_per_lf > (mean(wua_per_lf) + 3 * sd(wua_per_lf))) |>
+  group_by(comid) |>
+  filter(!any(outlier_filter)) |>
+  ungroup()
 
 # Train/test split
 
@@ -71,15 +77,19 @@ flow_to_suitable_area_test = flow_to_suitable_area |> filter(comid %in% test_com
 * Predictor (x) matrix has rows = comid ("replications"), columns = predictor variables ("features")
 * Output coefficient matrix will have rows = predictor variables ("features"), columns = flow ("argvals")
 
-```{r}
-prep_func_reg <- function(df_x, df_y, ..., # pass predictor variables as tidy eval list
+```{r funcs-data-prep}
+prep_func_reg <- function(df_x, df_y = NULL, ..., # pass predictor variables as tidy eval list
                           .y_var = "wua_per_lf",
                           .arg_var = "flow_cfs",
                           .rep_var = "comid") {
   
-  predictor_df <- 
-    df_x |>
-    filter(!!sym(.rep_var) %in% (df_y |> pull(!!sym(.rep_var))))
+  if(!is.null(df_y)) {
+    predictor_df <- 
+      df_x |>
+      filter(!!sym(.rep_var) %in% (df_y |> pull(!!sym(.rep_var))))
+  } else {
+    predictor_df <- df_x
+  }
   
   if(!missing(...)){
     predictor_df <- predictor_df |> select(!!sym(.rep_var), ...) 
@@ -91,7 +101,7 @@ prep_func_reg <- function(df_x, df_y, ..., # pass predictor variables as tidy ev
       xtabs(formula = value ~ .) |>
       as("array")
   
-  if(!missing(df_y)) {
+  if(!is.null(df_y)) {
     
     response_df <-
       predictor_df |>
@@ -130,13 +140,17 @@ fit_func_reg <- function(data, ...) {
 
 ### Setting up the training data
 
-```{r}
+```{r data-setup}
 # Specify variables using recipes for left and right side separately
 # We can save muliple of these recipe objects to test different model specifications
 
 lhs <- flow_to_suitable_area |> 
-  recipe(wua_per_lf + flow_cfs ~ comid) |> 
+  recipe(vars = c("wua_per_lf", "flow_cfs", "comid")) |>
+  #step_mutate_at(wua_per_lf, fn = function(x) asinh(x*10)) |> 
+  step_normalize(wua_per_lf, id="normalize_y") |> 
   prep(flow_to_suitable_area_train) 
+
+normalize_parameters <- tidy(lhs, id = "normalize_y") |> select(statistic, value) |> deframe()
 
 rhs <- flowline_attributes |> 
   recipe(comid ~ slope + sinuosity +
@@ -156,16 +170,16 @@ train_data <-
   glimpse()
 ```
 
-Training data is now compiled for `r cat(dim(data$y)[[2]])` flows and `r cat(dim(data$x)[[2]])` predictors across `r cat(dim(data$y)[[1]])` comids.
+Training data is now compiled for `r (dim(train_data$y)[[2]])` flows and `r (dim(train_data$x)[[2]])` predictors across `r (dim(train_data$y)[[1]])` comids.
 
-* Response (y) matrix dimensions: `r cat(paste(dim(data$y), collapse=" x "))`
-* Predictor (x) matrix dimensions: `r cat(paste(dim(data$x), collapse=" x "))`
+* Response (y) matrix dimensions: `r (paste(dim(train_data$y), collapse=" x "))`
+* Predictor (x) matrix dimensions: `r (paste(dim(train_data$x), collapse=" x "))`
 
 ### Fitting the model
 
-```{r}
+```{r model-fit}
 fit <- train_data |>
-  fit_func_reg(n.iters=1000, degree=3) |>
+  fit_func_reg(n.iters=15, degree=3) |>
   glimpse()
 
 coefs <- fit$coefs.mean
@@ -199,23 +213,27 @@ y_fit_tbl <- y_fit |>
   mutate(across(c(comid, flow_cfs),as.numeric)) 
 
 inner_join(y_obs_tbl, y_fit_tbl, by=join_by(comid, flow_cfs)) |>
+  mutate(across(starts_with("wua_per_lf"), function(x) (x*normalize_parameters[["sd"]]) + normalize_parameters[["mean"]])) |>
   mutate(residual = wua_per_lf_pred - wua_per_lf) |>
-  ggplot() + geom_point(aes(x = wua_per_lf, y = wua_per_lf_pred, color = flow_cfs, group = comid))
+  arrange(comid, flow_cfs) |>
+  ggplot() + geom_path(aes(x = wua_per_lf, y = wua_per_lf_pred, color = flow_cfs, group = comid)) + 
+  geom_abline(slope=1, intercept = 0)
+
 ```
 
-Now we have a `r cat(paste(dim(coefs), collapse=" x "))` coefficient matrix (rows are predictors and the intercept, columns are flows) 
+Now we have a `r (paste(dim(coefs), collapse=" x "))` coefficient matrix (rows are predictors and the intercept, columns are flows) 
 
-### Making predictions
+### Validation and Prediction
 
-```{r}
+```{r funcs-prediction}
 predict_func_reg <- function(data, fit) {
   
   coefs <- fit$coefs.mean
   rownames(coefs) <- c("_Intercept", data$x_names)
-  colnames(coefs) <- data$arg_vals
+  colnames(coefs) <- as.numeric(colnames(fit$observed)) #data$arg_vals
   
   result_mat <- cbind(1, data$x) %*% coefs
-  return(list("arg_vals" = data$arg_vals,
+  return(list("arg_vals" = as.numeric(colnames(fit$observed)),#data$arg_vals,
               x_names = data$x_names,
               rep_names = data$rep_names,
               "predictors" = data$x,
@@ -228,15 +246,17 @@ tidy_func_reg <- function(lst,
                           .y_var = "wua_per_lf",
                           .arg_var = "flow_cfs",
                           .rep_var = "comid") {
-  cbind(lst$rep_names, lst$predicted) |>
+  cbind(as.numeric(lst$rep_names), lst$predicted) |>
     as_tibble() |>
     setNames(c(.rep_var, lst$arg_vals)) |>
     pivot_longer(-!!sym(.rep_var), names_to = .arg_var, values_to = .y_var) |>
     mutate(across(c(.rep_var, .arg_var), as.numeric)) |>
     rename("{.y_var}_pred" := .y_var)
 }
+```
 
-# Set up testing dataset
+```{r model-validation}
+# Set up validation dataset
 test_data <- 
   prep_func_reg(df_x = rhs |> bake(flowline_attributes_test),
                 df_y = lhs |> bake(flow_to_suitable_area_test)) |>
@@ -247,10 +267,34 @@ validation <- test_data |>
   predict_func_reg(fit) |>
   glimpse()
 
-validation |> 
+validation_tbl <- validation |> 
   tidy_func_reg() |>
+  mutate(across(starts_with("wua_per_lf"), function(x) (x*normalize_parameters[["sd"]]) + normalize_parameters[["mean"]])) |>
   left_join(flow_to_suitable_area |> 
               select(dataset, comid, flow_cfs, wua_per_lf), 
             by=join_by(comid, flow_cfs)) |>
   glimpse()
+
+validation_tbl |>
+  arrange(comid, flow_cfs) |>
+  ggplot() + geom_path(aes(x = wua_per_lf, y = wua_per_lf_pred, color = flow_cfs, group = comid)) + 
+  geom_abline(slope=1, intercept = 0)
 ```
+
+```{r model-prediction}
+# Set up validation dataset
+pred_data <- 
+  prep_func_reg(df_x = rhs |> bake(flowline_attributes)) |>
+  glimpse()
+
+# Run the prediction
+prediction <- pred_data |> 
+  predict_func_reg(fit) |>
+  glimpse()
+
+predicted_tbl <- prediction |> 
+  tidy_func_reg() |>
+  mutate(across(starts_with("wua_per_lf"), function(x) (x*normalize_parameters[["sd"]]) + normalize_parameters[["mean"]])) |>
+  glimpse()
+```
+

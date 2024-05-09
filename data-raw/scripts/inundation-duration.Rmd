@@ -12,7 +12,7 @@ output:
       url: https://latex.codecogs.com/svg.image?
 ---
 
-Duration suitability criteria from the CBEC LYR analysis are:
+Duration suitability criteria from the CBEC LYR analysis and HQT are:
 
 **Valley Lowland**
 
@@ -27,6 +27,8 @@ Duration suitability criteria from the CBEC LYR analysis are:
 * 1 to 9 days: 1.00
 * 10+ days: 0.66
 
+Additionally, we modify such that >=100 days is suitability 0, to effectively exclude the baseflow channel. 
+
 ```{r setup, message=FALSE, warning=FALSE}
 library(tidyverse)
 library(sf)
@@ -38,6 +40,8 @@ knitr::opts_chunk$set(eval=TRUE, fig.width=6.5, fig.height=4, dpi=300)
 theme_set(theme_minimal())
 
 source(here::here("data-raw", "scripts", "data-functions.R"))
+
+test_comids <- c(12071016, 12071090, 12071178, 12071286, 12075424, 7981730, 7981752, 7981808, 7981872, 7981878, 7981882, 7982794, 7982804, 7982810, 7982884, 7982886, 2819792, 2819796, 2819800, 2819818, 2819824, 2819862, 2821822, 2821824, 2821830, 2821832, 2821836)
 ```
 
 ```{r import, message=FALSE, warning=FALSE}
@@ -158,7 +162,7 @@ training_cdec_data |>
 ```{r exceedence-periods, message=FALSE, warning=FALSE}
 #  function to calculate exceedence by flow
 # based on statistics calculated on the exceedence event level
-calculate_exceedence_summary <- function(q_gauge, q_crit) {
+calculate_exceedence_summary <- function(q_gauge, q_crit, baseflow_threshold_days = 100) {
   
   n_days <- length(q_gauge)
   
@@ -171,12 +175,14 @@ calculate_exceedence_summary <- function(q_gauge, q_crit) {
     summarize(duration_days = max(cumulative_exceedence)) |>
     mutate(#duration_days = pmin(duration_days, 365), 
            durhsi_vl = case_when(duration_days == 0  ~ 0,
-                                 duration_days < 18  ~ 2/3,
+                                 duration_days < 18  ~ 0.66,
                                  duration_days < 25 ~ 1.00,
-                                 duration_days >= 25 ~ 2/3),
+                                 duration_days < baseflow_threshold_days ~ 0.66,
+                                 duration_days >= baseflow_threshold_days ~ 0),
            durhsi_vf = case_when(duration_days <= 0  ~ 0,
-                                 duration_days < 10 ~ 1,
-                                 duration_days >= 10 ~ 2/3)) 
+                                 duration_days < 10 ~ 1.00,
+                                 duration_days < baseflow_threshold_days ~ 0.66,
+                                 duration_days >= baseflow_threshold_days ~ 0)) 
     
   exceedence_intervals |>
     summarize(n_inundations = n(),
@@ -262,6 +268,8 @@ calculate_days_inundated(filter(training_cdec_data, river=="Deer Creek" & water_
 ```
 
 ```{r calc-inundation-by-wy, message=FALSE, warning=FALSE}
+baseflow_threshold_days <- 100
+
 durhsi_by_model_q_wy <- 
   training_reach_gages |> 
   expand_grid(water_year = seq(1998, 2023, 1)) |>
@@ -277,13 +285,15 @@ durhsi_by_model_q_wy <-
          river=="Lower Yuba River" ~ "Sacramento Valley",
          river=="Stanislaus River" ~ "San Joaquin Valley")) |>
   inner_join(water_year_types, by=join_by(location, water_year), relationship="many-to-one") |>
-  mutate(durhsi_vl = case_when(max_days_inundated == 0  ~ 0,
-                               max_days_inundated < 18  ~ 2/3,
-                               max_days_inundated < 25 ~ 1.00,
-                               max_days_inundated >= 25 ~ 2/3),
-         durhsi_vf = case_when(max_days_inundated <= 0  ~ 0,
-                               max_days_inundated < 10 ~ 1,
-                               max_days_inundated >= 10 ~ 2/3)) |> 
+    mutate(durhsi_vl = case_when(max_days_inundated == 0  ~ 0,
+                                 max_days_inundated < 18  ~ 0.66,
+                                 max_days_inundated < 25 ~ 1.00,
+                                 max_days_inundated < baseflow_threshold_days ~ 0.66,
+                                 max_days_inundated >= baseflow_threshold_days ~ 0),
+           durhsi_vf = case_when(max_days_inundated <= 0  ~ 0,
+                                 max_days_inundated < 10 ~ 1.00,
+                                 max_days_inundated < baseflow_threshold_days ~ 0.66,
+                                 max_days_inundated >= baseflow_threshold_days ~ 0)) |>
   glimpse()
 
 durhsi_by_model_q_wy |>
@@ -415,7 +425,7 @@ durhsi_by_model_q |>
 
 ```
 
-```{r posthoc-duration-func, eval=FALSE, include=TRUE}
+```{r posthoc-duration-func, eval=FALSE, include=FALSE}
 # full version
 apply_durations_to_fsa_curve <- function(fsa, drc, fsa_q=q, fsa_wua=wua, drc_q=q, drc_dhsi=dhsi) {
   full_join(fsa |> transmute(q={{fsa_q}}, wua={{fsa_wua}}),
@@ -453,17 +463,21 @@ apply_durations_to_fsa_curve <- function(fsa, drc, fsa_q=q, fsa_wua=wua, drc_q=q
 apply_durations_to_fsa_curve <- possibly(apply_durations_to_fsa_curve, otherwise=NA)
 ```
 
-```{r posthoc-duration-func-test}
+```{r posthoc-duration-func-test, eval=FALSE, include=FALSE}
+baseflow_threshold_days <- 100
+
 # need a public facing function that takes an input daily hydrograph and outputs this rating curve
 duration_rating_curves <- durhsi_by_model_q |> 
   select(river, model_q, avg_days_inundated) |>
   mutate(durhsi_vl = case_when(avg_days_inundated == 0  ~ 0,
-                               avg_days_inundated < 18  ~ 2/3,
+                               avg_days_inundated < 18  ~ 0.66,
                                avg_days_inundated < 25 ~ 1.00,
-                               avg_days_inundated >= 25 ~ 2/3),
+                               avg_days_inundated < baseflow_threshold_days ~ 0.66,
+                               avg_days_inundated >= baseflow_threshold_days ~ 0),
          durhsi_vf = case_when(avg_days_inundated <= 0  ~ 0,
-                               avg_days_inundated < 10 ~ 1,
-                               avg_days_inundated >= 10 ~ 2/3)) 
+                               avg_days_inundated < 10 ~ 1.00,
+                               avg_days_inundated < baseflow_threshold_days ~ 0.66,
+                               avg_days_inundated >= baseflow_threshold_days ~ 0)) 
 
 duration_rating_curves |>
   filter(river=="Deer Creek") |>
@@ -484,12 +498,12 @@ apply_durations_to_fsa_curve(fsa, duration_rating_curves |> filter(river=="Deer 
                              drc_q = model_q, drc_dhsi=durhsi_vf)|>
   ggplot(aes(x=q)) + 
   geom_line(aes(y=wua, color="WUA")) + 
-  geom_line(aes(y=durwua_simple, color="Duration-weighted WUA (simple approach)")) +
+  #geom_line(aes(y=durwua_simple, color="Duration-weighted WUA (simple approach)")) +
   geom_line(aes(y=durwua, color="Duration-weighted WUA (first-in-first-out approach)")) +
   ggtitle("Duration Criteria Applied to Flow-to-Suitable-Area Curve")
 ```
 
-```{r posthoc-duration-func-apply}
+```{r posthoc-duration-func-apply, eval=FALSE, include=FALSE}
 # apply to all --  need to split by foothill/lowland too
 fsa_duration_posthoc <- inner_join(flow_to_suitable_area |> nest(.by=c(dataset, comid), .key="tbl_fsa"),
            duration_rating_curves |> nest(.by=(river), .key="tbl_drc"),
@@ -511,8 +525,7 @@ fsa_duration_posthoc |>
 ```
 
 
-```{r wet-dry-normal}
-                      
+```{r wet-dry-normal, eval=FALSE, include=FALSE}
 #durhsi_by_model_q_wyt <- 
 #  training_reach_gages |> 
 #  expand_grid(water_year = seq(1998, 2023, 1)) |>
@@ -554,7 +567,7 @@ durhsi_by_model_q_wyt |>
 
 ```
 
-```{r daily-flow-exceedence-functions, message=FALSE, warning=FALSE}
+```{r daily-flow-exceedence-functions, message=FALSE, warning=FALSE, eval=FALSE, include=FALSE}
 calculate_daily_inundation_duration <- function(q_gauge, q_crit) {
   tibble(q_gauge,
          q_crit,
@@ -570,20 +583,22 @@ calculate_daily_inundation_duration <- function(q_gauge, q_crit) {
 dhsi <- function(duration_days, type) {
   if (type=="vl") {
     case_when(duration_days == 0  ~ 0,
-              duration_days < 18  ~ 2/3,
+              duration_days < 18  ~ 0.66,
               duration_days < 25 ~ 1.00,
-              duration_days >= 25 ~ 2/3)
+              duration_days < baseflow_threshold_days ~ 0.66,
+              duration_days >= baseflow_threshold_days ~ 0)
   } else if (type=="vf") {
     case_when(duration_days <= 0  ~ 0,
               duration_days < 10 ~ 1,
-              duration_days >= 10 ~ 2/3)
+              duration_days < baseflow_threshold_days ~ 0.66,
+              duration_days >= baseflow_threshold_days ~ 0)
   }
 }
 
 calculate_daily_inundation_duration(filter(training_cdec_data, river=="Deer Creek" & water_year==2017)$q_gauge, 500) |> dhsi("vf")
 ```
 
-```{r message=FALSE}
+```{r message=FALSE, eval=FALSE, include=FALSE}
 # duration-based HSI factors by flow threshold, by date
 drcs <-
   # set up all combinations of date/flow and critical flow
@@ -643,7 +658,7 @@ example_result |>
   
 ```
 
-```{r message=FALSE}
+```{r message=FALSE, eval=FALSE, include=FALSE}
 # instead of one for each comid we can summarize for a whole reach
 
 fsas <- flow_to_suitable_area |> 
@@ -686,6 +701,13 @@ example_result |>
 ### Revised Version 2
 
 ```{r posthoc-duration-func-simple}
+# https://stackoverflow.com/a/73215592
+cummean.na.rm <- function(x) {
+  idx <- cumsum(!is.na(x))
+  x_filtered <- x[!is.na(x)]
+  cummean(x_filtered)[idx]
+}
+
 # simple version
 apply_durations_to_fsa_curve <- function(fsa, drc, fsa_q=q, fsa_wua=wua, drc_q=q, drc_dhsi=dhsi) {
   full_join(fsa |> transmute(q={{fsa_q}}, wua={{fsa_wua}}),
@@ -705,7 +727,7 @@ apply_durations_to_fsa_curve <- function(fsa, drc, fsa_q=q, fsa_wua=wua, drc_q=q
     mutate(wua_added = if_else(marginal_wua > 0, marginal_wua, 0),
            marginal_durwua_added = dhsi * wua_added,
            wua_removed = (-1) * if_else(marginal_wua < 0, marginal_wua, 0), 
-           marginal_durwua_removed = cummean(dhsi) * wua_removed,
+           marginal_durwua_removed = cummean.na.rm(if_else(dhsi > 0, dhsi, NA)) * wua_removed,
            marginal_durwua = marginal_durwua_added - marginal_durwua_removed,
            durwua = pmin(pmax(cumsum(marginal_durwua), 0), wua))
 }
@@ -715,7 +737,7 @@ apply_durations_to_fsa_curve <- possibly(apply_durations_to_fsa_curve, otherwise
 
 Example
 
-```{r}
+```{r posthoc-duration-func-example}
 # EXAMPLE FLOW-TO-SUITABLE-AREA CURVE
 
 # monotonic test comid: 12075424; chaotic test comid: 12069362
@@ -736,7 +758,8 @@ drc <- durhsi_by_model_q_wy |>
   transmute(model_q, dhsi = durhsi_vl) |>
   glimpse()
 
-drc |> ggplot() + geom_line(aes(x=model_q, y=dhsi)) + scale_x_log10() + scale_y_continuous(limits=c(0,1)) +
+drc |> ggplot() + geom_step(aes(x=model_q, y=dhsi), direction="vh") + 
+  scale_x_log10() + scale_y_continuous(limits=c(0,1)) +
   ggtitle("Duration HSI Rating Curve") + 
   theme(panel.grid.minor = element_blank()) + xlab("Flow (cfs)") + ylab("Duration HSI")
 
@@ -750,18 +773,18 @@ res <- apply_durations_to_fsa_curve(fsa, drc,
 
 res |> 
   ggplot(aes(x=q)) + 
-  geom_line(aes(y=wua, color="WUA")) + 
-  geom_line(aes(y=durwua, color="Duration-weighted WUA")) +
-  geom_line(aes(y=dhsi*20, color="DHSI")) +
+  geom_line(aes(y=wua, color="WUA"), linewidth=1) + 
+  geom_line(aes(y=durwua, color="Duration-weighted WUA"), linewidth=1) +
+  geom_step(aes(y=dhsi*20, color="DHSI"), direction="vh", linewidth=1) +
   ggtitle("Duration Criteria Applied to Flow-to-Suitable-Area Curve") +
   scale_y_continuous(sec.axis = sec_axis(trans = ~./20, name="Duration HSI")) + 
-  theme(panel.grid.minor = element_blank()) + xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2) per LF")
+  theme(panel.grid.minor = element_blank()) + xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2) per LF") +
   scale_x_log10()
 ```
 
 Batch
 
-```{r fig.width=6.5, fig.height=6.5, dpi=300}
+```{r posthoc-duration-func-batch, fig.width=6.5, fig.height=6.5, dpi=300}
 batch_fsa <- flow_to_suitable_area |>
   inner_join(flowline_attributes |> select(comid, hqt_gradient_class, reach_length_km)) |>
   mutate(hqt_cls = if_else(hqt_gradient_class == "Valley Lowland", "VL", "VF")) |>
@@ -789,8 +812,8 @@ batch_res <-
   glimpse()
 
 batch_res |>
-  filter(comid %in% test_comids) |>
-  filter(water_year == 2017) |>
+  filter(comid %in% test_comids[1:25]) |>
+  filter(water_year == 2017) |> 
   ggplot(aes(x=q)) + facet_wrap(~comid, scales="free_y") +
   geom_line(aes(y=wua, color="WUA")) + 
   geom_line(aes(y=durwua, color="Duration-weighted WUA")) +
@@ -801,13 +824,13 @@ batch_res |>
         panel.grid.minor=element_blank(), 
         legend.position = "top")
 
-batch_res |> saveRDS(here::here("data-raw", "results", "dhsi_applied_to_comid.Rds"))
+batch_res |> saveRDS(here::here("data-raw", "results", "durhsi_applied_to_comid.Rds"))
 
 ```
 
 Result applied to individual dates
 
-```{r}
+```{r posthoc-duration-func-time-series}
 # apply a rating curve to a time series
 extract_durwua_time_series <- function(gauge_ts, q_durwua) {
   if(!is.null(gauge_ts) & !is.null(q_durwua)) {
@@ -855,4 +878,96 @@ batch_res_ts |>
                      group_by(river, water_year, q) |>
                      summarize(wua_ac = sum(wua * length_ft) / 43560),
             aes(x = q, y = wua_ac))
+```
+
+## Floodplain-Instream Split 
+
+(eventually move this to its own file)
+
+Need method to determine the flow theshold (aka bankfull flow) to use to split instream and floodplain
+
+As a placeholder, is there a bankfull flow contained in the flowline_attributes? 
+Or assume some channel shape and derive from bf w and bf d using Manning's
+
+```{r floodplain-split-func}
+fp <- function(suitable_area, flow, flow_threshold) {
+  
+  if (length(flow) > 0 & 
+      length(suitable_area) > 0 & 
+      all(!is.na(flow)) & 
+      all(!is.na(suitable_area)) & 
+      all(!is.na(flow_threshold))) {
+    
+    qt <- flow_threshold
+    
+    suitable_area_below_flow_threshold <- if (any(flow < qt)) suitable_area[which(flow < qt)] 
+    instream_at_threshold <- if (any(flow < qt)) suitable_area_below_flow_threshold[[length(suitable_area_below_flow_threshold)]] else 0
+    #suitable_area_floodplain <- if (any(flow >= qt)) suitable_area[which(flow >= qt)] - instream_at_threshold
+  
+    suitable_area_instream <- if_else(suitable_area <= instream_at_threshold, suitable_area, instream_at_threshold)
+    
+    suitable_area_floodplain <- suitable_area - suitable_area_instream # 
+    
+    return(list(
+      flow = flow,
+      suitable_area = suitable_area,
+      is_floodplain = (flow >= qt),
+      # habitat_instream = c(suitable_area_instream, rep(instream_at_threshold, length(suitable_area_floodplain))),
+      # habitat_floodplain = c(rep(NA, length(suitable_area_instream)), suitable_area_floodplain)
+      habitat_instream = suitable_area_instream,
+      habitat_floodplain = suitable_area_floodplain # if_else(suitable_area_floodplain > 0, suitable_area_floodplain, NA)
+      ))
+    
+  } else {
+    return(list(
+      flow = flow,
+      suitable_area = suitable_area,
+      is_floodplain = NA,
+      habitat_instream = NA,
+      habitat_floodplain = NA
+      ))
+  }
+}
+```
+
+```{r floodplain-split-example}
+# rough example of instream-floodplain flow thresholds derived from bankfull width/depth
+bankfull_flows <- 
+  flowline_attributes |>
+  transmute(comid,
+            xs_area_m = bf_width_m * bf_depth_m,
+            w_perim_m = 2 * bf_depth_m * bf_width_m,
+            roughness = 0.03, # typical roughness for natural channels
+            bf_q_m3_s = xs_area_m * (xs_area_m / w_perim_m)^(2/3) * slope^(1/2) * roughness^(-1),
+            bf_q_cfs = bf_q_m3_s * 0.3048^(-3)) |>
+  select(comid, bf_q_cfs) |>
+  filter(!is.na(bf_q_cfs))
+
+# apply the floodplain function
+batch_res_fp <- batch_res |>
+  inner_join(bankfull_flows, by=join_by(comid)) |>
+  group_by(comid, water_year, bf_q_cfs) |>
+  summarize(result = list(fp(durwua, q, bf_q_cfs))) |>
+  ungroup() |>
+  unnest_wider(result, names_sep="_") |>
+  unnest(cols = starts_with("result_")) |>
+  rename_with(function(x) str_replace(x, "result_", ""), starts_with("result_")) |>
+  glimpse()
+
+# Plotting an example
+batch_res_fp |>
+  filter(water_year == 2017) |> 
+  filter(comid == 7981768) |>
+  ggplot(aes(x=flow)) + facet_wrap(~comid, scales="free_y") +
+  geom_step(aes(y=suitable_area, color="Combined"), direction="hv", linewidth=1) + 
+  geom_step(aes(y=habitat_instream, color="Instream"), direction="hv", linewidth=1) +
+  geom_step(aes(y=habitat_floodplain, color="Floodplain"), direction="hv", linewidth=1) +
+  geom_step(aes(y=suitable_area, color="Combined"),linetype="dashed", direction="hv", linewidth=1) +
+  geom_vline(aes(xintercept = bf_q_cfs, linetype = "Bankfull Flow (cfs)")) +
+  #scale_x_log10(scales::label_comma +
+  ggtitle("Instream/Floodplain Threshold Applied to Flow-to-Suitable-Area Curve") +
+  xlab("Flow (cfs)") + ylab("Suitable habitat area per linear ft") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), 
+        panel.grid.minor=element_blank(), 
+        legend.position = "top")
 ```

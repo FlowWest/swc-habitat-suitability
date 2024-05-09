@@ -1,7 +1,7 @@
 Flow Data Analysis for Inundation Duration HSI Component
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-05-08
+2024-05-09
 
 - [Import Flow Time Series Data](#import-flow-time-series-data)
 - [Flow Exceedence Calculation](#flow-exceedence-calculation)
@@ -589,7 +589,8 @@ apply_durations_to_fsa_curve <- function(fsa, drc, fsa_q=q, fsa_wua=wua, drc_q=q
     mutate(wua_added = if_else(marginal_wua > 0, marginal_wua, 0),
            marginal_durwua_added = dhsi * wua_added,
            wua_removed = (-1) * if_else(marginal_wua < 0, marginal_wua, 0), 
-           marginal_durwua_removed = cummean.na.rm(if_else(dhsi > 0, dhsi, NA)) * wua_removed,
+           marginal_durwua_removed = cummean(dhsi) * wua_removed,
+###        marginal_durwua_removed = cummean.na.rm(if_else(dhsi > 0, dhsi, NA)) * wua_removed,
            marginal_durwua = marginal_durwua_added - marginal_durwua_removed,
            durwua = pmin(pmax(cumsum(marginal_durwua), 0), wua))
 }
@@ -657,12 +658,6 @@ res <- apply_durations_to_fsa_curve(fsa, drc,
                                     drc_q = model_q, drc_dhsi = dhsi) |>
   glimpse()
 ```
-
-    ## Warning: There was 1 warning in `mutate()`.
-    ## ℹ In argument: `marginal_durwua_removed = cummean.na.rm(if_else(dhsi > 0, dhsi,
-    ##   NA)) * wua_removed`.
-    ## Caused by warning in `cummean.na.rm(if_else(dhsi > 0, dhsi, NA)) * wua_removed`:
-    ## ! longer object length is not a multiple of shorter object length
 
     ## Rows: 18
     ## Columns: 10
@@ -741,18 +736,7 @@ batch_res <-
   glimpse()
 ```
 
-    ## Warning: There were 2992 warnings in `mutate()`.
-    ## The first warning was:
-    ## ℹ In argument: `durwua = pmin(pmax(cumsum(marginal_durwua), 0), wua)`.
-    ## Caused by warning:
-    ## ! There was 1 warning in `mutate()`.
-    ## ℹ In argument: `marginal_durwua_removed = cummean.na.rm(if_else(dhsi > 0, dhsi,
-    ##   NA)) * wua_removed`.
-    ## Caused by warning in `cummean.na.rm(if_else(dhsi > 0, dhsi, NA)) * wua_removed`:
-    ## ! longer object length is not a multiple of shorter object length
-    ## ℹ Run `dplyr::last_dplyr_warnings()` to see the 2991 remaining warnings.
-
-    ## Rows: 87,170
+    ## Rows: 89,550
     ## Columns: 14
     ## $ dataset                 <chr> "Deer Creek", "Deer Creek", "Deer Creek", "Dee…
     ## $ hqt_cls                 <chr> "VF", "VF", "VF", "VF", "VF", "VF", "VF", "VF"…
@@ -765,9 +749,9 @@ batch_res <-
     ## $ wua_added               <dbl> 5.39242987, 1.66736437, 0.00000000, 0.00000000…
     ## $ marginal_durwua_added   <dbl> 3.559004, 0.000000, 0.000000, 0.000000, 0.0000…
     ## $ wua_removed             <dbl> 0.0000000, 0.0000000, 1.2432948, 1.5998988, 0.…
-    ## $ marginal_durwua_removed <dbl> 0.00000000, 0.00000000, 0.82057458, 1.05593318…
-    ## $ marginal_durwua         <dbl> 3.55900371, 0.00000000, -0.82057458, -1.055933…
-    ## $ durwua                  <dbl> 3.559004, 3.559004, 2.738429, 1.682496, 1.1481…
+    ## $ marginal_durwua_removed <dbl> 0.000000000, 0.000000000, 0.273524861, 0.26398…
+    ## $ marginal_durwua         <dbl> 3.559003712, 0.000000000, -0.273524861, -0.263…
+    ## $ durwua                  <dbl> 3.559004, 3.559004, 3.285479, 3.021496, 2.9146…
 
 ``` r
 batch_res |>
@@ -776,6 +760,7 @@ batch_res |>
   ggplot(aes(x=q)) + facet_wrap(~comid, scales="free_y") +
   geom_line(aes(y=wua, color="WUA")) + 
   geom_line(aes(y=durwua, color="Duration-weighted WUA")) +
+  geom_line(aes(y=wua, color="WUA"), linetype = "dashed") +
   scale_x_log10() +
   ggtitle("Duration Criteria Applied to Flow-to-Suitable-Area Curve") +
   xlab("Flow (cfs)") + ylab("Suitable habitat area per linear ft") +
@@ -787,7 +772,7 @@ batch_res |>
 ![](inundation-duration_files/figure-gfm/posthoc-duration-func-batch-1.png)<!-- -->
 
 ``` r
-batch_res |> saveRDS(here::here("data-raw", "results", "dhsi_applied_to_comid.Rds"))
+batch_res |> saveRDS(here::here("data-raw", "results", "durhsi_applied_to_comid.Rds"))
 ```
 
 Result applied to individual dates
@@ -929,7 +914,7 @@ batch_res_fp <- batch_res |>
     ## `summarise()` has grouped output by 'comid', 'water_year'. You can override
     ## using the `.groups` argument.
 
-    ## Rows: 85,220
+    ## Rows: 87,600
     ## Columns: 8
     ## $ comid              <dbl> 2819786, 2819786, 2819786, 2819786, 2819786, 281978…
     ## $ water_year         <dbl> 1998, 1998, 1998, 1998, 1998, 1998, 1998, 1998, 199…

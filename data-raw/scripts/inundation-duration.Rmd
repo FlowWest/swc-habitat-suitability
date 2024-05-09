@@ -727,7 +727,8 @@ apply_durations_to_fsa_curve <- function(fsa, drc, fsa_q=q, fsa_wua=wua, drc_q=q
     mutate(wua_added = if_else(marginal_wua > 0, marginal_wua, 0),
            marginal_durwua_added = dhsi * wua_added,
            wua_removed = (-1) * if_else(marginal_wua < 0, marginal_wua, 0), 
-           marginal_durwua_removed = cummean.na.rm(if_else(dhsi > 0, dhsi, NA)) * wua_removed,
+           marginal_durwua_removed = cummean(dhsi) * wua_removed,
+###        marginal_durwua_removed = cummean.na.rm(if_else(dhsi > 0, dhsi, NA)) * wua_removed,
            marginal_durwua = marginal_durwua_added - marginal_durwua_removed,
            durwua = pmin(pmax(cumsum(marginal_durwua), 0), wua))
 }
@@ -817,6 +818,7 @@ batch_res |>
   ggplot(aes(x=q)) + facet_wrap(~comid, scales="free_y") +
   geom_line(aes(y=wua, color="WUA")) + 
   geom_line(aes(y=durwua, color="Duration-weighted WUA")) +
+  geom_line(aes(y=wua, color="WUA"), linetype = "dashed") +
   scale_x_log10() +
   ggtitle("Duration Criteria Applied to Flow-to-Suitable-Area Curve") +
   xlab("Flow (cfs)") + ylab("Suitable habitat area per linear ft") +

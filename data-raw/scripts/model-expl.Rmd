@@ -67,7 +67,9 @@ flowlines <- readRDS(here::here("data-raw", "results", "flowline_geometries_proj
 
 # predictor variables by ComID
 flowline_attributes <- readRDS(here::here("data-raw", "results", "flowline_attributes.Rds")) |>
-  mutate(da_scalar = (da_area_sq_km*247.1053815) * (da_ppt_mean_mm*0.0393701) / 1E6) # 1 million acre-inches
+  mutate(da_scalar = (da_area_sq_km*247.1053815) * (da_ppt_mean_mm*0.0393701) / 1E6) |># 1 million acre-inches
+  mutate(length_ft = reach_length_km * 1000 / 0.3048) 
+# this is reach length based on NHD but should update for training data
 
 # response variables by ComID and Flow 
 flow_to_suitable_area <- readRDS(here::here("data-raw", "results", "fsa_combined.Rds"))
@@ -93,7 +95,9 @@ flow_to_suitable_area <-
 
 train_data <- flowlines |> st_drop_geometry() |>
   left_join(flowline_attributes, by=join_by("comid"), relationship="one-to-one") |>
-  inner_join(flow_to_suitable_area, by=join_by("comid"), relationship="one-to-many") |> 
+  inner_join(flow_to_suitable_area, by=join_by("comid"), relationship="one-to-many") |>
+# TODO: reconcile length_ft from flow_to_suitable_area and from flowline_attributes
+  mutate(case_wt = hardhat::importance_weights(length_ft)) |>
   #filter(hqt_gradient_class != "Valley Lowland") |>
   # # eliminate reaches with near zero mean annual flow
   # filter(erom_q_ma_cfs>10) |>
@@ -187,17 +191,17 @@ filter_variable_ranges <- function(data) {
 
 td <- train_data |>
   mutate(flow_norm_cfs = flow_cfs / !!norm_var) |> # flow as a percent of mean annual flow
-  mutate(wua_per_lf = area_wua_ft2 / (reach_length_km*3280.84),
+  mutate(wua_per_lf = area_wua_ft2 / length_ft,
          #log_wua_per_lf = log(wua_per_lf), # transect-wise habitat area per linear foot
          ihs_wua_per_lf = asinh(wua_per_lf), # inverse hyperbolic sine as alternative to log that can handle zeros
          wua_per_lf_norm = wua_per_lf / !!norm_var,
          #log_wua_per_lf_norm = log(wua_per_lf_norm), # transect-wise habitat area per linear foot
          ihs_wua_per_lf_norm = asinh(wua_per_lf_norm), # transect-wise habitat area per linear foot
-         tot_area_per_lf = area_tot_ft2 / (reach_length_km*3280.84),
+         tot_area_per_lf = area_tot_ft2 / length_ft,
          #log_tot_area_per_lf = log(tot_area_per_lf),
          ihs_tot_area_per_lf = asinh(tot_area_per_lf)
          ) |> 
-  transmute(dataset, comid, 
+  transmute(dataset, comid, length_ft, case_wt,
          # suitable habitat area normalized by reach length
          hsi_frac, wua_per_lf, ihs_wua_per_lf, wua_per_lf_norm, ihs_wua_per_lf_norm, tot_area_per_lf, ihs_tot_area_per_lf,
          # flow cfs normalized by mean annual flow
@@ -337,7 +341,7 @@ Straightforward but highly sensitive to the ranges of flow data available in tra
 
 ```{r recipe-sd, message=FALSE}
 sd_rec <- recipe(data=training(td_split), 
-      formula = ihs_wua_per_lf ~ 
+      formula = ihs_wua_per_lf + case_wt ~ 
         # flow (cfs)
         flow_cfs + 
         # predictors of flow (catchment area, elevation, and MAP) -- attributes for gradient and upstream drainage area are interrelated
@@ -379,6 +383,7 @@ lm_spec <- linear_reg()
 lm_sd <- workflow() |>
   add_recipe(sd_rec) |>
   add_model(lm_spec) |>
+  add_case_weights(case_wt) |>
   fit(data=training(td_split))
 
 lm_sd |> glance()
@@ -554,6 +559,7 @@ rfr_spec <- rand_forest(mode = "regression", trees = 2^8, mtry = mtry, min_n = 1
 rfr_sd <- workflow() |>
   add_recipe(sd_rec) |>
   add_model(rfr_spec) |>
+  add_case_weights(case_wt) |>
   fit(data=training(td_split))
 
 rfr_sd$fit$fit |> print()
@@ -629,7 +635,7 @@ To generate the inundation area estimates that are needed to interpret the scale
 
 ```{r recipe-sd2, message=FALSE}
 sd2_rec <- recipe(data=training(td_split), 
-      formula = ihs_tot_area_per_lf ~ 
+      formula = ihs_tot_area_per_lf + case_wt ~ 
         # flow (cfs)
         flow_cfs + 
         # predictors of flow (catchment area, elevation, and MAP) -- attributes for gradient and upstream drainage area are interrelated
@@ -670,6 +676,7 @@ lm_spec <- linear_reg()
 lm_sd2 <- workflow() |>
   add_recipe(sd2_rec) |>
   add_model(lm_spec) |>
+  add_case_weights(case_wt) |>
   fit(data=training(td_split))
 
 lm_sd2 |> glance()
@@ -749,6 +756,7 @@ rfr_spec <- rand_forest(mode = "regression", trees = 2^8, mtry = mtry, min_n = 1
 rfr_sd2 <- workflow() |>
   add_recipe(sd2_rec) |>
   add_model(rfr_spec) |>
+  add_case_weights(case_wt) |>
   fit(data=training(td_split))
 
 rfr_sd2$fit$fit |> print()
@@ -796,7 +804,7 @@ Technically this should not use linear regression as it is a proportion between 
 
 ```{r recipe-si, message=FALSE}
 si_rec <- recipe(data=training(td_split), 
-      formula=hsi_frac ~ 
+      formula=hsi_frac + case_wt ~ 
         # flow as percent of mean annual flow
         flow_norm_cfs + 
         # channel characteristics: gradient and sinuosity
@@ -835,6 +843,7 @@ lm_spec <- linear_reg()
 lm_si <- workflow() |>
   add_recipe(si_rec) |>
   add_model(lm_spec) |>
+  add_case_weights(case_wt) |>
   fit(data=training(td_split))
 
 lm_si |> glance()
@@ -935,6 +944,7 @@ rfr_spec <- rand_forest(mode = "regression", trees = 2^8, mtry = mtry, min_n = 1
 rfr_si <- workflow() |>
   add_recipe(si_rec) |>
   add_model(rfr_spec) |>
+  add_case_weights(case_wt) |>
   fit(data=training(td_split))
 
 rfr_si$fit$fit |> print()
@@ -974,7 +984,7 @@ A potential compromise between the previous two models that scales the results b
 
 ```{r recipe-si2, message=FALSE}
 si2_rec <- recipe(data=training(td_split), 
-      formula=ihs_wua_per_lf_norm ~ 
+      formula=ihs_wua_per_lf_norm + case_wt ~ 
         # flow as percent of mean annual flow
         flow_norm_cfs + 
         # channel characteristics: gradient and sinuosity
@@ -1013,6 +1023,7 @@ lm_spec <- linear_reg()
 lm_si2 <- workflow() |>
   add_recipe(si2_rec) |>
   add_model(lm_spec) |>
+  add_case_weights(case_wt) |>
   fit(data=training(td_split))
 
 lm_si2 |> glance()
@@ -1093,6 +1104,7 @@ rfr_spec <- rand_forest(mode = "regression", trees = 2^8, mtry = mtry, min_n = 1
 rfr_si2 <- workflow() |>
   add_recipe(si2_rec) |>
   add_model(rfr_spec) |>
+  add_case_weights(case_wt) |>
   fit(data=training(td_split))
 
 rfr_si2$fit$fit |> print()
@@ -1935,7 +1947,7 @@ lyr_cbec_temporal_summary <-
   mutate(wua_ft2_per_lf = wua_ft2 / length_lf)
 
 yuba_wua_predicted_temporal <- 
-  readRDS(here::here("data-raw", "results", "dhsi_applied_to_comid.Rds")) |>
+  readRDS(here::here("data-raw", "results", "durhsi_applied_to_comid.Rds")) |>
   filter(dataset == "Lower Yuba River") |>
   filter(water_year %in% unique(lyr_cbec_temporal$water_year)) |>
   select(comid, water_year, flow_cfs = q, wua, durwua) |>

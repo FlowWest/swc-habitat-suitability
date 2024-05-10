@@ -1,7 +1,7 @@
 Statistical Modeling to Predict Flow-to-Suitable-Area Curves
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-05-07
+2024-05-10
 
 - [Import and Preprocess Training
   Data](#import-and-preprocess-training-data)
@@ -90,7 +90,9 @@ flowlines <- readRDS(here::here("data-raw", "results", "flowline_geometries_proj
 
 # predictor variables by ComID
 flowline_attributes <- readRDS(here::here("data-raw", "results", "flowline_attributes.Rds")) |>
-  mutate(da_scalar = (da_area_sq_km*247.1053815) * (da_ppt_mean_mm*0.0393701) / 1E6) # 1 million acre-inches
+  mutate(da_scalar = (da_area_sq_km*247.1053815) * (da_ppt_mean_mm*0.0393701) / 1E6) |># 1 million acre-inches
+  mutate(length_ft = reach_length_km * 1000 / 0.3048) 
+# this is reach length based on NHD but should update for training data
 
 # response variables by ComID and Flow 
 flow_to_suitable_area <- readRDS(here::here("data-raw", "results", "fsa_combined.Rds"))
@@ -116,7 +118,9 @@ flow_to_suitable_area <-
 
 train_data <- flowlines |> st_drop_geometry() |>
   left_join(flowline_attributes, by=join_by("comid"), relationship="one-to-one") |>
-  inner_join(flow_to_suitable_area, by=join_by("comid"), relationship="one-to-many") |> 
+  inner_join(flow_to_suitable_area, by=join_by("comid"), relationship="one-to-many") |>
+# TODO: reconcile length_ft from flow_to_suitable_area and from flowline_attributes
+  mutate(case_wt = hardhat::importance_weights(length_ft)) |>
   #filter(hqt_gradient_class != "Valley Lowland") |>
   # # eliminate reaches with near zero mean annual flow
   # filter(erom_q_ma_cfs>10) |>
@@ -124,7 +128,7 @@ train_data <- flowlines |> st_drop_geometry() |>
 ```
 
     ## Rows: 20,236
-    ## Columns: 123
+    ## Columns: 125
 
     ## Warning in grepl(",", levels(x), fixed = TRUE): input string 3 is invalid in
     ## this locale
@@ -253,11 +257,13 @@ train_data <- flowlines |> st_drop_geometry() |>
     ## $ mtpi30_min                   <dbl> -33, -33, -33, -33, -33, -33, -33, -33, -…
     ## $ vb_bf_w_ratio                <dbl> 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,…
     ## $ da_scalar                    <dbl> 50.71088, 50.71088, 50.71088, 50.71088, 5…
+    ## $ length_ft                    <dbl> 118.1102, 118.1102, 118.1102, 118.1102, 1…
     ## $ dataset                      <chr> "Lower Yuba River", "Lower Yuba River", "…
     ## $ flow_cfs                     <dbl> 300, 400, 500, 600, 700, 800, 900, 1000, …
     ## $ area_tot_ft2                 <dbl> 19593.81, 20488.41, 21314.99, 22077.41, 2…
     ## $ area_wua_ft2                 <dbl> 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0…
     ## $ hsi_frac                     <dbl> 0.000000000, 0.000000000, 0.000000000, 0.…
+    ## $ case_wt                      <imp_wts> 118.1102, 118.1102, 118.1102, 118.110…
 
 ``` r
 flowlines_gcs <- readRDS(here::here("data-raw", "results", "flowline_geometries.Rds"))
@@ -396,17 +402,17 @@ filter_variable_ranges <- function(data) {
 
 td <- train_data |>
   mutate(flow_norm_cfs = flow_cfs / !!norm_var) |> # flow as a percent of mean annual flow
-  mutate(wua_per_lf = area_wua_ft2 / (reach_length_km*3280.84),
+  mutate(wua_per_lf = area_wua_ft2 / length_ft,
          #log_wua_per_lf = log(wua_per_lf), # transect-wise habitat area per linear foot
          ihs_wua_per_lf = asinh(wua_per_lf), # inverse hyperbolic sine as alternative to log that can handle zeros
          wua_per_lf_norm = wua_per_lf / !!norm_var,
          #log_wua_per_lf_norm = log(wua_per_lf_norm), # transect-wise habitat area per linear foot
          ihs_wua_per_lf_norm = asinh(wua_per_lf_norm), # transect-wise habitat area per linear foot
-         tot_area_per_lf = area_tot_ft2 / (reach_length_km*3280.84),
+         tot_area_per_lf = area_tot_ft2 / length_ft,
          #log_tot_area_per_lf = log(tot_area_per_lf),
          ihs_tot_area_per_lf = asinh(tot_area_per_lf)
          ) |> 
-  transmute(dataset, comid, 
+  transmute(dataset, comid, length_ft, case_wt,
          # suitable habitat area normalized by reach length
          hsi_frac, wua_per_lf, ihs_wua_per_lf, wua_per_lf_norm, ihs_wua_per_lf_norm, tot_area_per_lf, ihs_tot_area_per_lf,
          # flow cfs normalized by mean annual flow
@@ -440,15 +446,17 @@ td <- train_data |>
 ```
 
     ## Rows: 18,164
-    ## Columns: 34
+    ## Columns: 36
     ## $ dataset                  <chr> "Lower Yuba River", "Lower Yuba River", "Lowe…
     ## $ comid                    <dbl> 8062583, 8062583, 8062583, 8062583, 8062583, …
+    ## $ length_ft                <dbl> 82.021, 82.021, 82.021, 82.021, 82.021, 82.02…
+    ## $ case_wt                  <imp_wts> 82.021, 82.021, 82.021, 82.021, 82.021, 8…
     ## $ hsi_frac                 <dbl> 0.000000000, 0.000000000, 0.000000000, 0.0000…
     ## $ wua_per_lf               <dbl> 0.0000000, 0.0000000, 0.0000000, 0.0000000, 0…
     ## $ ihs_wua_per_lf           <dbl> 0.0000000, 0.0000000, 0.0000000, 0.0000000, 0…
     ## $ wua_per_lf_norm          <dbl> 0.000000000, 0.000000000, 0.000000000, 0.0000…
     ## $ ihs_wua_per_lf_norm      <dbl> 0.000000000, 0.000000000, 0.000000000, 0.0000…
-    ## $ tot_area_per_lf          <dbl> 57.92315, 60.38506, 62.98109, 65.20195, 67.15…
+    ## $ tot_area_per_lf          <dbl> 57.92315, 60.38506, 62.98109, 65.20196, 67.15…
     ## $ ihs_tot_area_per_lf      <dbl> 4.752339, 4.793957, 4.836045, 4.870695, 4.900…
     ## $ flow_cfs                 <dbl> 300, 400, 500, 600, 700, 800, 900, 1000, 1100…
     ## $ flow_norm_cfs            <dbl> 5.915888, 7.887851, 9.859814, 11.831776, 13.8…
@@ -611,7 +619,7 @@ available in training datasets.
 
 ``` r
 sd_rec <- recipe(data=training(td_split), 
-      formula = ihs_wua_per_lf ~ 
+      formula = ihs_wua_per_lf + case_wt ~ 
         # flow (cfs)
         flow_cfs + 
         # predictors of flow (catchment area, elevation, and MAP) -- attributes for gradient and upstream drainage area are interrelated
@@ -653,6 +661,7 @@ lm_spec <- linear_reg()
 lm_sd <- workflow() |>
   add_recipe(sd_rec) |>
   add_model(lm_spec) |>
+  add_case_weights(case_wt) |>
   fit(data=training(td_split))
 
 lm_sd |> glance()
@@ -661,7 +670,7 @@ lm_sd |> glance()
     ## # A tibble: 1 × 12
     ##   r.squared adj.r.squared sigma statistic p.value    df  logLik    AIC    BIC
     ##       <dbl>         <dbl> <dbl>     <dbl>   <dbl> <dbl>   <dbl>  <dbl>  <dbl>
-    ## 1     0.473         0.472  1.03      307.       0    43 -21289. 42667. 43009.
+    ## 1     0.684         0.683  31.7      742.       0    43 -21683. 43456. 43798.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
@@ -671,16 +680,16 @@ lm_sd |> tidy()
     ## # A tibble: 44 × 5
     ##    term             estimate std.error statistic  p.value
     ##    <chr>               <dbl>     <dbl>     <dbl>    <dbl>
-    ##  1 (Intercept)         3.36    0.00844   398.    0       
-    ##  2 flow_cfs          111.    101.          1.10  2.73e- 1
-    ##  3 slope             136.     17.5         7.79  7.41e-15
-    ##  4 da_area_sq_km       1.10    5.80        0.191 8.49e- 1
-    ##  5 da_elev_mean      -10.8     8.17       -1.32  1.88e- 1
-    ##  6 da_ppt_mean_mm    -14.5     4.96       -2.92  3.52e- 3
-    ##  7 bf_depth_m          1.96    1.11        1.76  7.85e- 2
-    ##  8 bf_w_d_ratio        0.243   0.539       0.451 6.52e- 1
-    ##  9 da_k_erodibility    1.70    9.43        0.180 8.57e- 1
-    ## 10 da_avg_slope       12.6     4.86        2.60  9.40e- 3
+    ##  1 (Intercept)          3.41   0.00931    366.   0       
+    ##  2 flow_cfs           357.    71.0          5.02 5.23e- 7
+    ##  3 slope              118.    18.9          6.22 5.13e-10
+    ##  4 da_area_sq_km        7.37   3.90         1.89 5.87e- 2
+    ##  5 da_elev_mean        17.1    5.68         3.01 2.62e- 3
+    ##  6 da_ppt_mean_mm       8.72   3.65         2.39 1.69e- 2
+    ##  7 bf_depth_m           9.66   0.745       13.0  3.38e-38
+    ##  8 bf_w_d_ratio         2.97   0.339        8.74 2.62e-18
+    ##  9 da_k_erodibility    27.0    6.40         4.22 2.43e- 5
+    ## 10 da_avg_slope        -7.06   3.44        -2.05 4.02e- 2
     ## # ℹ 34 more rows
 
 ``` r
@@ -704,7 +713,7 @@ lm_sd_res |>
   xlab("Suitable Habitat Area (ft2) per LF (Actual)") + ylab("Suitable Habitat Area (ft2) per LF (Predicted)")
 ```
 
-    ## Warning: Removed 275 rows containing missing values (`geom_path()`).
+    ## Warning: Removed 274 rows containing missing values (`geom_path()`).
 
 ![](model-expl_files/figure-gfm/lm-sd-1.png)<!-- -->
 
@@ -721,7 +730,7 @@ lm_sd_res |>
   xlab("Suitable Habitat Area (ft2) per LF (Actual)") + ylab("Suitable Habitat Area (ft2) per LF (Predicted)")
 ```
 
-    ## Warning: Removed 84 rows containing missing values (`geom_point()`).
+    ## Warning: Removed 83 rows containing missing values (`geom_point()`).
 
 ![](model-expl_files/figure-gfm/lm-sd-2.png)<!-- -->
 
@@ -779,6 +788,7 @@ rfr_spec <- rand_forest(mode = "regression", trees = 2^8, mtry = mtry, min_n = 1
 rfr_sd <- workflow() |>
   add_recipe(sd_rec) |>
   add_model(rfr_spec) |>
+  add_case_weights(case_wt) |>
   fit(data=training(td_split))
 
 rfr_sd$fit$fit |> print()
@@ -789,7 +799,7 @@ rfr_sd$fit$fit |> print()
     ## Ranger result
     ## 
     ## Call:
-    ##  ranger::ranger(x = maybe_data_frame(x), y = y, mtry = min_cols(~mtry,      x), num.trees = ~2^8, min.node.size = min_rows(~10, x), num.threads = ~4,      verbose = FALSE, seed = sample.int(10^5, 1)) 
+    ##  ranger::ranger(x = maybe_data_frame(x), y = y, mtry = min_cols(~mtry,      x), num.trees = ~2^8, min.node.size = min_rows(~10, x), num.threads = ~4,      verbose = FALSE, seed = sample.int(10^5, 1), case.weights = weights) 
     ## 
     ## Type:                             Regression 
     ## Number of trees:                  256 
@@ -799,8 +809,8 @@ rfr_sd$fit$fit |> print()
     ## Target node size:                 10 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.01358472 
-    ## R squared (OOB):                  0.9931751
+    ## OOB prediction error (MSE):       0.09533618 
+    ## R squared (OOB):                  0.9521032
 
 ``` r
 rfr_sd_res <- testing(td_split) |>
@@ -823,7 +833,7 @@ rfr_sd_res |>
   xlab("Suitable Habitat Area (ft2) per LF (Actual)") + ylab("Suitable Habitat Area (ft2) per LF (Predicted)")
 ```
 
-    ## Warning: Removed 303 rows containing missing values (`geom_path()`).
+    ## Warning: Removed 302 rows containing missing values (`geom_path()`).
 
 ![](model-expl_files/figure-gfm/rfr-sd-1.png)<!-- -->
 
@@ -840,7 +850,7 @@ rfr_sd_res |>
   xlab("Suitable Habitat Area (ft2) per LF (Actual)") + ylab("Suitable Habitat Area (ft2) per LF (Predicted)")
 ```
 
-    ## Warning: Removed 90 rows containing missing values (`geom_point()`).
+    ## Warning: Removed 91 rows containing missing values (`geom_point()`).
 
 ![](model-expl_files/figure-gfm/rfr-sd-2.png)<!-- -->
 
@@ -879,8 +889,8 @@ residuals |>
   deframe()
 ```
 
-    ##       Test      Train 
-    ## -6.2550344 -0.2571302
+    ##      Test     Train 
+    ## -7.205008 -2.202128
 
 ``` r
 residuals |>
@@ -898,7 +908,7 @@ the scale-independent %HSI model outputs
 
 ``` r
 sd2_rec <- recipe(data=training(td_split), 
-      formula = ihs_tot_area_per_lf ~ 
+      formula = ihs_tot_area_per_lf + case_wt ~ 
         # flow (cfs)
         flow_cfs + 
         # predictors of flow (catchment area, elevation, and MAP) -- attributes for gradient and upstream drainage area are interrelated
@@ -939,15 +949,16 @@ lm_spec <- linear_reg()
 lm_sd2 <- workflow() |>
   add_recipe(sd2_rec) |>
   add_model(lm_spec) |>
+  add_case_weights(case_wt) |>
   fit(data=training(td_split))
 
 lm_sd2 |> glance()
 ```
 
     ## # A tibble: 1 × 12
-    ##   r.squared adj.r.squared sigma statistic p.value    df logLik    AIC    BIC
-    ##       <dbl>         <dbl> <dbl>     <dbl>   <dbl> <dbl>  <dbl>  <dbl>  <dbl>
-    ## 1     0.578         0.577 0.444      492.       0    41 -8946. 17979. 18305.
+    ##   r.squared adj.r.squared sigma statistic p.value    df  logLik    AIC    BIC
+    ##       <dbl>         <dbl> <dbl>     <dbl>   <dbl> <dbl>   <dbl>  <dbl>  <dbl>
+    ## 1     0.767         0.767  15.3     1183.       0    41 -10928. 21942. 22269.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
@@ -957,16 +968,16 @@ lm_sd2 |> tidy()
     ## # A tibble: 42 × 5
     ##    term             estimate std.error statistic  p.value
     ##    <chr>               <dbl>     <dbl>     <dbl>    <dbl>
-    ##  1 (Intercept)         6.33    0.00366  1732.    0       
-    ##  2 flow_cfs          165.     43.0         3.84  1.25e- 4
-    ##  3 slope              23.3     7.37        3.16  1.61e- 3
-    ##  4 da_area_sq_km       1.70    2.47        0.687 4.92e- 1
-    ##  5 da_elev_mean        5.12    3.47        1.48  1.40e- 1
-    ##  6 da_ppt_mean_mm     -1.76    2.08       -0.848 3.96e- 1
-    ##  7 bf_depth_m          5.27    0.480      11.0   5.96e-28
-    ##  8 bf_w_d_ratio        2.09    0.233       8.98  3.08e-19
-    ##  9 da_k_erodibility   10.4     4.02        2.57  1.00e- 2
-    ## 10 da_avg_slope       -0.685   2.04       -0.336 7.37e- 1
+    ##  1 (Intercept)          6.34   0.00448   1415.   0       
+    ##  2 flow_cfs           179.    34.1          5.24 1.64e- 7
+    ##  3 slope              -24.5    8.84        -2.78 5.49e- 3
+    ##  4 da_area_sq_km        5.18   1.87         2.76 5.70e- 3
+    ##  5 da_elev_mean        11.6    2.73         4.26 2.09e- 5
+    ##  6 da_ppt_mean_mm       1.98   1.74         1.14 2.56e- 1
+    ##  7 bf_depth_m           6.53   0.357       18.3  8.23e-74
+    ##  8 bf_w_d_ratio         2.44   0.163       14.9  4.34e-50
+    ##  9 da_k_erodibility    19.4    3.07         6.32 2.70e-10
+    ## 10 da_avg_slope        -3.15   1.65        -1.91 5.59e- 2
     ## # ℹ 32 more rows
 
 ``` r
@@ -1055,6 +1066,7 @@ rfr_spec <- rand_forest(mode = "regression", trees = 2^8, mtry = mtry, min_n = 1
 rfr_sd2 <- workflow() |>
   add_recipe(sd2_rec) |>
   add_model(rfr_spec) |>
+  add_case_weights(case_wt) |>
   fit(data=training(td_split))
 
 rfr_sd2$fit$fit |> print()
@@ -1065,7 +1077,7 @@ rfr_sd2$fit$fit |> print()
     ## Ranger result
     ## 
     ## Call:
-    ##  ranger::ranger(x = maybe_data_frame(x), y = y, mtry = min_cols(~mtry,      x), num.trees = ~2^8, min.node.size = min_rows(~10, x), num.threads = ~4,      verbose = FALSE, seed = sample.int(10^5, 1)) 
+    ##  ranger::ranger(x = maybe_data_frame(x), y = y, mtry = min_cols(~mtry,      x), num.trees = ~2^8, min.node.size = min_rows(~10, x), num.threads = ~4,      verbose = FALSE, seed = sample.int(10^5, 1), case.weights = weights) 
     ## 
     ## Type:                             Regression 
     ## Number of trees:                  256 
@@ -1075,8 +1087,8 @@ rfr_sd2$fit$fit |> print()
     ## Target node size:                 10 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.0008292413 
-    ## R squared (OOB):                  0.998223
+    ## OOB prediction error (MSE):       0.01019373 
+    ## R squared (OOB):                  0.9781552
 
 ``` r
 rfr_sd2_res <- testing(td_split) |>
@@ -1137,7 +1149,7 @@ via the betareg package.
 
 ``` r
 si_rec <- recipe(data=training(td_split), 
-      formula=hsi_frac ~ 
+      formula=hsi_frac + case_wt ~ 
         # flow as percent of mean annual flow
         flow_norm_cfs + 
         # channel characteristics: gradient and sinuosity
@@ -1176,15 +1188,16 @@ lm_spec <- linear_reg()
 lm_si <- workflow() |>
   add_recipe(si_rec) |>
   add_model(lm_spec) |>
+  add_case_weights(case_wt) |>
   fit(data=training(td_split))
 
 lm_si |> glance()
 ```
 
     ## # A tibble: 1 × 12
-    ##   r.squared adj.r.squared  sigma statistic p.value    df logLik     AIC     BIC
-    ##       <dbl>         <dbl>  <dbl>     <dbl>   <dbl> <dbl>  <dbl>   <dbl>   <dbl>
-    ## 1     0.242         0.240 0.0588      142.       0    33 20888. -41707. -41441.
+    ##   r.squared adj.r.squared sigma statistic p.value    df logLik     AIC     BIC
+    ##       <dbl>         <dbl> <dbl>     <dbl>   <dbl> <dbl>  <dbl>   <dbl>   <dbl>
+    ## 1     0.503         0.502  1.72      452.       0    33 21312. -42554. -42288.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
@@ -1192,18 +1205,18 @@ lm_si |> tidy()
 ```
 
     ## # A tibble: 34 × 5
-    ##    term             estimate std.error statistic  p.value
-    ##    <chr>               <dbl>     <dbl>     <dbl>    <dbl>
-    ##  1 (Intercept)       0.0751   0.000484   155.    0       
-    ##  2 flow_norm_cfs     1.19     0.277        4.29  1.80e- 5
-    ##  3 slope             0.0127   0.00438      2.91  3.58e- 3
-    ##  4 sinuosity         0.00742  0.00410      1.81  7.03e- 2
-    ##  5 bf_depth_m        0.106    0.0181       5.87  4.32e- 9
-    ##  6 bf_w_d_ratio      0.0152   0.00891      1.70  8.89e- 2
-    ##  7 da_k_erodibility  0.0238   0.0269       0.884 3.77e- 1
-    ##  8 da_avg_slope     -0.0228   0.0171      -1.33  1.83e- 1
-    ##  9 mean_ndvi         0.0261   0.00619      4.21  2.54e- 5
-    ## 10 loc_bfi           0.0939   0.00990      9.49  2.64e-21
+    ##    term              estimate std.error statistic  p.value
+    ##    <chr>                <dbl>     <dbl>     <dbl>    <dbl>
+    ##  1 (Intercept)       0.0743    0.000497  150.     0       
+    ##  2 flow_norm_cfs     2.59      0.190      13.6    6.65e-42
+    ##  3 slope             0.0430    0.00880     4.88   1.08e- 6
+    ##  4 sinuosity        -0.00771   0.00207    -3.72   1.97e- 4
+    ##  5 bf_depth_m        0.184     0.0128     14.3    3.02e-46
+    ##  6 bf_w_d_ratio      0.0595    0.00630     9.45   3.88e-21
+    ##  7 da_k_erodibility  0.222     0.0166     13.4    1.32e-40
+    ##  8 da_avg_slope      0.0499    0.0126      3.95   7.99e- 5
+    ##  9 mean_ndvi         0.000183  0.00486     0.0378 9.70e- 1
+    ## 10 loc_bfi           0.108     0.00603    17.9    6.71e-71
     ## # ℹ 24 more rows
 
 ``` r
@@ -1314,6 +1327,7 @@ rfr_spec <- rand_forest(mode = "regression", trees = 2^8, mtry = mtry, min_n = 1
 rfr_si <- workflow() |>
   add_recipe(si_rec) |>
   add_model(rfr_spec) |>
+  add_case_weights(case_wt) |>
   fit(data=training(td_split))
 
 rfr_si$fit$fit |> print()
@@ -1324,7 +1338,7 @@ rfr_si$fit$fit |> print()
     ## Ranger result
     ## 
     ## Call:
-    ##  ranger::ranger(x = maybe_data_frame(x), y = y, mtry = min_cols(~mtry,      x), num.trees = ~2^8, min.node.size = min_rows(~10, x), num.threads = ~4,      verbose = FALSE, seed = sample.int(10^5, 1)) 
+    ##  ranger::ranger(x = maybe_data_frame(x), y = y, mtry = min_cols(~mtry,      x), num.trees = ~2^8, min.node.size = min_rows(~10, x), num.threads = ~4,      verbose = FALSE, seed = sample.int(10^5, 1), case.weights = weights) 
     ## 
     ## Type:                             Regression 
     ## Number of trees:                  256 
@@ -1334,8 +1348,8 @@ rfr_si$fit$fit |> print()
     ## Target node size:                 10 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       6.050362e-05 
-    ## R squared (OOB):                  0.9867115
+    ## OOB prediction error (MSE):       0.0004767478 
+    ## R squared (OOB):                  0.8952908
 
 ``` r
 rfr_si_res <- testing(td_split) |>
@@ -1384,7 +1398,7 @@ results by da_scalar, then unscales them after prediction.
 
 ``` r
 si2_rec <- recipe(data=training(td_split), 
-      formula=ihs_wua_per_lf_norm ~ 
+      formula=ihs_wua_per_lf_norm + case_wt ~ 
         # flow as percent of mean annual flow
         flow_norm_cfs + 
         # channel characteristics: gradient and sinuosity
@@ -1423,6 +1437,7 @@ lm_spec <- linear_reg()
 lm_si2 <- workflow() |>
   add_recipe(si2_rec) |>
   add_model(lm_spec) |>
+  add_case_weights(case_wt) |>
   fit(data=training(td_split))
 
 lm_si2 |> glance()
@@ -1431,7 +1446,7 @@ lm_si2 |> glance()
     ## # A tibble: 1 × 12
     ##   r.squared adj.r.squared sigma statistic p.value    df  logLik    AIC    BIC
     ##       <dbl>         <dbl> <dbl>     <dbl>   <dbl> <dbl>   <dbl>  <dbl>  <dbl>
-    ## 1     0.733         0.733 0.482     1305.       0    31 -10149. 20365. 20616.
+    ## 1     0.811         0.810  18.1     2035.       0    31 -13438. 26943. 27194.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
@@ -1439,18 +1454,18 @@ lm_si2 |> tidy()
 ```
 
     ## # A tibble: 32 × 5
-    ##    term             estimate std.error statistic  p.value
-    ##    <chr>               <dbl>     <dbl>     <dbl>    <dbl>
-    ##  1 (Intercept)        0.738    0.00397    186.   0       
-    ##  2 flow_norm_cfs     38.9      2.15        18.1  3.02e-72
-    ##  3 slope             -0.0792   0.0343      -2.31 2.08e- 2
-    ##  4 sinuosity          0.622    0.0324      19.2  4.77e-81
-    ##  5 bf_w_d_ratio       0.0584   0.0356       1.64 1.01e- 1
-    ##  6 da_k_erodibility  -1.43     0.157       -9.14 6.75e-20
-    ##  7 da_avg_slope       0.587    0.140        4.20 2.71e- 5
-    ##  8 mean_ndvi          0.477    0.0490       9.73 2.56e-22
-    ##  9 loc_bfi            0.488    0.0616       7.93 2.35e-15
-    ## 10 loc_pct_clay       0.992    0.0783      12.7  1.39e-36
+    ##    term             estimate std.error statistic   p.value
+    ##    <chr>               <dbl>     <dbl>     <dbl>     <dbl>
+    ##  1 (Intercept)        0.693    0.00520   133.    0        
+    ##  2 flow_norm_cfs     60.4      2.00       30.2   1.98e-194
+    ##  3 slope              0.249    0.0919      2.71  6.72e-  3
+    ##  4 sinuosity          0.332    0.0217     15.3   1.56e- 52
+    ##  5 bf_w_d_ratio       0.369    0.0383      9.63  6.65e- 22
+    ##  6 da_k_erodibility  -0.0840   0.136      -0.618 5.36e-  1
+    ##  7 da_avg_slope       1.82     0.128      14.3   8.65e- 46
+    ##  8 mean_ndvi          0.112    0.0489      2.29  2.21e-  2
+    ##  9 loc_bfi            0.603    0.0494     12.2   4.79e- 34
+    ## 10 loc_pct_clay       0.516    0.0662      7.79  7.03e- 15
     ## # ℹ 22 more rows
 
 ``` r
@@ -1541,6 +1556,7 @@ rfr_spec <- rand_forest(mode = "regression", trees = 2^8, mtry = mtry, min_n = 1
 rfr_si2 <- workflow() |>
   add_recipe(si2_rec) |>
   add_model(rfr_spec) |>
+  add_case_weights(case_wt) |>
   fit(data=training(td_split))
 
 rfr_si2$fit$fit |> print()
@@ -1551,7 +1567,7 @@ rfr_si2$fit$fit |> print()
     ## Ranger result
     ## 
     ## Call:
-    ##  ranger::ranger(x = maybe_data_frame(x), y = y, mtry = min_cols(~mtry,      x), num.trees = ~2^8, min.node.size = min_rows(~10, x), num.threads = ~4,      verbose = FALSE, seed = sample.int(10^5, 1)) 
+    ##  ranger::ranger(x = maybe_data_frame(x), y = y, mtry = min_cols(~mtry,      x), num.trees = ~2^8, min.node.size = min_rows(~10, x), num.threads = ~4,      verbose = FALSE, seed = sample.int(10^5, 1), case.weights = weights) 
     ## 
     ## Type:                             Regression 
     ## Number of trees:                  256 
@@ -1561,8 +1577,8 @@ rfr_si2$fit$fit |> print()
     ## Target node size:                 10 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.001453083 
-    ## R squared (OOB):                  0.9983259
+    ## OOB prediction error (MSE):       0.01231636 
+    ## R squared (OOB):                  0.9858106
 
 ``` r
 rfr_si2_res <- testing(td_split) |>
@@ -1721,8 +1737,8 @@ sd_pred <-
     ## Columns: 4
     ## $ comid               <dbl> 342517, 342517, 342517, 342517, 342517, 342517, 34…
     ## $ flow_cfs            <dbl> 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000,…
-    ## $ ihs_wua_per_lf_pred <dbl> 2.009086, 2.037042, 2.079911, 2.201014, 2.350480, …
-    ## $ wua_per_lf_pred     <dbl> 3.661193, 3.768742, 3.939409, 4.461740, 5.197640, …
+    ## $ ihs_wua_per_lf_pred <dbl> 1.614572, 1.647879, 1.743528, 1.810171, 1.982560, …
+    ## $ wua_per_lf_pred     <dbl> 2.413380, 2.501745, 2.771288, 2.973932, 3.561797, …
 
 ``` r
 flowlines_gcs |>
@@ -1752,7 +1768,7 @@ sd_pred |>
 
     ## `geom_smooth()` using method = 'gam' and formula = 'y ~ s(x, bs = "cs")'
 
-    ## Warning: Removed 580 rows containing non-finite values (`stat_smooth()`).
+    ## Warning: Removed 180 rows containing non-finite values (`stat_smooth()`).
 
 ![](model-expl_files/figure-gfm/prediction-output-sd-2.png)<!-- -->
 
@@ -1786,9 +1802,9 @@ si2_pred <-
     ## $ flow_cfs                 <dbl> 100, 200, 300, 400, 500, 600, 700, 800, 900, …
     ## $ flow_norm_cfs            <dbl> 73.29645, 146.59291, 219.88936, 293.18582, 36…
     ## $ da_scalar                <dbl> 1.364322, 1.364322, 1.364322, 1.364322, 1.364…
-    ## $ ihs_wua_per_lf_norm_pred <dbl> 1.264528, 1.443429, 1.634720, 1.687944, 1.709…
-    ## $ wua_per_lf_norm_pred     <dbl> 1.629525, 1.999539, 2.466507, 2.611725, 2.673…
-    ## $ wua_per_lf_pred          <dbl> 2.223197, 2.728016, 3.365110, 3.563234, 3.647…
+    ## $ ihs_wua_per_lf_norm_pred <dbl> 0.8182393, 0.9924823, 1.2271212, 1.2432881, 1…
+    ## $ wua_per_lf_norm_pred     <dbl> 0.9126490, 1.1636338, 1.5591297, 1.5892801, 1…
+    ## $ wua_per_lf_pred          <dbl> 1.245148, 1.587572, 2.127156, 2.168291, 2.264…
 
 ``` r
 flowlines_gcs |>
@@ -1818,7 +1834,7 @@ si2_pred |>
 
     ## `geom_smooth()` using method = 'gam' and formula = 'y ~ s(x, bs = "cs")'
 
-    ## Warning: Removed 435 rows containing non-finite values (`stat_smooth()`).
+    ## Warning: Removed 105 rows containing non-finite values (`stat_smooth()`).
 
 ![](model-expl_files/figure-gfm/prediction-output-si2-2.png)<!-- -->
 
@@ -1844,8 +1860,8 @@ sd2_pred <-
     ## Columns: 4
     ## $ comid                    <dbl> 342517, 342517, 342517, 342517, 342517, 34251…
     ## $ flow_cfs                 <dbl> 100, 200, 300, 400, 500, 600, 700, 800, 900, …
-    ## $ ihs_tot_area_per_lf_pred <dbl> 5.910602, 5.924425, 5.933161, 5.954668, 5.988…
-    ## $ tot_area_per_lf_pred     <dbl> 184.4627, 187.0302, 188.6714, 192.7731, 199.3…
+    ## $ ihs_tot_area_per_lf_pred <dbl> 5.300860, 5.307262, 5.308987, 5.347177, 5.367…
+    ## $ tot_area_per_lf_pred     <dbl> 100.2521, 100.8960, 101.0702, 105.0049, 107.2…
 
 ``` r
 sd2si_pred <- 
@@ -1874,10 +1890,10 @@ sd2si_pred <-
     ## $ comid                    <dbl> 342517, 342517, 342517, 342517, 342517, 34251…
     ## $ flow_cfs                 <dbl> 100, 200, 300, 400, 500, 600, 700, 800, 900, …
     ## $ flow_norm_cfs            <dbl> 73.29645, 146.59291, 219.88936, 293.18582, 36…
-    ## $ hsi_frac_pred            <dbl> 0.1318697, 0.1602785, 0.1647445, 0.1696468, 0…
-    ## $ ihs_tot_area_per_lf_pred <dbl> 5.910602, 5.924425, 5.933161, 5.954668, 5.988…
-    ## $ tot_area_per_lf_pred     <dbl> 184.4627, 187.0302, 188.6714, 192.7731, 199.3…
-    ## $ wua_per_lf_pred          <dbl> 24.32503, 29.97693, 31.08258, 32.70334, 34.62…
+    ## $ hsi_frac_pred            <dbl> 0.08570038, 0.10434659, 0.11280539, 0.1106276…
+    ## $ ihs_tot_area_per_lf_pred <dbl> 5.300860, 5.307262, 5.308987, 5.347177, 5.367…
+    ## $ tot_area_per_lf_pred     <dbl> 100.2521, 100.8960, 101.0702, 105.0049, 107.2…
+    ## $ wua_per_lf_pred          <dbl> 8.591647, 10.528150, 11.401262, 11.616442, 11…
 
 ``` r
 flowlines_gcs |>
@@ -2715,7 +2731,7 @@ lyr_cbec_temporal_summary <-
 
 ``` r
 yuba_wua_predicted_temporal <- 
-  readRDS(here::here("data-raw", "results", "dhsi_applied_to_comid.Rds")) |>
+  readRDS(here::here("data-raw", "results", "durhsi_applied_to_comid.Rds")) |>
   filter(dataset == "Lower Yuba River") |>
   filter(water_year %in% unique(lyr_cbec_temporal$water_year)) |>
   select(comid, water_year, flow_cfs = q, wua, durwua) |>

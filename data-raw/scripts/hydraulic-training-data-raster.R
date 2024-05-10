@@ -39,15 +39,15 @@ basso_groups <-
   st_read(as_tibble=T)
 
 basso_rast <- basso_filenames |>
-  prep_rast(.id_var = comid)
+  raster_prep_grid(.group_var = comid)
 
 outpath <- here::here("data-raw", "results", "fsa_basso.Rds")
 
 if(!file.exists(outpath)) {
 
   basso_result <- basso_rast |>
-    raster_hsi(basso_groups, .id_var = comid) |>
-    post_rast(basso_groups, .id_var = comid)
+    raster_summarize_hsi(basso_groups, .group_var = comid) |>
+    postprocess(basso_groups, .group_var = comid)
 
   basso_result |> saveRDS(outpath)
 
@@ -94,15 +94,15 @@ deer_groups <-
   filter(comid > 0)
 
 deer_rast <- basso_filenames |>
-  prep_rast(.id_var = comid)
+  raster_prep_grid(.group_var = comid)
 
 outpath <- here::here("data-raw", "results", "fsa_deer.Rds")
 
 if(!file.exists(outpath)) {
 
   deer_result <- deer_rast |>
-    raster_hsi(deer_groups, .id_var = comid, parallel = TRUE) |>
-    post_rast(deer_groups, .id_var = comid)
+    raster_summarize_hsi(deer_groups, .group_var = comid, parallel = TRUE) |>
+    postprocess(deer_groups, .group_var = comid)
 
   deer_result |> saveRDS(outpath)
 

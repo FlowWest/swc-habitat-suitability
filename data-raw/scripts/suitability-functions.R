@@ -65,7 +65,7 @@ vector_dvhsi_lyr <- function(d, v) {
 vector_calculate_hsi <- function(data, hsi_func = vector_dvhsi_hqt) {
 
   data |>
-    select(flow, vid, wdepth, vel_mag) |>
+    select(flow_cfs, vid, wdepth, vel_mag) |>
     mutate(inundated = wdepth > 0,
            hsi = hsi_func(wdepth, vel_mag))
 
@@ -101,7 +101,7 @@ vector_prep_mesh <- function(mesh,
 vector_summarize_hsi <- function(mesh_tbl, hsi_tbl, .group_var = comid, .id_var=vid) {
   mesh_tbl |>
     inner_join(hsi_tbl, by=join_by({{.id_var}}), relationship="one-to-many") |>
-    group_by({{.group_var}}) |>
+    group_by({{.group_var}}, flow_cfs) |>
     summarize(area_tot = sum(if_else(wdepth > 0, area_ft2, 0)),
               area_wua = sum(area_ft2 * hsi)) |>
     mutate(area_pct = area_wua / area_tot)

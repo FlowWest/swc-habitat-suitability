@@ -7,6 +7,8 @@ source(here::here("data-raw", "scripts", "suitability-functions.R"))
 
 flowlines <- readRDS(here::here("data-raw", "results", "flowline_geometries_proj.Rds"))
 
+googledrive::drive_auth() # run this before proceeding with rest of script
+
 # TUOLUMNE BASSO-LA GRANGE -----------------------------------------------------
 
 basso_dir <- here::here("data-raw", "temp", "tuolumne-basso")

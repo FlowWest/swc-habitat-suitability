@@ -6,6 +6,8 @@ source(here::here("data-raw", "scripts", "suitability-functions.R"))
 
 flowlines <- readRDS(here::here("data-raw", "results", "flowline_geometries_proj.Rds"))
 
+googledrive::drive_auth() # run this before proceeding with rest of script
+
 # STANISLAUS RIVER -------------------------------------------------------------
 
 stan_dir <- here::here("data-raw", "temp", "stanislaus")
@@ -35,7 +37,7 @@ stan_thiessen <- st_read(file.path("/vsizip", stan_dir, "StanMesh072313_Thiessen
   select(vid) |>
   arrange(vid)
 
-stan_csvs <- tribble(~flow, ~filename,
+stan_csvs <- tribble(~flow_cfs, ~filename,
                        500, "500cfs_072313.csv.gz",
                        750, "750cfs_072413.csv.gz",
                       1000, "1000cfs_072413.csv.gz",
@@ -78,7 +80,7 @@ yuba_csv_results |> archive::archive_extract(dir=yuba_dir)
 yuba_comid <- drive_file_by_id("1-xSi142jtNZKQS9-VgXZT1yzTfH1KjyR", vsizip=T) |>
   st_read(as_tibble=T) |>
   st_zm() |>
-  janitor::clean_names()
+  select(reach = ReachLYR, comid = COMID)
 
 yuba_reaches <- c("EDR", "TBR", "HR", "DGR", "FR")
 
@@ -87,21 +89,22 @@ yuba_flows <- c(300, 350, 400, 450, 530, 600, 622, 700, 800, 880, 930,
                 10000, 15000, 21100, 30000, 42200, 84400, 110400)
 
 yuba_srh2d_result_by_reach <-
-  expand_grid(reach = yuba_reaches, flow = yuba_flows) |>
-  mutate(filename = file.path(yuba_dir, glue::glue("{reach}_{flow}_SMS.csv"))) |>
+  expand_grid(reach = yuba_reaches, flow_cfs = yuba_flows) |>
+  mutate(filename = file.path(yuba_dir, glue::glue("{reach}_{flow_cfs}_SMS.csv"))) |>
   filter(file.exists(filename)) |>
-  nest(tbl_filenames = c(flow, filename)) |>
+  nest(tbl_filenames = c(flow_cfs, filename)) |>
   mutate(tbl_results = future_map(tbl_filenames,
                            function(x) vector_import_srh2d(x, units="ft", has_vid_col=T)))
 
-# yuba_srh2d_result_by_reach |> saveRDS(here::here("data-raw", "results", "yuba_srh2d_result_by_reach.Rds"))
+yuba_srh2d_result_by_reach |> saveRDS(file.path(yuba_dir, "yuba_srh2d_result_by_reach.Rds"))
 
 yuba_hsi_by_flow_by_reach <-
   yuba_srh2d_result_by_reach |>
   mutate(tbl_hsi = future_map(tbl_results,
-                       function(x) vector_calculate_hsi(x, hsi_func = vector_dvhsi_hqt)))
+                       function(x) vector_calculate_hsi(x, hsi_func = vector_dvhsi_hqt))) |>
+  select(reach, tbl_hsi)
 
-yuba_hsi_by_flow_by_reach |> saveRDS(here::here("data-raw", "results", "yuba_hsi_by_flow_by_reach.Rds"))
+yuba_hsi_by_flow_by_reach |> saveRDS(file.path(yuba_dir, "yuba_hsi_by_flow_by_reach.Rds"))
 
 yuba_mesh_prepped_by_reach <-
   tribble(~reach, ~vertices, ~thiessen,
@@ -123,14 +126,15 @@ yuba_mesh_prepped_by_reach <-
                                thp |>
                                  st_join(vtx |>
                                            transmute(vid=row_number()),
-                                         join=st_nearest_feature) |>
+                                         join=st_contains_properly, left = FALSE) |> #st_nearest_feature) |>
                                  arrange(vid) |>
-                                 vector_prep_mesh(group_polygons = yuba_comid |> filter(reach_lyr==reach),
-                                                 .group_var = comid,
-                                                 .id_var = vid)
-                             }))
+                                 vector_prep_mesh(group_polygons = yuba_comid |> filter(reach==rch),
+                                                  .group_var = comid,
+                                                  .id_var = vid)
+                             })) |>
+  select(reach, mesh_prepped)
 
-yuba_mesh_prepped_by_reach |> saveRDS(here::here("data-raw", "results", "yuba_mesh_prepped_by_reach.Rds"))
+yuba_mesh_prepped_by_reach |> saveRDS(file.path(yuba_dir, "yuba_mesh_prepped_by_reach.Rds"))
 
 yuba_output_by_reach <-
   inner_join(yuba_hsi_by_flow_by_reach, yuba_mesh_prepped_by_reach,
@@ -138,9 +142,10 @@ yuba_output_by_reach <-
   mutate(hsi_output = pmap(list(mesh_prepped, tbl_hsi),
                            function(x, y) vector_summarize_hsi(x, y, .group_var=comid, .id_var=vid))) |>
   mutate(hsi_final = pmap(list(hsi_output, reach),
-                          function(x, y) postprocess(x, yuba_comid |> filter(reach_lyr==reach), .group_var=comid)))
+                          function(x, y) postprocess(x, yuba_comid |> filter(reach==y), .group_var=comid))) |>
+  select(reach, hsi_final)
 
-yuba_output_by_reach |> saveRDS(here::here("data-raw", "results", "yuba_output_by_reach.Rds"))
+yuba_output_by_reach |> saveRDS(file.path(yuba_dir, "yuba_output_by_reach.Rds"))
 
 yuba_result <-
   yuba_output_by_reach |>
@@ -150,5 +155,3 @@ yuba_result <-
 outpath <- here::here("data-raw", "results", "fsa_yuba.Rds")
 
 yuba_result |> saveRDS(outpath)
-
-

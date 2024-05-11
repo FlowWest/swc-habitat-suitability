@@ -38,7 +38,7 @@ vector_import_srh2d <- function(csv_tbl,
 
   csv_tbl |>
     mutate(tbl = map({{.filename_var}}, function(x) {
-      message("import SRH-2D results from", x)
+      message("import SRH-2D results from ", x)
       csv_in <- read_csv(x, col_names=names(cols), col_types=cols, skip=1)
       if (has_vid_col) {
         return(csv_in)
@@ -153,8 +153,8 @@ raster_summarize_hsi <- function(rasters,
     dep <- terra::wrap(rasters$depth)
     vel <- terra::wrap(rasters$velocity)
 
-    if (future::availableCores()>1) {
-        future::plan(future::multisession, workers = future::availableCores())
+    if (future::availableCores()>2) {
+        future::plan(future::multisession, workers = future::availableCores() - 1)
     } else {
         future::plan(future::sequential)
     }

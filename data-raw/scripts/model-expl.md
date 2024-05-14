@@ -1,7 +1,7 @@
 Statistical Modeling to Predict Flow-to-Suitable-Area Curves
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-05-10
+2024-05-14
 
 - [Import and Preprocess Training
   Data](#import-and-preprocess-training-data)
@@ -87,15 +87,35 @@ palette_hqt_gradient_class <-
 ``` r
 # flowline geometries
 flowlines <- readRDS(here::here("data-raw", "results", "flowline_geometries_proj.Rds"))
+flowlines_gcs <- readRDS(here::here("data-raw", "results", "flowline_geometries.Rds"))
 
 # predictor variables by ComID
 flowline_attributes <- readRDS(here::here("data-raw", "results", "flowline_attributes.Rds")) |>
   mutate(da_scalar = (da_area_sq_km*247.1053815) * (da_ppt_mean_mm*0.0393701) / 1E6) |># 1 million acre-inches
-  mutate(length_ft = reach_length_km * 1000 / 0.3048) 
-# this is reach length based on NHD but should update for training data
+  mutate(length_ft_nhd = reach_length_km * 1000 / 0.3048) 
+# TODO: Clean up import of these attributes; ensure UTF-8 encoding
+```
 
+``` r
 # response variables by ComID and Flow 
-flow_to_suitable_area <- readRDS(here::here("data-raw", "results", "fsa_combined.Rds"))
+#flow_to_suitable_area <- readRDS(here::here("data-raw", "results", "fsa_combined.Rds"))
+fsa_combined <- 
+  bind_rows(.id = "dataset",
+    # VECTOR SRH-2D MODELS
+    "Lower Yuba River" = 
+      readRDS(here::here("data-raw", "results", "fsa_yuba.Rds")) |> 
+      select(-reach),
+    "Stanislaus River" = 
+      readRDS(here::here("data-raw", "results", "fsa_stan.Rds")),
+    # RASTER HEC-RAS 2D MODELS
+    "Deer Creek" = 
+      readRDS(here::here("data-raw", "results", "fsa_deer.Rds")),
+    "Tuolumne River (Basso-La Grange)" = 
+      readRDS(here::here("data-raw", "results", "fsa_basso.Rds")),
+    ) |>
+  rename(area_tot_ft2 = area_tot, area_wua_ft2 = area_wua, hsi_frac = area_pct)
+
+fsa_combined |> saveRDS(here::here("data-raw", "results", "fsa_combined.Rds"))
 ```
 
 ``` r
@@ -108,18 +128,19 @@ interp_flows <- seq(300,15000,100)
 #interp_flows <- c(seq(300,950,50), seq(1000,9500,500), seq(10000,85000,5000))
 
 flow_to_suitable_area <- 
-  flow_to_suitable_area |>
-  group_by(dataset, comid) |>
+  fsa_combined |>
+  group_by(dataset, comid, length_ft) |>
   complete(flow_cfs = interp_flows) |>
   arrange(dataset, comid, flow_cfs) |>
-  mutate(across(c(area_tot_ft2, area_wua_ft2, hsi_frac), function(var) zoo::na.approx(var, x = flow_cfs, na.rm=F))) |>
+  mutate(across(c(area_tot_ft2, area_wua_ft2, hsi_frac, ind_per_lf, wua_per_lf), 
+                function(var) zoo::na.approx(var, x = flow_cfs, na.rm=F))) |>
   filter(flow_cfs %in% interp_flows) |>
-  filter(!is.na(hsi_frac))
+  filter(!is.na(hsi_frac)) |>
+  ungroup()
 
 train_data <- flowlines |> st_drop_geometry() |>
   left_join(flowline_attributes, by=join_by("comid"), relationship="one-to-one") |>
   inner_join(flow_to_suitable_area, by=join_by("comid"), relationship="one-to-many") |>
-# TODO: reconcile length_ft from flow_to_suitable_area and from flowline_attributes
   mutate(case_wt = hardhat::importance_weights(length_ft)) |>
   #filter(hqt_gradient_class != "Valley Lowland") |>
   # # eliminate reaches with near zero mean annual flow
@@ -127,8 +148,8 @@ train_data <- flowlines |> st_drop_geometry() |>
   glimpse()
 ```
 
-    ## Rows: 20,236
-    ## Columns: 125
+    ## Rows: 21,298
+    ## Columns: 128
 
     ## Warning in grepl(",", levels(x), fixed = TRUE): input string 3 is invalid in
     ## this locale
@@ -257,19 +278,23 @@ train_data <- flowlines |> st_drop_geometry() |>
     ## $ mtpi30_min                   <dbl> -33, -33, -33, -33, -33, -33, -33, -33, -…
     ## $ vb_bf_w_ratio                <dbl> 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,…
     ## $ da_scalar                    <dbl> 50.71088, 50.71088, 50.71088, 50.71088, 5…
-    ## $ length_ft                    <dbl> 118.1102, 118.1102, 118.1102, 118.1102, 1…
+    ## $ length_ft_nhd                <dbl> 118.1102, 118.1102, 118.1102, 118.1102, 1…
     ## $ dataset                      <chr> "Lower Yuba River", "Lower Yuba River", "…
+    ## $ length_ft                    <dbl> 116.047, 116.047, 116.047, 116.047, 116.0…
     ## $ flow_cfs                     <dbl> 300, 400, 500, 600, 700, 800, 900, 1000, …
-    ## $ area_tot_ft2                 <dbl> 19593.81, 20488.41, 21314.99, 22077.41, 2…
-    ## $ area_wua_ft2                 <dbl> 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0…
-    ## $ hsi_frac                     <dbl> 0.000000000, 0.000000000, 0.000000000, 0.…
-    ## $ case_wt                      <imp_wts> 118.1102, 118.1102, 118.1102, 118.110…
+    ## $ area_tot_ft2                 <dbl> 19584.29, 20464.75, 21281.66, 22043.93, 2…
+    ## $ area_wua_ft2                 <dbl> 2584.542, 2614.989, 2679.709, 2736.891, 2…
+    ## $ hsi_frac                     <dbl> 0.13197016, 0.12778015, 0.12594477, 0.124…
+    ## $ ind_per_lf                   <dbl> 168.7618, 176.3489, 183.3883, 189.9570, 1…
+    ## $ wua_per_lf                   <dbl> 22.27152, 22.53388, 23.09159, 23.58434, 2…
+    ## $ case_wt                      <imp_wts> 116.047, 116.047, 116.047, 116.047, 1…
 
 ``` r
-flowlines_gcs <- readRDS(here::here("data-raw", "results", "flowline_geometries.Rds"))
 train_flowlines <- flowlines_gcs |>
   filter(comid %in% unique(flow_to_suitable_area$comid)) |>
-  left_join(flowline_attributes, by=join_by("comid"), relationship="one-to-one") 
+  left_join(flowline_attributes |> select(comid, gnis_name, hqt_gradient_class), 
+            by=join_by("comid"), 
+            relationship="one-to-one") 
 
 training_reach_labels <- train_flowlines |>
   group_by(gnis_name) |>
@@ -445,19 +470,19 @@ td <- train_data |>
   glimpse()
 ```
 
-    ## Rows: 18,164
+    ## Rows: 19,226
     ## Columns: 36
     ## $ dataset                  <chr> "Lower Yuba River", "Lower Yuba River", "Lowe…
     ## $ comid                    <dbl> 8062583, 8062583, 8062583, 8062583, 8062583, …
-    ## $ length_ft                <dbl> 82.021, 82.021, 82.021, 82.021, 82.021, 82.02…
-    ## $ case_wt                  <imp_wts> 82.021, 82.021, 82.021, 82.021, 82.021, 8…
-    ## $ hsi_frac                 <dbl> 0.000000000, 0.000000000, 0.000000000, 0.0000…
-    ## $ wua_per_lf               <dbl> 0.0000000, 0.0000000, 0.0000000, 0.0000000, 0…
-    ## $ ihs_wua_per_lf           <dbl> 0.0000000, 0.0000000, 0.0000000, 0.0000000, 0…
-    ## $ wua_per_lf_norm          <dbl> 0.000000000, 0.000000000, 0.000000000, 0.0000…
-    ## $ ihs_wua_per_lf_norm      <dbl> 0.000000000, 0.000000000, 0.000000000, 0.0000…
-    ## $ tot_area_per_lf          <dbl> 57.92315, 60.38506, 62.98109, 65.20196, 67.15…
-    ## $ ihs_tot_area_per_lf      <dbl> 4.752339, 4.793957, 4.836045, 4.870695, 4.900…
+    ## $ length_ft                <dbl> 83.03531, 83.03531, 83.03531, 83.03531, 83.03…
+    ## $ case_wt                  <imp_wts> 83.03531, 83.03531, 83.03531, 83.03531, 8…
+    ## $ hsi_frac                 <dbl> 0.2373422, 0.2050521, 0.1807279, 0.1705799, 0…
+    ## $ wua_per_lf               <dbl> 13.48619, 12.17890, 11.19774, 10.96250, 10.63…
+    ## $ ihs_wua_per_lf           <dbl> 3.296185, 3.194534, 3.110847, 3.089701, 3.059…
+    ## $ wua_per_lf_norm          <dbl> 0.2659426, 0.2401634, 0.2208152, 0.2161764, 0…
+    ## $ ihs_wua_per_lf_norm      <dbl> 0.2629035, 0.2379127, 0.2190590, 0.2145271, 0…
+    ## $ tot_area_per_lf          <dbl> 56.82170, 59.39419, 62.00580, 64.26606, 66.22…
+    ## $ ihs_tot_area_per_lf      <dbl> 4.733143, 4.777414, 4.820440, 4.856239, 4.886…
     ## $ flow_cfs                 <dbl> 300, 400, 500, 600, 700, 800, 900, 1000, 1100…
     ## $ flow_norm_cfs            <dbl> 5.915888, 7.887851, 9.859814, 11.831776, 13.8…
     ## $ slope                    <dbl> 0.008, 0.008, 0.008, 0.008, 0.008, 0.008, 0.0…
@@ -498,7 +523,7 @@ td |> ggplot() +
 
     ## `geom_smooth()` using formula = 'y ~ s(x, bs = "cs")'
 
-    ## Warning: Removed 828 rows containing non-finite values (`stat_smooth()`).
+    ## Warning: Removed 111 rows containing non-finite values (`stat_smooth()`).
 
 ![](model-expl_files/figure-gfm/td-summary-1.png)<!-- -->
 
@@ -590,7 +615,7 @@ td |>
 
     ## `geom_smooth()` using method = 'gam' and formula = 'y ~ s(x, bs = "cs")'
 
-    ## Warning: Removed 16560 rows containing non-finite values (`stat_smooth()`).
+    ## Warning: Removed 2220 rows containing non-finite values (`stat_smooth()`).
 
 ![](model-expl_files/figure-gfm/td-flow-predictor-curves-2.png)<!-- -->
 
@@ -670,7 +695,7 @@ lm_sd |> glance()
     ## # A tibble: 1 × 12
     ##   r.squared adj.r.squared sigma statistic p.value    df  logLik    AIC    BIC
     ##       <dbl>         <dbl> <dbl>     <dbl>   <dbl> <dbl>   <dbl>  <dbl>  <dbl>
-    ## 1     0.684         0.683  31.7      742.       0    43 -21683. 43456. 43798.
+    ## 1     0.412         0.410  30.4      259.       0    43 -22439. 44968. 45313.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
@@ -680,16 +705,16 @@ lm_sd |> tidy()
     ## # A tibble: 44 × 5
     ##    term             estimate std.error statistic  p.value
     ##    <chr>               <dbl>     <dbl>     <dbl>    <dbl>
-    ##  1 (Intercept)          3.41   0.00931    366.   0       
-    ##  2 flow_cfs           357.    71.0          5.02 5.23e- 7
-    ##  3 slope              118.    18.9          6.22 5.13e-10
-    ##  4 da_area_sq_km        7.37   3.90         1.89 5.87e- 2
-    ##  5 da_elev_mean        17.1    5.68         3.01 2.62e- 3
-    ##  6 da_ppt_mean_mm       8.72   3.65         2.39 1.69e- 2
-    ##  7 bf_depth_m           9.66   0.745       13.0  3.38e-38
-    ##  8 bf_w_d_ratio         2.97   0.339        8.74 2.62e-18
-    ##  9 da_k_erodibility    27.0    6.40         4.22 2.43e- 5
-    ## 10 da_avg_slope        -7.06   3.44        -2.05 4.02e- 2
+    ##  1 (Intercept)          3.83   0.00787   486.    0       
+    ##  2 flow_cfs            29.2   20.3         1.43  1.51e- 1
+    ##  3 slope              109.    15.5         7.05  1.82e-12
+    ##  4 da_area_sq_km       -7.32   1.29       -5.66  1.56e- 8
+    ##  5 da_elev_mean         3.47   2.63        1.32  1.88e- 1
+    ##  6 da_ppt_mean_mm       3.03   2.40        1.26  2.06e- 1
+    ##  7 bf_depth_m           7.73   0.695      11.1   1.09e-28
+    ##  8 bf_w_d_ratio         2.61   0.353       7.39  1.57e-13
+    ##  9 da_k_erodibility    -1.11   1.84       -0.604 5.46e- 1
+    ## 10 da_avg_slope        -2.71   1.73       -1.57  1.17e- 1
     ## # ℹ 34 more rows
 
 ``` r
@@ -713,8 +738,6 @@ lm_sd_res |>
   xlab("Suitable Habitat Area (ft2) per LF (Actual)") + ylab("Suitable Habitat Area (ft2) per LF (Predicted)")
 ```
 
-    ## Warning: Removed 274 rows containing missing values (`geom_path()`).
-
 ![](model-expl_files/figure-gfm/lm-sd-1.png)<!-- -->
 
 ``` r
@@ -730,7 +753,7 @@ lm_sd_res |>
   xlab("Suitable Habitat Area (ft2) per LF (Actual)") + ylab("Suitable Habitat Area (ft2) per LF (Predicted)")
 ```
 
-    ## Warning: Removed 83 rows containing missing values (`geom_point()`).
+    ## Warning: Removed 1 rows containing missing values (`geom_point()`).
 
 ![](model-expl_files/figure-gfm/lm-sd-2.png)<!-- -->
 
@@ -803,14 +826,14 @@ rfr_sd$fit$fit |> print()
     ## 
     ## Type:                             Regression 
     ## Number of trees:                  256 
-    ## Sample size:                      14758 
+    ## Sample size:                      15952 
     ## Number of independent variables:  43 
     ## Mtry:                             7 
     ## Target node size:                 10 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.09533618 
-    ## R squared (OOB):                  0.9521032
+    ## OOB prediction error (MSE):       0.05386471 
+    ## R squared (OOB):                  0.9586958
 
 ``` r
 rfr_sd_res <- testing(td_split) |>
@@ -833,8 +856,6 @@ rfr_sd_res |>
   xlab("Suitable Habitat Area (ft2) per LF (Actual)") + ylab("Suitable Habitat Area (ft2) per LF (Predicted)")
 ```
 
-    ## Warning: Removed 302 rows containing missing values (`geom_path()`).
-
 ![](model-expl_files/figure-gfm/rfr-sd-1.png)<!-- -->
 
 ``` r
@@ -850,7 +871,7 @@ rfr_sd_res |>
   xlab("Suitable Habitat Area (ft2) per LF (Actual)") + ylab("Suitable Habitat Area (ft2) per LF (Predicted)")
 ```
 
-    ## Warning: Removed 91 rows containing missing values (`geom_point()`).
+    ## Warning: Removed 1 rows containing missing values (`geom_point()`).
 
 ![](model-expl_files/figure-gfm/rfr-sd-2.png)<!-- -->
 
@@ -890,7 +911,7 @@ residuals |>
 ```
 
     ##      Test     Train 
-    ## -7.205008 -2.202128
+    ## -7.462133 -2.106091
 
 ``` r
 residuals |>
@@ -958,7 +979,7 @@ lm_sd2 |> glance()
     ## # A tibble: 1 × 12
     ##   r.squared adj.r.squared sigma statistic p.value    df  logLik    AIC    BIC
     ##       <dbl>         <dbl> <dbl>     <dbl>   <dbl> <dbl>   <dbl>  <dbl>  <dbl>
-    ## 1     0.767         0.767  15.3     1183.       0    41 -10928. 21942. 22269.
+    ## 1     0.654         0.653  14.5      734.       0    41 -10623. 21332. 21663.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
@@ -968,16 +989,16 @@ lm_sd2 |> tidy()
     ## # A tibble: 42 × 5
     ##    term             estimate std.error statistic  p.value
     ##    <chr>               <dbl>     <dbl>     <dbl>    <dbl>
-    ##  1 (Intercept)          6.34   0.00448   1415.   0       
-    ##  2 flow_cfs           179.    34.1          5.24 1.64e- 7
-    ##  3 slope              -24.5    8.84        -2.78 5.49e- 3
-    ##  4 da_area_sq_km        5.18   1.87         2.76 5.70e- 3
-    ##  5 da_elev_mean        11.6    2.73         4.26 2.09e- 5
-    ##  6 da_ppt_mean_mm       1.98   1.74         1.14 2.56e- 1
-    ##  7 bf_depth_m           6.53   0.357       18.3  8.23e-74
-    ##  8 bf_w_d_ratio         2.44   0.163       14.9  4.34e-50
-    ##  9 da_k_erodibility    19.4    3.07         6.32 2.70e-10
-    ## 10 da_avg_slope        -3.15   1.65        -1.91 5.59e- 2
+    ##  1 (Intercept)          6.27   0.00375   1674.   0       
+    ##  2 flow_cfs            40.1    9.13         4.40 1.11e- 5
+    ##  3 slope               34.1    7.09         4.81 1.52e- 6
+    ##  4 da_area_sq_km       -4.22   0.584       -7.21 5.70e-13
+    ##  5 da_elev_mean         5.00   1.19         4.20 2.65e- 5
+    ##  6 da_ppt_mean_mm       2.89   1.14         2.54 1.10e- 2
+    ##  7 bf_depth_m           5.39   0.325       16.6  4.47e-61
+    ##  8 bf_w_d_ratio         1.96   0.166       11.7  9.87e-32
+    ##  9 da_k_erodibility     3.74   0.763        4.90 9.92e- 7
+    ## 10 da_avg_slope        -1.85   0.820       -2.25 2.42e- 2
     ## # ℹ 32 more rows
 
 ``` r
@@ -1081,14 +1102,14 @@ rfr_sd2$fit$fit |> print()
     ## 
     ## Type:                             Regression 
     ## Number of trees:                  256 
-    ## Sample size:                      14758 
+    ## Sample size:                      15952 
     ## Number of independent variables:  41 
     ## Mtry:                             6 
     ## Target node size:                 10 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.01019373 
-    ## R squared (OOB):                  0.9781552
+    ## OOB prediction error (MSE):       0.009667315 
+    ## R squared (OOB):                  0.9752743
 
 ``` r
 rfr_sd2_res <- testing(td_split) |>
@@ -1197,7 +1218,7 @@ lm_si |> glance()
     ## # A tibble: 1 × 12
     ##   r.squared adj.r.squared sigma statistic p.value    df logLik     AIC     BIC
     ##       <dbl>         <dbl> <dbl>     <dbl>   <dbl> <dbl>  <dbl>   <dbl>   <dbl>
-    ## 1     0.503         0.502  1.72      452.       0    33 21312. -42554. -42288.
+    ## 1     0.345         0.343  2.35      254.       0    33 18378. -36686. -36418.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
@@ -1205,18 +1226,18 @@ lm_si |> tidy()
 ```
 
     ## # A tibble: 34 × 5
-    ##    term              estimate std.error statistic  p.value
-    ##    <chr>                <dbl>     <dbl>     <dbl>    <dbl>
-    ##  1 (Intercept)       0.0743    0.000497  150.     0       
-    ##  2 flow_norm_cfs     2.59      0.190      13.6    6.65e-42
-    ##  3 slope             0.0430    0.00880     4.88   1.08e- 6
-    ##  4 sinuosity        -0.00771   0.00207    -3.72   1.97e- 4
-    ##  5 bf_depth_m        0.184     0.0128     14.3    3.02e-46
-    ##  6 bf_w_d_ratio      0.0595    0.00630     9.45   3.88e-21
-    ##  7 da_k_erodibility  0.222     0.0166     13.4    1.32e-40
-    ##  8 da_avg_slope      0.0499    0.0126      3.95   7.99e- 5
-    ##  9 mean_ndvi         0.000183  0.00486     0.0378 9.70e- 1
-    ## 10 loc_bfi           0.108     0.00603    17.9    6.71e-71
+    ##    term             estimate std.error statistic  p.value
+    ##    <chr>               <dbl>     <dbl>     <dbl>    <dbl>
+    ##  1 (Intercept)       0.107    0.000599   178.    0       
+    ##  2 flow_norm_cfs     1.90     0.244        7.78  7.41e-15
+    ##  3 slope             0.0577   0.0115       5.04  4.69e- 7
+    ##  4 sinuosity         0.0180   0.00255      7.03  2.14e-12
+    ##  5 bf_depth_m        0.0735   0.0123       5.96  2.61e- 9
+    ##  6 bf_w_d_ratio      0.0180   0.00754      2.39  1.68e- 2
+    ##  7 da_k_erodibility  0.121    0.0256       4.75  2.07e- 6
+    ##  8 da_avg_slope      0.0892   0.0142       6.27  3.63e-10
+    ##  9 mean_ndvi        -0.0354   0.00517     -6.84  7.96e-12
+    ## 10 loc_bfi          -0.00588  0.00671     -0.876 3.81e- 1
     ## # ℹ 24 more rows
 
 ``` r
@@ -1342,14 +1363,14 @@ rfr_si$fit$fit |> print()
     ## 
     ## Type:                             Regression 
     ## Number of trees:                  256 
-    ## Sample size:                      14758 
+    ## Sample size:                      15952 
     ## Number of independent variables:  33 
     ## Mtry:                             5 
     ## Target node size:                 10 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.0004767478 
-    ## R squared (OOB):                  0.8952908
+    ## OOB prediction error (MSE):       0.000891972 
+    ## R squared (OOB):                  0.8716413
 
 ``` r
 rfr_si_res <- testing(td_split) |>
@@ -1446,7 +1467,7 @@ lm_si2 |> glance()
     ## # A tibble: 1 × 12
     ##   r.squared adj.r.squared sigma statistic p.value    df  logLik    AIC    BIC
     ##       <dbl>         <dbl> <dbl>     <dbl>   <dbl> <dbl>   <dbl>  <dbl>  <dbl>
-    ## 1     0.811         0.810  18.1     2035.       0    31 -13438. 26943. 27194.
+    ## 1     0.632         0.632  19.1      883.       0    31 -15021. 30109. 30362.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
@@ -1454,18 +1475,18 @@ lm_si2 |> tidy()
 ```
 
     ## # A tibble: 32 × 5
-    ##    term             estimate std.error statistic   p.value
-    ##    <chr>               <dbl>     <dbl>     <dbl>     <dbl>
-    ##  1 (Intercept)        0.693    0.00520   133.    0        
-    ##  2 flow_norm_cfs     60.4      2.00       30.2   1.98e-194
-    ##  3 slope              0.249    0.0919      2.71  6.72e-  3
-    ##  4 sinuosity          0.332    0.0217     15.3   1.56e- 52
-    ##  5 bf_w_d_ratio       0.369    0.0383      9.63  6.65e- 22
-    ##  6 da_k_erodibility  -0.0840   0.136      -0.618 5.36e-  1
-    ##  7 da_avg_slope       1.82     0.128      14.3   8.65e- 46
-    ##  8 mean_ndvi          0.112    0.0489      2.29  2.21e-  2
-    ##  9 loc_bfi            0.603    0.0494     12.2   4.79e- 34
-    ## 10 loc_pct_clay       0.516    0.0662      7.79  7.03e- 15
+    ##    term             estimate std.error statistic  p.value
+    ##    <chr>               <dbl>     <dbl>     <dbl>    <dbl>
+    ##  1 (Intercept)        0.782    0.00486   161.    0       
+    ##  2 flow_norm_cfs     18.2      1.93        9.45  3.99e-21
+    ##  3 slope              0.335    0.0917      3.65  2.61e- 4
+    ##  4 sinuosity          0.386    0.0203     19.1   3.98e-80
+    ##  5 bf_w_d_ratio      -0.0128   0.0390     -0.328 7.43e- 1
+    ##  6 da_k_erodibility  -1.39     0.154      -9.00  2.40e-19
+    ##  7 da_avg_slope       0.356    0.114       3.11  1.89e- 3
+    ##  8 mean_ndvi         -0.0772   0.0414     -1.87  6.22e- 2
+    ##  9 loc_bfi           -0.118    0.0454     -2.61  9.13e- 3
+    ## 10 loc_pct_clay       0.662    0.0636     10.4   2.74e-25
     ## # ℹ 22 more rows
 
 ``` r
@@ -1571,14 +1592,14 @@ rfr_si2$fit$fit |> print()
     ## 
     ## Type:                             Regression 
     ## Number of trees:                  256 
-    ## Sample size:                      14758 
+    ## Sample size:                      15952 
     ## Number of independent variables:  31 
     ## Mtry:                             5 
     ## Target node size:                 10 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.01231636 
-    ## R squared (OOB):                  0.9858106
+    ## OOB prediction error (MSE):       0.01068109 
+    ## R squared (OOB):                  0.9831827
 
 ``` r
 rfr_si2_res <- testing(td_split) |>
@@ -1737,8 +1758,8 @@ sd_pred <-
     ## Columns: 4
     ## $ comid               <dbl> 342517, 342517, 342517, 342517, 342517, 342517, 34…
     ## $ flow_cfs            <dbl> 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000,…
-    ## $ ihs_wua_per_lf_pred <dbl> 1.614572, 1.647879, 1.743528, 1.810171, 1.982560, …
-    ## $ wua_per_lf_pred     <dbl> 2.413380, 2.501745, 2.771288, 2.973932, 3.561797, …
+    ## $ ihs_wua_per_lf_pred <dbl> 3.696754, 3.710941, 3.679540, 3.655673, 3.648186, …
+    ## $ wua_per_lf_pred     <dbl> 20.14572, 20.43391, 19.80146, 19.33385, 19.18945, …
 
 ``` r
 flowlines_gcs |>
@@ -1764,11 +1785,7 @@ sd_pred |>
   scale_x_log10() + scale_y_log10() + theme(panel.grid.minor = element_blank())
 ```
 
-    ## Warning: Transformation introduced infinite values in continuous y-axis
-
     ## `geom_smooth()` using method = 'gam' and formula = 'y ~ s(x, bs = "cs")'
-
-    ## Warning: Removed 180 rows containing non-finite values (`stat_smooth()`).
 
 ![](model-expl_files/figure-gfm/prediction-output-sd-2.png)<!-- -->
 
@@ -1802,9 +1819,9 @@ si2_pred <-
     ## $ flow_cfs                 <dbl> 100, 200, 300, 400, 500, 600, 700, 800, 900, …
     ## $ flow_norm_cfs            <dbl> 73.29645, 146.59291, 219.88936, 293.18582, 36…
     ## $ da_scalar                <dbl> 1.364322, 1.364322, 1.364322, 1.364322, 1.364…
-    ## $ ihs_wua_per_lf_norm_pred <dbl> 0.8182393, 0.9924823, 1.2271212, 1.2432881, 1…
-    ## $ wua_per_lf_norm_pred     <dbl> 0.9126490, 1.1636338, 1.5591297, 1.5892801, 1…
-    ## $ wua_per_lf_pred          <dbl> 1.245148, 1.587572, 2.127156, 2.168291, 2.264…
+    ## $ ihs_wua_per_lf_norm_pred <dbl> 0.9958327, 1.1162876, 1.1669153, 1.2029954, 1…
+    ## $ wua_per_lf_norm_pred     <dbl> 1.168781, 1.363002, 1.450372, 1.514892, 1.534…
+    ## $ wua_per_lf_pred          <dbl> 1.594594, 1.859574, 1.978775, 2.066801, 2.093…
 
 ``` r
 flowlines_gcs |>
@@ -1830,11 +1847,7 @@ si2_pred |>
   scale_x_log10() + scale_y_log10() + theme(panel.grid.minor = element_blank())
 ```
 
-    ## Warning: Transformation introduced infinite values in continuous y-axis
-
     ## `geom_smooth()` using method = 'gam' and formula = 'y ~ s(x, bs = "cs")'
-
-    ## Warning: Removed 105 rows containing non-finite values (`stat_smooth()`).
 
 ![](model-expl_files/figure-gfm/prediction-output-si2-2.png)<!-- -->
 
@@ -1860,8 +1873,8 @@ sd2_pred <-
     ## Columns: 4
     ## $ comid                    <dbl> 342517, 342517, 342517, 342517, 342517, 34251…
     ## $ flow_cfs                 <dbl> 100, 200, 300, 400, 500, 600, 700, 800, 900, …
-    ## $ ihs_tot_area_per_lf_pred <dbl> 5.300860, 5.307262, 5.308987, 5.347177, 5.367…
-    ## $ tot_area_per_lf_pred     <dbl> 100.2521, 100.8960, 101.0702, 105.0049, 107.2…
+    ## $ ihs_tot_area_per_lf_pred <dbl> 5.390080, 5.400989, 5.416252, 5.440766, 5.471…
+    ## $ tot_area_per_lf_pred     <dbl> 109.6082, 110.8105, 112.5148, 115.3073, 118.9…
 
 ``` r
 sd2si_pred <- 
@@ -1890,10 +1903,10 @@ sd2si_pred <-
     ## $ comid                    <dbl> 342517, 342517, 342517, 342517, 342517, 34251…
     ## $ flow_cfs                 <dbl> 100, 200, 300, 400, 500, 600, 700, 800, 900, …
     ## $ flow_norm_cfs            <dbl> 73.29645, 146.59291, 219.88936, 293.18582, 36…
-    ## $ hsi_frac_pred            <dbl> 0.08570038, 0.10434659, 0.11280539, 0.1106276…
-    ## $ ihs_tot_area_per_lf_pred <dbl> 5.300860, 5.307262, 5.308987, 5.347177, 5.367…
-    ## $ tot_area_per_lf_pred     <dbl> 100.2521, 100.8960, 101.0702, 105.0049, 107.2…
-    ## $ wua_per_lf_pred          <dbl> 8.591647, 10.528150, 11.401262, 11.616442, 11…
+    ## $ hsi_frac_pred            <dbl> 0.13659811, 0.14226384, 0.14481004, 0.1462714…
+    ## $ ihs_tot_area_per_lf_pred <dbl> 5.390080, 5.400989, 5.416252, 5.440766, 5.471…
+    ## $ tot_area_per_lf_pred     <dbl> 109.6082, 110.8105, 112.5148, 115.3073, 118.9…
+    ## $ wua_per_lf_pred          <dbl> 14.97228, 15.76433, 16.29327, 16.86616, 17.33…
 
 ``` r
 flowlines_gcs |>
@@ -1916,11 +1929,12 @@ prediction_flows <- readRDS(here::here("data-raw", "results", "watershed_flow_su
   mutate(flow_cfs = map2(min_cfs, max_cfs, function(x, y) oom_range(x, y))) |>
   select(watershed, flow_cfs) |>
   unnest(flow_cfs) |>
-  filter(flow_cfs >= min(interp_flows) & flow_cfs <= max(interp_flows)) |>
+  #instead of filtering here, filter later
+  #filter(flow_cfs >= min(interp_flows) & flow_cfs <= max(interp_flows)) |>
   glimpse()
 ```
 
-    ## Rows: 336
+    ## Rows: 587
     ## Columns: 2
     ## $ watershed <chr> "American River", "American River", "American River", "Ameri…
     ## $ flow_cfs  <dbl> 500, 600, 700, 800, 900, 1000, 2000, 3000, 4000, 5000, 6000,…
@@ -2051,13 +2065,15 @@ dsm_habitat_combined <- mainstems |>
 ``` r
 dsm_habitat_wua_per_lf <- dsm_habitat_combined |>
   select(river, flow_cfs, instream_wua_per_lf, floodplain_wua_per_lf) |>
+#  mutate(combined_wua_per_lf = pmax(instream_wua_per_lf, floodplain_wua_per_lf)) |>
   pivot_longer(cols=c(instream_wua_per_lf, floodplain_wua_per_lf)) |>
   mutate(name = paste("DSMhabitat", str_replace(name, "_wua_per_lf", "")),
          value = if_else(value>0, value, NA))
 
 dsm_habitat_suitable_ac <- dsm_habitat_combined |>
   select(river, flow_cfs, instream_suitable_ac, floodplain_suitable_ac) |>
-  pivot_longer(cols=c(instream_suitable_ac, floodplain_suitable_ac))  |>
+#  mutate(combined_suitable_ac = pmax(instream_suitable_ac, floodplain_suitable_ac)) |>
+  pivot_longer(cols=c(instream_suitable_ac, floodplain_suitable_ac)) |>
   mutate(value = if_else(value>0, value, NA)) |>
   mutate(name = paste("DSMhabitat", str_replace(name, "_suitable_ac", "")),
          value = if_else(value>0, value, NA))
@@ -2113,7 +2129,8 @@ pd_rf_by_mainstem |>
   geom_line(aes(y = wua_per_lf_pred, group = comid, color = hqt_gradient_class), alpha=0.5) + 
   geom_line(data=pd_rf_by_mainstem_summary, aes(y = avg_wua_ft2_per_lf), linewidth=1.0) + #geom_smooth(method="loess", se=F, color="black") +
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="top", 
         panel.grid.minor = element_blank(),
@@ -2122,6 +2139,13 @@ pd_rf_by_mainstem |>
   scale_color_manual(values = palette_hqt_gradient_class)
 ```
 
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+    ## Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 9296 rows containing missing values (`geom_line()`).
+
+    ## Warning: Removed 12 rows containing missing values (`geom_line()`).
+
 ![](model-expl_files/figure-gfm/dsmhabitat-sd-val-1.png)<!-- -->
 
 ``` r
@@ -2129,13 +2153,18 @@ pd_rf_by_mainstem_summary |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = tot_wua_ac, color = river)) + #, color=species, linetype=habitat)) + 
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="none", 
         panel.grid.minor = element_blank(),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   xlab("Flow (cfs)") + ylab("Total WUA (ac)")
 ```
+
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 203 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-sd-val-2.png)<!-- -->
 
@@ -2144,13 +2173,17 @@ pd_rf_by_mainstem_summary |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color = river)) + #, color=species, linetype=habitat)) + 
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="none", 
         panel.grid.minor = element_blank(),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
 ```
+
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+    ## Removed 203 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-sd-val-3.png)<!-- -->
 
@@ -2162,7 +2195,8 @@ pd_rf_by_mainstem_summary |>
   geom_line(aes(x = flow_cfs, y = tot_wua_ac, color="habistat prediction")) + 
   geom_line(data=dsm_habitat_suitable_ac, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   theme(legend.position="top", legend.title=element_blank(),
         panel.grid.minor = element_blank(),
@@ -2173,7 +2207,11 @@ pd_rf_by_mainstem_summary |>
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
 
-    ## Warning: Removed 25 rows containing missing values (`geom_line()`).
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 12 rows containing missing values (`geom_line()`).
+
+    ## Warning: Removed 26 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-sd-val-4.png)<!-- -->
 
@@ -2184,7 +2222,8 @@ pd_rf_by_mainstem_summary |>
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color="habistat prediction")) + 
   geom_line(data=dsm_habitat_wua_per_lf, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   theme(legend.position="top", legend.title=element_blank(),
         panel.grid.minor = element_blank(),
@@ -2194,7 +2233,12 @@ pd_rf_by_mainstem_summary |>
 ```
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
-    ## Removed 25 rows containing missing values (`geom_line()`).
+
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 12 rows containing missing values (`geom_line()`).
+
+    ## Warning: Removed 26 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-sd-val-5.png)<!-- -->
 
@@ -2215,6 +2259,8 @@ pd_rf_by_mainstem_summary |> filter(flow_cfs>=min(interp_flows)) |>
 ```
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 1 row containing missing values (`geom_line()`).
 
     ## Warning: Removed 26 rows containing missing values (`geom_line()`).
 
@@ -2271,7 +2317,8 @@ pd_rf_by_mainstem |>
   geom_line(aes(y = wua_per_lf_pred, group = comid, color = hqt_gradient_class), alpha=0.5) + 
   geom_line(data=pd_rf_by_mainstem_summary, aes(y = avg_wua_ft2_per_lf), linewidth=1.0) + #geom_smooth(method="loess", se=F, color="black") +
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="top", 
         panel.grid.minor = element_blank(),
@@ -2280,6 +2327,13 @@ pd_rf_by_mainstem |>
   scale_color_manual(values = palette_hqt_gradient_class)
 ```
 
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+    ## Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 9296 rows containing missing values (`geom_line()`).
+
+    ## Warning: Removed 12 rows containing missing values (`geom_line()`).
+
 ![](model-expl_files/figure-gfm/dsmhabitat-si2-val-1.png)<!-- -->
 
 ``` r
@@ -2287,13 +2341,18 @@ pd_rf_by_mainstem_summary |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = tot_wua_ac, color = river)) + #, color=species, linetype=habitat)) + 
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="none", 
         panel.grid.minor = element_blank(),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   xlab("Flow (cfs)") + ylab("Total WUA (ac)")
 ```
+
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 203 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si2-val-2.png)<!-- -->
 
@@ -2302,13 +2361,17 @@ pd_rf_by_mainstem_summary |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color = river)) + #, color=species, linetype=habitat)) + 
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="none", 
         panel.grid.minor = element_blank(),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
 ```
+
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+    ## Removed 203 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si2-val-3.png)<!-- -->
 
@@ -2320,7 +2383,8 @@ pd_rf_by_mainstem_summary |>
   geom_line(aes(x = flow_cfs, y = tot_wua_ac, color="habistat prediction")) + 
   geom_line(data=dsm_habitat_suitable_ac, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   theme(legend.position="top", legend.title=element_blank(),
         panel.grid.minor = element_blank(),
@@ -2331,7 +2395,11 @@ pd_rf_by_mainstem_summary |>
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
 
-    ## Warning: Removed 25 rows containing missing values (`geom_line()`).
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 12 rows containing missing values (`geom_line()`).
+
+    ## Warning: Removed 26 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si2-val-4.png)<!-- -->
 
@@ -2342,7 +2410,8 @@ pd_rf_by_mainstem_summary |>
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color="habistat prediction")) + 
   geom_line(data=dsm_habitat_wua_per_lf, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   theme(legend.position="top", legend.title=element_blank(),
         panel.grid.minor = element_blank(),
@@ -2352,7 +2421,12 @@ pd_rf_by_mainstem_summary |>
 ```
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
-    ## Removed 25 rows containing missing values (`geom_line()`).
+
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 12 rows containing missing values (`geom_line()`).
+
+    ## Warning: Removed 26 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si2-val-5.png)<!-- -->
 
@@ -2373,6 +2447,8 @@ pd_rf_by_mainstem_summary |> filter(flow_cfs>=min(interp_flows)) |>
 ```
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 1 row containing missing values (`geom_line()`).
 
     ## Warning: Removed 26 rows containing missing values (`geom_line()`).
 
@@ -2451,7 +2527,8 @@ pd_rf_by_mainstem |>
   geom_line(aes(y = wua_per_lf_pred, group = comid, color = hqt_gradient_class), alpha=0.5) + 
   geom_line(data=pd_rf_by_mainstem_summary, aes(y = avg_wua_ft2_per_lf), linewidth=1.0) + #geom_smooth(method="loess", se=F, color="black") +
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="top", 
         panel.grid.minor = element_blank(),
@@ -2460,6 +2537,13 @@ pd_rf_by_mainstem |>
   scale_color_manual(values = palette_hqt_gradient_class)
 ```
 
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+    ## Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 9296 rows containing missing values (`geom_line()`).
+
+    ## Warning: Removed 12 rows containing missing values (`geom_line()`).
+
 ![](model-expl_files/figure-gfm/dsmhabitat-si-val-1.png)<!-- -->
 
 ``` r
@@ -2467,13 +2551,18 @@ pd_rf_by_mainstem_summary |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = tot_wua_ac, color = river)) + #, color=species, linetype=habitat)) + 
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="none", 
         panel.grid.minor = element_blank(),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   xlab("Flow (cfs)") + ylab("Total WUA (ac)")
 ```
+
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 203 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si-val-2.png)<!-- -->
 
@@ -2482,13 +2571,17 @@ pd_rf_by_mainstem_summary |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color = river)) + #, color=species, linetype=habitat)) + 
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="none", 
         panel.grid.minor = element_blank(),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
 ```
+
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+    ## Removed 203 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si-val-3.png)<!-- -->
 
@@ -2500,7 +2593,8 @@ pd_rf_by_mainstem_summary |>
   geom_line(aes(x = flow_cfs, y = tot_wua_ac, color="habistat prediction")) + 
   geom_line(data=dsm_habitat_suitable_ac, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   theme(legend.position="top", legend.title=element_blank(),
         panel.grid.minor = element_blank(),
@@ -2511,7 +2605,11 @@ pd_rf_by_mainstem_summary |>
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
 
-    ## Warning: Removed 25 rows containing missing values (`geom_line()`).
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 12 rows containing missing values (`geom_line()`).
+
+    ## Warning: Removed 26 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si-val-4.png)<!-- -->
 
@@ -2522,7 +2620,8 @@ pd_rf_by_mainstem_summary |>
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color="habistat prediction")) + 
   geom_line(data=dsm_habitat_wua_per_lf, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   theme(legend.position="top", legend.title=element_blank(),
         panel.grid.minor = element_blank(),
@@ -2532,7 +2631,12 @@ pd_rf_by_mainstem_summary |>
 ```
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
-    ## Removed 25 rows containing missing values (`geom_line()`).
+
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 12 rows containing missing values (`geom_line()`).
+
+    ## Warning: Removed 26 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si-val-5.png)<!-- -->
 
@@ -2554,6 +2658,8 @@ pd_rf_by_mainstem_summary |> filter(flow_cfs>=min(interp_flows)) |>
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
 
+    ## Warning: Removed 1 row containing missing values (`geom_line()`).
+
     ## Warning: Removed 26 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si-val-6.png)<!-- -->
@@ -2561,15 +2667,19 @@ pd_rf_by_mainstem_summary |> filter(flow_cfs>=min(interp_flows)) |>
 ## Results Export
 
 ``` r
-wua_predicted <- pd |>
+wua_predicted <- 
+  pd |>
   inner_join(sd_pred |> select(comid, flow_cfs, wua_per_lf_pred_sd = wua_per_lf_pred),
              by=join_by(comid, flow_cfs), relationship="one-to-one") |>
   inner_join(si2_pred |> select(comid, flow_cfs, wua_per_lf_pred_si2 = wua_per_lf_pred),
              by=join_by(comid, flow_cfs), relationship="one-to-one") |>
   inner_join(sd2si_pred |> select(comid, flow_cfs, wua_per_lf_pred_sd2si = wua_per_lf_pred),
              by=join_by(comid, flow_cfs), relationship="one-to-one") |>
+  #filter(row_number() == 26143) |>
   left_join(td |> select(comid, flow_cfs, wua_per_lf_actual = wua_per_lf),
             by=join_by(comid, flow_cfs), relationship="one-to-one")
+  
+ # td |> filter(comid==2823726)
 
 wua_predicted |> saveRDS(here::here("data-raw", "results", "predictions_table.Rds"))
 wua_predicted |> usethis::use_data(overwrite = TRUE)
@@ -2584,7 +2694,482 @@ wua_predicted |> usethis::use_data(overwrite = TRUE)
 
 # hs_predictions <- predictions_export
 # usethis::use_data(hs_predictions, overwrite = T)
+
+td |> filter(str_detect(dataset,"Tuolumne River")) |>
+  select(comid, flow_cfs) |> arrange(comid, flow_cfs)
 ```
+
+    ##       comid flow_cfs
+    ## 1   2823718      300
+    ## 2   2823718      400
+    ## 3   2823718      500
+    ## 4   2823718      600
+    ## 5   2823718      700
+    ## 6   2823718      800
+    ## 7   2823718      900
+    ## 8   2823718     1000
+    ## 9   2823718     1100
+    ## 10  2823718     1200
+    ## 11  2823718     1300
+    ## 12  2823718     1400
+    ## 13  2823718     1500
+    ## 14  2823718     1600
+    ## 15  2823718     1700
+    ## 16  2823718     1800
+    ## 17  2823718     1900
+    ## 18  2823718     2000
+    ## 19  2823718     2100
+    ## 20  2823718     2200
+    ## 21  2823718     2300
+    ## 22  2823718     2400
+    ## 23  2823718     2500
+    ## 24  2823718     2600
+    ## 25  2823718     2700
+    ## 26  2823718     2800
+    ## 27  2823718     2900
+    ## 28  2823718     3000
+    ## 29  2823718     3100
+    ## 30  2823718     3200
+    ## 31  2823718     3300
+    ## 32  2823718     3400
+    ## 33  2823718     3500
+    ## 34  2823718     3600
+    ## 35  2823718     3700
+    ## 36  2823718     3800
+    ## 37  2823718     3900
+    ## 38  2823718     4000
+    ## 39  2823718     4100
+    ## 40  2823718     4200
+    ## 41  2823718     4300
+    ## 42  2823718     4400
+    ## 43  2823718     4500
+    ## 44  2823718     4600
+    ## 45  2823718     4700
+    ## 46  2823718     4800
+    ## 47  2823718     4900
+    ## 48  2823718     5000
+    ## 49  2823718     5100
+    ## 50  2823718     5200
+    ## 51  2823718     5300
+    ## 52  2823718     5400
+    ## 53  2823718     5500
+    ## 54  2823718     5600
+    ## 55  2823718     5700
+    ## 56  2823718     5800
+    ## 57  2823718     5900
+    ## 58  2823718     6000
+    ## 59  2823718     6100
+    ## 60  2823718     6200
+    ## 61  2823718     6300
+    ## 62  2823718     6400
+    ## 63  2823718     6500
+    ## 64  2823718     6600
+    ## 65  2823718     6700
+    ## 66  2823718     6800
+    ## 67  2823718     6900
+    ## 68  2823718     7000
+    ## 69  2823718     7100
+    ## 70  2823718     7200
+    ## 71  2823718     7300
+    ## 72  2823718     7400
+    ## 73  2823718     7500
+    ## 74  2823718     7600
+    ## 75  2823718     7700
+    ## 76  2823718     7800
+    ## 77  2823718     7900
+    ## 78  2823718     8000
+    ## 79  2823718     8100
+    ## 80  2823718     8200
+    ## 81  2823718     8300
+    ## 82  2823718     8400
+    ## 83  2823718     8500
+    ## 84  2823718     8600
+    ## 85  2823718     8700
+    ## 86  2823718     8800
+    ## 87  2823718     8900
+    ## 88  2823718     9000
+    ## 89  2823718     9100
+    ## 90  2823718     9200
+    ## 91  2823718     9300
+    ## 92  2823718     9400
+    ## 93  2823718     9500
+    ## 94  2823718     9600
+    ## 95  2823720      300
+    ## 96  2823720      400
+    ## 97  2823720      500
+    ## 98  2823720      600
+    ## 99  2823720      700
+    ## 100 2823720      800
+    ## 101 2823720      900
+    ## 102 2823720     1000
+    ## 103 2823720     1100
+    ## 104 2823720     1200
+    ## 105 2823720     1300
+    ## 106 2823720     1400
+    ## 107 2823720     1500
+    ## 108 2823720     1600
+    ## 109 2823720     1700
+    ## 110 2823720     1800
+    ## 111 2823720     1900
+    ## 112 2823720     2000
+    ## 113 2823720     2100
+    ## 114 2823720     2200
+    ## 115 2823720     2300
+    ## 116 2823720     2400
+    ## 117 2823720     2500
+    ## 118 2823720     2600
+    ## 119 2823720     2700
+    ## 120 2823720     2800
+    ## 121 2823720     2900
+    ## 122 2823720     3000
+    ## 123 2823720     3100
+    ## 124 2823720     3200
+    ## 125 2823720     3300
+    ## 126 2823720     3400
+    ## 127 2823720     3500
+    ## 128 2823720     3600
+    ## 129 2823720     3700
+    ## 130 2823720     3800
+    ## 131 2823720     3900
+    ## 132 2823720     4000
+    ## 133 2823720     4100
+    ## 134 2823720     4200
+    ## 135 2823720     4300
+    ## 136 2823720     4400
+    ## 137 2823720     4500
+    ## 138 2823720     4600
+    ## 139 2823720     4700
+    ## 140 2823720     4800
+    ## 141 2823720     4900
+    ## 142 2823720     5000
+    ## 143 2823720     5100
+    ## 144 2823720     5200
+    ## 145 2823720     5300
+    ## 146 2823720     5400
+    ## 147 2823720     5500
+    ## 148 2823720     5600
+    ## 149 2823720     5700
+    ## 150 2823720     5800
+    ## 151 2823720     5900
+    ## 152 2823720     6000
+    ## 153 2823720     6100
+    ## 154 2823720     6200
+    ## 155 2823720     6300
+    ## 156 2823720     6400
+    ## 157 2823720     6500
+    ## 158 2823720     6600
+    ## 159 2823720     6700
+    ## 160 2823720     6800
+    ## 161 2823720     6900
+    ## 162 2823720     7000
+    ## 163 2823720     7100
+    ## 164 2823720     7200
+    ## 165 2823720     7300
+    ## 166 2823720     7400
+    ## 167 2823720     7500
+    ## 168 2823720     7600
+    ## 169 2823720     7700
+    ## 170 2823720     7800
+    ## 171 2823720     7900
+    ## 172 2823720     8000
+    ## 173 2823720     8100
+    ## 174 2823720     8200
+    ## 175 2823720     8300
+    ## 176 2823720     8400
+    ## 177 2823720     8500
+    ## 178 2823720     8600
+    ## 179 2823720     8700
+    ## 180 2823720     8800
+    ## 181 2823720     8900
+    ## 182 2823720     9000
+    ## 183 2823720     9100
+    ## 184 2823720     9200
+    ## 185 2823720     9300
+    ## 186 2823720     9400
+    ## 187 2823720     9500
+    ## 188 2823720     9600
+    ## 189 2823726      300
+    ## 190 2823726      400
+    ## 191 2823726      500
+    ## 192 2823726      600
+    ## 193 2823726      700
+    ## 194 2823726      800
+    ## 195 2823726      900
+    ## 196 2823726     1000
+    ## 197 2823726     1100
+    ## 198 2823726     1200
+    ## 199 2823726     1300
+    ## 200 2823726     1400
+    ## 201 2823726     1500
+    ## 202 2823726     1600
+    ## 203 2823726     1700
+    ## 204 2823726     1800
+    ## 205 2823726     1900
+    ## 206 2823726     2000
+    ## 207 2823726     2100
+    ## 208 2823726     2200
+    ## 209 2823726     2300
+    ## 210 2823726     2400
+    ## 211 2823726     2500
+    ## 212 2823726     2600
+    ## 213 2823726     2700
+    ## 214 2823726     2800
+    ## 215 2823726     2900
+    ## 216 2823726     3000
+    ## 217 2823726     3100
+    ## 218 2823726     3200
+    ## 219 2823726     3300
+    ## 220 2823726     3400
+    ## 221 2823726     3500
+    ## 222 2823726     3600
+    ## 223 2823726     3700
+    ## 224 2823726     3800
+    ## 225 2823726     3900
+    ## 226 2823726     4000
+    ## 227 2823726     4100
+    ## 228 2823726     4200
+    ## 229 2823726     4300
+    ## 230 2823726     4400
+    ## 231 2823726     4500
+    ## 232 2823726     4600
+    ## 233 2823726     4700
+    ## 234 2823726     4800
+    ## 235 2823726     4900
+    ## 236 2823726     5000
+    ## 237 2823726     5100
+    ## 238 2823726     5200
+    ## 239 2823726     5300
+    ## 240 2823726     5400
+    ## 241 2823726     5500
+    ## 242 2823726     5600
+    ## 243 2823726     5700
+    ## 244 2823726     5800
+    ## 245 2823726     5900
+    ## 246 2823726     6000
+    ## 247 2823726     6100
+    ## 248 2823726     6200
+    ## 249 2823726     6300
+    ## 250 2823726     6400
+    ## 251 2823726     6500
+    ## 252 2823726     6600
+    ## 253 2823726     6700
+    ## 254 2823726     6800
+    ## 255 2823726     6900
+    ## 256 2823726     7000
+    ## 257 2823726     7100
+    ## 258 2823726     7200
+    ## 259 2823726     7300
+    ## 260 2823726     7400
+    ## 261 2823726     7500
+    ## 262 2823726     7600
+    ## 263 2823726     7700
+    ## 264 2823726     7800
+    ## 265 2823726     7900
+    ## 266 2823726     8000
+    ## 267 2823726     8100
+    ## 268 2823726     8200
+    ## 269 2823726     8300
+    ## 270 2823726     8400
+    ## 271 2823726     8500
+    ## 272 2823726     8600
+    ## 273 2823726     8700
+    ## 274 2823726     8800
+    ## 275 2823726     8900
+    ## 276 2823726     9000
+    ## 277 2823726     9100
+    ## 278 2823726     9200
+    ## 279 2823726     9300
+    ## 280 2823726     9400
+    ## 281 2823726     9500
+    ## 282 2823726     9600
+    ## 283 2823744      300
+    ## 284 2823744      400
+    ## 285 2823744      500
+    ## 286 2823744      600
+    ## 287 2823744      700
+    ## 288 2823744      800
+    ## 289 2823744      900
+    ## 290 2823744     1000
+    ## 291 2823744     1100
+    ## 292 2823744     1200
+    ## 293 2823744     1300
+    ## 294 2823744     1400
+    ## 295 2823744     1500
+    ## 296 2823744     1600
+    ## 297 2823744     1700
+    ## 298 2823744     1800
+    ## 299 2823744     1900
+    ## 300 2823744     2000
+    ## 301 2823744     2100
+    ## 302 2823744     2200
+    ## 303 2823744     2300
+    ## 304 2823744     2400
+    ## 305 2823744     2500
+    ## 306 2823744     2600
+    ## 307 2823744     2700
+    ## 308 2823744     2800
+    ## 309 2823744     2900
+    ## 310 2823744     3000
+    ## 311 2823744     3100
+    ## 312 2823744     3200
+    ## 313 2823744     3300
+    ## 314 2823744     3400
+    ## 315 2823744     3500
+    ## 316 2823744     3600
+    ## 317 2823744     3700
+    ## 318 2823744     3800
+    ## 319 2823744     3900
+    ## 320 2823744     4000
+    ## 321 2823744     4100
+    ## 322 2823744     4200
+    ## 323 2823744     4300
+    ## 324 2823744     4400
+    ## 325 2823744     4500
+    ## 326 2823744     4600
+    ## 327 2823744     4700
+    ## 328 2823744     4800
+    ## 329 2823744     4900
+    ## 330 2823744     5000
+    ## 331 2823744     5100
+    ## 332 2823744     5200
+    ## 333 2823744     5300
+    ## 334 2823744     5400
+    ## 335 2823744     5500
+    ## 336 2823744     5600
+    ## 337 2823744     5700
+    ## 338 2823744     5800
+    ## 339 2823744     5900
+    ## 340 2823744     6000
+    ## 341 2823744     6100
+    ## 342 2823744     6200
+    ## 343 2823744     6300
+    ## 344 2823744     6400
+    ## 345 2823744     6500
+    ## 346 2823744     6600
+    ## 347 2823744     6700
+    ## 348 2823744     6800
+    ## 349 2823744     6900
+    ## 350 2823744     7000
+    ## 351 2823744     7100
+    ## 352 2823744     7200
+    ## 353 2823744     7300
+    ## 354 2823744     7400
+    ## 355 2823744     7500
+    ## 356 2823744     7600
+    ## 357 2823744     7700
+    ## 358 2823744     7800
+    ## 359 2823744     7900
+    ## 360 2823744     8000
+    ## 361 2823744     8100
+    ## 362 2823744     8200
+    ## 363 2823744     8300
+    ## 364 2823744     8400
+    ## 365 2823744     8500
+    ## 366 2823744     8600
+    ## 367 2823744     8700
+    ## 368 2823744     8800
+    ## 369 2823744     8900
+    ## 370 2823744     9000
+    ## 371 2823744     9100
+    ## 372 2823744     9200
+    ## 373 2823744     9300
+    ## 374 2823744     9400
+    ## 375 2823744     9500
+    ## 376 2823744     9600
+    ## 377 2823750      300
+    ## 378 2823750      400
+    ## 379 2823750      500
+    ## 380 2823750      600
+    ## 381 2823750      700
+    ## 382 2823750      800
+    ## 383 2823750      900
+    ## 384 2823750     1000
+    ## 385 2823750     1100
+    ## 386 2823750     1200
+    ## 387 2823750     1300
+    ## 388 2823750     1400
+    ## 389 2823750     1500
+    ## 390 2823750     1600
+    ## 391 2823750     1700
+    ## 392 2823750     1800
+    ## 393 2823750     1900
+    ## 394 2823750     2000
+    ## 395 2823750     2100
+    ## 396 2823750     2200
+    ## 397 2823750     2300
+    ## 398 2823750     2400
+    ## 399 2823750     2500
+    ## 400 2823750     2600
+    ## 401 2823750     2700
+    ## 402 2823750     2800
+    ## 403 2823750     2900
+    ## 404 2823750     3000
+    ## 405 2823750     3100
+    ## 406 2823750     3200
+    ## 407 2823750     3300
+    ## 408 2823750     3400
+    ## 409 2823750     3500
+    ## 410 2823750     3600
+    ## 411 2823750     3700
+    ## 412 2823750     3800
+    ## 413 2823750     3900
+    ## 414 2823750     4000
+    ## 415 2823750     4100
+    ## 416 2823750     4200
+    ## 417 2823750     4300
+    ## 418 2823750     4400
+    ## 419 2823750     4500
+    ## 420 2823750     4600
+    ## 421 2823750     4700
+    ## 422 2823750     4800
+    ## 423 2823750     4900
+    ## 424 2823750     5000
+    ## 425 2823750     5100
+    ## 426 2823750     5200
+    ## 427 2823750     5300
+    ## 428 2823750     5400
+    ## 429 2823750     5500
+    ## 430 2823750     5600
+    ## 431 2823750     5700
+    ## 432 2823750     5800
+    ## 433 2823750     5900
+    ## 434 2823750     6000
+    ## 435 2823750     6100
+    ## 436 2823750     6200
+    ## 437 2823750     6300
+    ## 438 2823750     6400
+    ## 439 2823750     6500
+    ## 440 2823750     6600
+    ## 441 2823750     6700
+    ## 442 2823750     6800
+    ## 443 2823750     6900
+    ## 444 2823750     7000
+    ## 445 2823750     7100
+    ## 446 2823750     7200
+    ## 447 2823750     7300
+    ## 448 2823750     7400
+    ## 449 2823750     7500
+    ## 450 2823750     7600
+    ## 451 2823750     7700
+    ## 452 2823750     7800
+    ## 453 2823750     7900
+    ## 454 2823750     8000
+    ## 455 2823750     8100
+    ## 456 2823750     8200
+    ## 457 2823750     8300
+    ## 458 2823750     8400
+    ## 459 2823750     8500
+    ## 460 2823750     8600
+    ## 461 2823750     8700
+    ## 462 2823750     8800
+    ## 463 2823750     8900
+    ## 464 2823750     9000
+    ## 465 2823750     9100
+    ## 466 2823750     9200
+    ## 467 2823750     9300
+    ## 468 2823750     9400
+    ## 469 2823750     9500
+    ## 470 2823750     9600
 
 ## Yuba Comparison
 

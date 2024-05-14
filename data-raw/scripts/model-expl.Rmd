@@ -64,15 +64,35 @@ palette_hqt_gradient_class <-
 ```{r import, message=FALSE, warning=FALSE}
 # flowline geometries
 flowlines <- readRDS(here::here("data-raw", "results", "flowline_geometries_proj.Rds"))
+flowlines_gcs <- readRDS(here::here("data-raw", "results", "flowline_geometries.Rds"))
 
 # predictor variables by ComID
 flowline_attributes <- readRDS(here::here("data-raw", "results", "flowline_attributes.Rds")) |>
   mutate(da_scalar = (da_area_sq_km*247.1053815) * (da_ppt_mean_mm*0.0393701) / 1E6) |># 1 million acre-inches
-  mutate(length_ft = reach_length_km * 1000 / 0.3048) 
-# this is reach length based on NHD but should update for training data
+  mutate(length_ft_nhd = reach_length_km * 1000 / 0.3048) 
+# TODO: Clean up import of these attributes; ensure UTF-8 encoding
+```
 
+```{r fsa-import}
 # response variables by ComID and Flow 
-flow_to_suitable_area <- readRDS(here::here("data-raw", "results", "fsa_combined.Rds"))
+#flow_to_suitable_area <- readRDS(here::here("data-raw", "results", "fsa_combined.Rds"))
+fsa_combined <- 
+  bind_rows(.id = "dataset",
+    # VECTOR SRH-2D MODELS
+    "Lower Yuba River" = 
+      readRDS(here::here("data-raw", "results", "fsa_yuba.Rds")) |> 
+      select(-reach),
+    "Stanislaus River" = 
+      readRDS(here::here("data-raw", "results", "fsa_stan.Rds")),
+    # RASTER HEC-RAS 2D MODELS
+    "Deer Creek" = 
+      readRDS(here::here("data-raw", "results", "fsa_deer.Rds")),
+    "Tuolumne River (Basso-La Grange)" = 
+      readRDS(here::here("data-raw", "results", "fsa_basso.Rds")),
+    ) |>
+  rename(area_tot_ft2 = area_tot, area_wua_ft2 = area_wua, hsi_frac = area_pct)
+
+fsa_combined |> saveRDS(here::here("data-raw", "results", "fsa_combined.Rds"))
 ```
 
 ```{r import-step2, fig.width=4, fig.height=6.5, dpi=300}
@@ -85,28 +105,30 @@ interp_flows <- seq(300,15000,100)
 #interp_flows <- c(seq(300,950,50), seq(1000,9500,500), seq(10000,85000,5000))
 
 flow_to_suitable_area <- 
-  flow_to_suitable_area |>
-  group_by(dataset, comid) |>
+  fsa_combined |>
+  group_by(dataset, comid, length_ft) |>
   complete(flow_cfs = interp_flows) |>
   arrange(dataset, comid, flow_cfs) |>
-  mutate(across(c(area_tot_ft2, area_wua_ft2, hsi_frac), function(var) zoo::na.approx(var, x = flow_cfs, na.rm=F))) |>
+  mutate(across(c(area_tot_ft2, area_wua_ft2, hsi_frac, ind_per_lf, wua_per_lf), 
+                function(var) zoo::na.approx(var, x = flow_cfs, na.rm=F))) |>
   filter(flow_cfs %in% interp_flows) |>
-  filter(!is.na(hsi_frac))
+  filter(!is.na(hsi_frac)) |>
+  ungroup()
 
 train_data <- flowlines |> st_drop_geometry() |>
   left_join(flowline_attributes, by=join_by("comid"), relationship="one-to-one") |>
   inner_join(flow_to_suitable_area, by=join_by("comid"), relationship="one-to-many") |>
-# TODO: reconcile length_ft from flow_to_suitable_area and from flowline_attributes
   mutate(case_wt = hardhat::importance_weights(length_ft)) |>
   #filter(hqt_gradient_class != "Valley Lowland") |>
   # # eliminate reaches with near zero mean annual flow
   # filter(erom_q_ma_cfs>10) |>
   glimpse()
 
-flowlines_gcs <- readRDS(here::here("data-raw", "results", "flowline_geometries.Rds"))
 train_flowlines <- flowlines_gcs |>
   filter(comid %in% unique(flow_to_suitable_area$comid)) |>
-  left_join(flowline_attributes, by=join_by("comid"), relationship="one-to-one") 
+  left_join(flowline_attributes |> select(comid, gnis_name, hqt_gradient_class), 
+            by=join_by("comid"), 
+            relationship="one-to-one") 
 
 training_reach_labels <- train_flowlines |>
   group_by(gnis_name) |>
@@ -1329,7 +1351,8 @@ prediction_flows <- readRDS(here::here("data-raw", "results", "watershed_flow_su
   mutate(flow_cfs = map2(min_cfs, max_cfs, function(x, y) oom_range(x, y))) |>
   select(watershed, flow_cfs) |>
   unnest(flow_cfs) |>
-  filter(flow_cfs >= min(interp_flows) & flow_cfs <= max(interp_flows)) |>
+  #instead of filtering here, filter later
+  #filter(flow_cfs >= min(interp_flows) & flow_cfs <= max(interp_flows)) |>
   glimpse()
 
 #prediction_flows |> group_by(watershed) |> summarize(max_flow = max(flow_cfs)) |> arrange(-max_flow) 
@@ -1419,13 +1442,15 @@ dsm_habitat_combined <- mainstems |>
 
 dsm_habitat_wua_per_lf <- dsm_habitat_combined |>
   select(river, flow_cfs, instream_wua_per_lf, floodplain_wua_per_lf) |>
+#  mutate(combined_wua_per_lf = pmax(instream_wua_per_lf, floodplain_wua_per_lf)) |>
   pivot_longer(cols=c(instream_wua_per_lf, floodplain_wua_per_lf)) |>
   mutate(name = paste("DSMhabitat", str_replace(name, "_wua_per_lf", "")),
          value = if_else(value>0, value, NA))
 
 dsm_habitat_suitable_ac <- dsm_habitat_combined |>
   select(river, flow_cfs, instream_suitable_ac, floodplain_suitable_ac) |>
-  pivot_longer(cols=c(instream_suitable_ac, floodplain_suitable_ac))  |>
+#  mutate(combined_suitable_ac = pmax(instream_suitable_ac, floodplain_suitable_ac)) |>
+  pivot_longer(cols=c(instream_suitable_ac, floodplain_suitable_ac)) |>
   mutate(value = if_else(value>0, value, NA)) |>
   mutate(name = paste("DSMhabitat", str_replace(name, "_suitable_ac", "")),
          value = if_else(value>0, value, NA))
@@ -1476,7 +1501,8 @@ pd_rf_by_mainstem |>
   geom_line(aes(y = wua_per_lf_pred, group = comid, color = hqt_gradient_class), alpha=0.5) + 
   geom_line(data=pd_rf_by_mainstem_summary, aes(y = avg_wua_ft2_per_lf), linewidth=1.0) + #geom_smooth(method="loess", se=F, color="black") +
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="top", 
         panel.grid.minor = element_blank(),
@@ -1488,7 +1514,8 @@ pd_rf_by_mainstem_summary |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = tot_wua_ac, color = river)) + #, color=species, linetype=habitat)) + 
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="none", 
         panel.grid.minor = element_blank(),
@@ -1499,7 +1526,8 @@ pd_rf_by_mainstem_summary |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color = river)) + #, color=species, linetype=habitat)) + 
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="none", 
         panel.grid.minor = element_blank(),
@@ -1513,7 +1541,8 @@ pd_rf_by_mainstem_summary |>
   geom_line(aes(x = flow_cfs, y = tot_wua_ac, color="habistat prediction")) + 
   geom_line(data=dsm_habitat_suitable_ac, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   theme(legend.position="top", legend.title=element_blank(),
         panel.grid.minor = element_blank(),
@@ -1527,7 +1556,8 @@ pd_rf_by_mainstem_summary |>
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color="habistat prediction")) + 
   geom_line(data=dsm_habitat_wua_per_lf, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   theme(legend.position="top", legend.title=element_blank(),
         panel.grid.minor = element_blank(),
@@ -1597,7 +1627,8 @@ pd_rf_by_mainstem |>
   geom_line(aes(y = wua_per_lf_pred, group = comid, color = hqt_gradient_class), alpha=0.5) + 
   geom_line(data=pd_rf_by_mainstem_summary, aes(y = avg_wua_ft2_per_lf), linewidth=1.0) + #geom_smooth(method="loess", se=F, color="black") +
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="top", 
         panel.grid.minor = element_blank(),
@@ -1609,7 +1640,8 @@ pd_rf_by_mainstem_summary |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = tot_wua_ac, color = river)) + #, color=species, linetype=habitat)) + 
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="none", 
         panel.grid.minor = element_blank(),
@@ -1620,7 +1652,8 @@ pd_rf_by_mainstem_summary |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color = river)) + #, color=species, linetype=habitat)) + 
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="none", 
         panel.grid.minor = element_blank(),
@@ -1634,7 +1667,8 @@ pd_rf_by_mainstem_summary |>
   geom_line(aes(x = flow_cfs, y = tot_wua_ac, color="habistat prediction")) + 
   geom_line(data=dsm_habitat_suitable_ac, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   theme(legend.position="top", legend.title=element_blank(),
         panel.grid.minor = element_blank(),
@@ -1648,7 +1682,8 @@ pd_rf_by_mainstem_summary |>
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color="habistat prediction")) + 
   geom_line(data=dsm_habitat_wua_per_lf, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   theme(legend.position="top", legend.title=element_blank(),
         panel.grid.minor = element_blank(),
@@ -1740,7 +1775,8 @@ pd_rf_by_mainstem |>
   geom_line(aes(y = wua_per_lf_pred, group = comid, color = hqt_gradient_class), alpha=0.5) + 
   geom_line(data=pd_rf_by_mainstem_summary, aes(y = avg_wua_ft2_per_lf), linewidth=1.0) + #geom_smooth(method="loess", se=F, color="black") +
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="top", 
         panel.grid.minor = element_blank(),
@@ -1752,7 +1788,8 @@ pd_rf_by_mainstem_summary |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = tot_wua_ac, color = river)) + #, color=species, linetype=habitat)) + 
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="none", 
         panel.grid.minor = element_blank(),
@@ -1763,7 +1800,8 @@ pd_rf_by_mainstem_summary |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color = river)) + #, color=species, linetype=habitat)) + 
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="none", 
         panel.grid.minor = element_blank(),
@@ -1777,7 +1815,8 @@ pd_rf_by_mainstem_summary |>
   geom_line(aes(x = flow_cfs, y = tot_wua_ac, color="habistat prediction")) + 
   geom_line(data=dsm_habitat_suitable_ac, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   theme(legend.position="top", legend.title=element_blank(),
         panel.grid.minor = element_blank(),
@@ -1791,7 +1830,8 @@ pd_rf_by_mainstem_summary |>
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color="habistat prediction")) + 
   geom_line(data=dsm_habitat_wua_per_lf, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   theme(legend.position="top", legend.title=element_blank(),
         panel.grid.minor = element_blank(),
@@ -1818,15 +1858,19 @@ pd_rf_by_mainstem_summary |> filter(flow_cfs>=min(interp_flows)) |>
 ## Results Export
 
 ```{r}
-wua_predicted <- pd |>
+wua_predicted <- 
+  pd |>
   inner_join(sd_pred |> select(comid, flow_cfs, wua_per_lf_pred_sd = wua_per_lf_pred),
              by=join_by(comid, flow_cfs), relationship="one-to-one") |>
   inner_join(si2_pred |> select(comid, flow_cfs, wua_per_lf_pred_si2 = wua_per_lf_pred),
              by=join_by(comid, flow_cfs), relationship="one-to-one") |>
   inner_join(sd2si_pred |> select(comid, flow_cfs, wua_per_lf_pred_sd2si = wua_per_lf_pred),
              by=join_by(comid, flow_cfs), relationship="one-to-one") |>
+  #filter(row_number() == 26143) |>
   left_join(td |> select(comid, flow_cfs, wua_per_lf_actual = wua_per_lf),
             by=join_by(comid, flow_cfs), relationship="one-to-one")
+  
+ # td |> filter(comid==2823726)
 
 wua_predicted |> saveRDS(here::here("data-raw", "results", "predictions_table.Rds"))
 wua_predicted |> usethis::use_data(overwrite = TRUE)
@@ -1835,6 +1879,9 @@ wua_predicted |> usethis::use_data(overwrite = TRUE)
 
 # hs_predictions <- predictions_export
 # usethis::use_data(hs_predictions, overwrite = T)
+
+td |> filter(str_detect(dataset,"Tuolumne River")) |>
+  select(comid, flow_cfs) |> arrange(comid, flow_cfs)
 ```
 
 ## Yuba Comparison

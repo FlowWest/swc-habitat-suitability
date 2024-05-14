@@ -137,16 +137,20 @@ raster_dvhsi_lyr <- function(d, v) (d>0.5 & d<=5.2) & (v>0 & v<=4.0)
 # input should be the output from prep_rast()
 raster_summarize_hsi <- function(rasters,
                        group_polygons = NULL,
-                       #mask_raster = NULL,
                        hsi_func = raster_dvhsi_hqt,
                        .group_var = comid,
                        parallel = FALSE){
 
   if(!is.null(group_polygons)){
-    grp <- terra::vect(group_polygons)
+    grp <- group_polygons |>
+      group_by({{.group_var}}) |>
+      summarize() |>
+      st_union(by_feature=T)
+
+    grp_vect <- terra::vect(grp)
   }
 
-  cell_area_ft2 <- prod(terra::res(rasters$depth)) * (terra::linearUnits(rasters$depth)/0.3048)^2
+  gggarea_ft2 <- prod(terra::res(rasters$depth)) * (terra::linearUnits(rasters$depth)/0.3048)^2
 
   if (parallel) {
 
@@ -159,33 +163,43 @@ raster_summarize_hsi <- function(rasters,
         future::plan(future::sequential)
     }
 
+  } else {
+
+    dep <- rasters$depth
+    vel <- rasters$velocity
+
   }
 
-  run_for_flow <- function(flow) {
+  # TODO: Fix issue where parallelized version is not able to pass through the non-standard symbol for comid name. Need to quo/unquo to pass. Can't properly use parallel processing until this is fixed.
+  # .group_var_str = rlang::as_string(.group_var)
+  # message(.group_var_str)
+
+  run_for_flow <- function(flow, dep, vel) {
 
     if (parallel) {
       d <- terra::unwrap(dep)[[as.character(flow)]]
       v <- terra::unwrap(vel)[[as.character(flow)]]
     } else {
-      d <- rasters$depth[[as.character(flow)]]
-      v <- rasters$velocity[[as.character(flow)]]
+      d <- dep[[as.character(flow)]]
+      v <- vel[[as.character(flow)]]
     }
 
     message(paste(flow, " - calculate inundation extent"))
     ext <- (d > 0)
 
     message(paste(flow, " - apply habitat suitability function"))
-    hsi <- hsi_func(d, v) # * mask_raster
+    #hsi <- hsi_func(d, v)
+    hsi <- terra::lapp(c(d, v), hsi_func)
 
     if(!is.null(group_polygons)){
 
       message(paste(flow, " - summarize inundation extent by group"))
-      area_tot <- terra::zonal(ext, grp, "sum", na.rm=TRUE)[[1]] * cell_area_ft2
+      area_tot <- terra::zonal(ext, grp_vect, "sum", na.rm=TRUE)[[1]] * cell_area_ft2
 
       message(paste(flow, " - summarize suitable habitat area by group"))
-      area_wua <- terra::zonal(hsi, grp, "sum", na.rm=TRUE)[[1]] * cell_area_ft2
+      area_wua <- terra::zonal(hsi, grp_vect, "sum", na.rm=TRUE)[[1]] * cell_area_ft2
 
-      return(tibble({{.group_var}} := group_polygons |> pull({{.group_var}}),
+      return(tibble({{.group_var}} := grp |> pull({{.group_var}}),
                     area_tot,
                     area_wua,
                     area_pct = area_wua / area_tot))
@@ -209,15 +223,17 @@ raster_summarize_hsi <- function(rasters,
 
     result <- names(rasters$depth) |>
       setNames(names(rasters$depth)) |>
-      future.apply::future_lapply(run_for_flow, future.seed = 47) |>
-      bind_rows(.id = "flow_cfs")
+      future.apply::future_lapply(function(x) run_for_flow(x, dep, vel), future.seed = 47) |>
+      bind_rows(.id = "flow_cfs") |>
+      mutate(flow_cfs = as.numeric(flow_cfs))
 
   } else {
 
     result <- names(rasters$depth) |>
       setNames(names(rasters$depth)) |>
-      lapply(run_for_flow) |>
-      bind_rows(.id = "flow_cfs")
+      lapply(function(x) run_for_flow(x, dep, vel)) |>
+      bind_rows(.id = "flow_cfs") |>
+      mutate(flow_cfs = as.numeric(flow_cfs))
   }
 
   return(result)

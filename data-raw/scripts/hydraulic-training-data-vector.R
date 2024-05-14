@@ -61,7 +61,9 @@ stan_mesh_prepped <-
                    .group_var = comid,
                    .id_var = vid)
 
-stan_result <- vector_summarize_hsi(stan_mesh_prepped, stan_hsi_by_flow)
+stan_result <-
+  vector_summarize_hsi(stan_mesh_prepped, stan_hsi_by_flow) |>
+  postprocess(stan_comid, .group_var = comid)
 
 outpath <- here::here("data-raw", "results", "fsa_stan.Rds")
 

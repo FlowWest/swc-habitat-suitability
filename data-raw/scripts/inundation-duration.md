@@ -17,6 +17,7 @@ Flow Data Analysis for Inundation Duration HSI Component
   - [Version 1 (skip down to “Revised Version
     2”)](#version-1-skip-down-to-revised-version-2)
   - [Revised Version 2](#revised-version-2)
+- [Baseflow Elimination](#baseflow-elimination)
 - [Floodplain-Instream Split](#floodplain-instream-split)
 
 Duration suitability criteria from the CBEC LYR analysis and HQT are:
@@ -48,6 +49,7 @@ knitr::opts_chunk$set(eval=TRUE, fig.width=6.5, fig.height=4, dpi=300)
 theme_set(theme_minimal())
 
 source(here::here("data-raw", "scripts", "data-functions.R"))
+source(here::here("data-raw", "scripts", "inundation-duration-functions.R"))
 
 test_comids <- c(12071016, 12071090, 12071178, 12071286, 12075424, 7981730, 7981752, 7981808, 7981872, 7981878, 7981882, 7982794, 7982804, 7982810, 7982884, 7982886, 2819792, 2819796, 2819800, 2819818, 2819824, 2819862, 2821822, 2821824, 2821830, 2821832, 2821836)
 ```
@@ -82,41 +84,6 @@ water_year_types <- read_csv(here::here("data-raw", "source", "water_year_type",
     ## ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
 
 ## Import Flow Time Series Data
-
-``` r
-# functions from interoperable flows
-
-retrieve_cdec_csv <- function(sta=character(), sen=character(), dur=character(), 
-                     start_date=ymd("1900-10-01"), end_date=ymd("2023-09-30"),
-                     dir="temp") {
-  name <- str_to_upper(paste0(sta, "_", sen, "_", dur))
-  filename <- file.path(dir, paste0(name,".csv.gz"))
-  if(!file.exists(filename)){
-    message(paste0("downloading to ",filename))
-    dir.create(dir, recursive = TRUE)
-    data_raw <-
-      httr::GET(
-      url="https://cdec.water.ca.gov/dynamicapp/req/CSVDataServlet",
-      query=list(Stations=sta, SensorNums=sen, dur_code=dur, 
-                 Start=format(start_date,"%Y-%m-%d"), End=format(end_date,"%Y-%m-%d"))) |> 
-      httr::content("raw") 
-    gzf <- gzcon(file(filename, "wb"))
-    data_raw |> writeBin(gzf)
-    close(gzf)
-  } else {
-    message(paste0(filename, " exists, loading"))
-  }
-  return(filename)
-}
-
-parse_cdec_csv <- function(filename) {
-  read_csv(filename, 
-           col_select = c(date_time = "DATE TIME", value = "VALUE"),
-           col_types = list(col_datetime(), col_double())) |>
-    janitor::clean_names() |>
-    mutate(water_year = if_else(month(date_time)>=10, year(date_time)+1, year(date_time)))
-}
-```
 
 ``` r
 # refer to https://cdec.water.ca.gov/webgis/?appid=cdecstation
@@ -336,18 +303,19 @@ durhsi_by_model_q |>
 
 ``` r
 # simple version, for data within one water year only
+
 calculate_days_inundated <- function(q_gauge, q_crit, stat="max") {
-  
+
   n_days <- length(q_gauge)
-  
-  exceedence_intervals <- 
+
+  exceedence_intervals <-
     tibble(exceeds_q = q_gauge > q_crit,
            exceedence_event = with(rle(exceeds_q), rep(seq_along(lengths), lengths))) |>
     group_by(exceedence_event) |>
     mutate(cumulative_exceedence = if_else(exceeds_q, seq_along(exceedence_event), 0)) |>
     filter(exceeds_q) |>
     summarize(duration_days = max(cumulative_exceedence))
-  
+
   if(stat=="sum"){
     return(sum(exceedence_intervals$duration_days))
   } else if(stat=="max") {
@@ -563,13 +531,6 @@ durhsi_by_model_q |>
 ### Revised Version 2
 
 ``` r
-# https://stackoverflow.com/a/73215592
-cummean.na.rm <- function(x) {
-  idx <- cumsum(!is.na(x))
-  x_filtered <- x[!is.na(x)]
-  cummean(x_filtered)[idx]
-}
-
 # simple version
 apply_durations_to_fsa_curve <- function(fsa, drc, fsa_q=q, fsa_wua=wua, drc_q=q, drc_dhsi=dhsi) {
   full_join(fsa |> transmute(q={{fsa_q}}, wua={{fsa_wua}}),
@@ -833,6 +794,57 @@ batch_res_ts |>
     ## using the `.groups` argument.
 
 ![](inundation-duration_files/figure-gfm/posthoc-duration-func-time-series-1.png)<!-- -->
+
+## Baseflow Elimination
+
+Function for simple elimination of baseflow given a threshold flow,
+without needing to know a full hydrology:
+
+``` r
+# EDIT: Moved this to inundation-duration-functions.R
+# eliminate_baseflow <- function(fsa, baseflow_threshold_flow, fsa_q=q, fsa_wua=wua, ...) {
+# 
+#   min_q <- 0
+#   max_q <- fsa |> pull({{fsa_q}}) |> max()
+# 
+#   baseflow_removal_drc <-
+#     fsa |>
+#     complete(flow_cfs = baseflow_threshold_flow) |>
+#     arrange(flow_cfs) |>
+#     transmute(q = flow_cfs,
+#               dhsi = if_else(flow_cfs <= baseflow_threshold_flow, 0, 1))
+# 
+#   apply_durations_to_fsa_curve(fsa=fsa, drc=baseflow_removal_drc,
+#                                fsa_q={{fsa_q}}, fsa_wua={{fsa_wua}}, ...) |>
+#     transmute({{fsa_q}} := q,
+#               {{fsa_wua}} := durwua)
+# 
+# }
+
+test_threshold <- 330 #cfs
+
+test_output <- fsa |> 
+  eliminate_baseflow(test_threshold, fsa_q=flow_cfs, fsa_wua=wua) |>
+  glimpse()
+```
+
+    ## Rows: 19
+    ## Columns: 2
+    ## $ flow_cfs <dbl> 100, 250, 300, 330, 400, 500, 600, 1000, 3000, 5000, 6000, 70…
+    ## $ wua      <dbl> 0.0000000, 0.0000000, 0.0000000, 0.0000000, 0.6254589, 1.4446…
+
+``` r
+test_output |> 
+  ggplot() + 
+  geom_line(aes(x=flow_cfs, y=wua, color="original")) + 
+  geom_point(aes(x=flow_cfs, y=wua, color="original")) + 
+  geom_line(data=fsa, aes(x=flow_cfs, y=wua, color="baseflow removed")) +
+  geom_point(data=fsa, aes(x=flow_cfs, y=wua, color="baseflow removed")) +
+  geom_vline(aes(xintercept = test_threshold), linetype="dashed") +
+  scale_x_log10()
+```
+
+![](inundation-duration_files/figure-gfm/eliminate-bfc-1.png)<!-- -->
 
 ## Floodplain-Instream Split
 

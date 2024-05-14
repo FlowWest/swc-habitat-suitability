@@ -3333,6 +3333,16 @@ yuba_wua_predicted_temporal_summary <-
     ## `.groups` argument.
 
 ``` r
+source(here::here("data-raw", "scripts", "inundation-duration-functions.R"))
+yuba_wua_predicted_summary_bfcremoved <- 
+  yuba_wua_predicted_temporal_summary |> group_by(flow_cfs, wua) |> summarize() |> ungroup() |>
+  eliminate_baseflow(600, fsa_q=flow_cfs, fsa_wua=wua)
+```
+
+    ## `summarise()` has grouped output by 'flow_cfs'. You can override using the
+    ## `.groups` argument.
+
+``` r
 yuba_wua_predicted_temporal_ts <-
   readRDS(here::here("data-raw", "results", "durhsi_applied_to_comid_ts.Rds")) |>
   ungroup() |>
@@ -3362,12 +3372,14 @@ ggplot() +
             aes(x = flow_cfs, y = durwua, group = water_year, color = "Habistat Model 1", linetype = "Temporal", linewidth = "Temporal")) +
   geom_line(data = yuba_wua_predicted_temporal_summary,
             aes(x = flow_cfs, y = wua, color = "Habistat Model 1", linetype = "Non-temporal", linewidth = "Non-temporal")) +
+  geom_line(data = yuba_wua_predicted_summary_bfcremoved,
+            aes(x = flow_cfs, y = wua, color = "Habistat Model 1", linetype = "Non-temporal, no baseflow", linewidth = "Non-temporal, no baseflow")) +
   scale_x_log10(labels = scales::label_comma(), limits = c(NA, 15000)) + 
   scale_y_continuous(limits = c(0, 60), expand = c(0, 0)) +
   xlab("Flow (cfs)") + ylab("Suitable habitat area (ft2) per linear ft") +
   theme(panel.grid.minor = element_blank()) + annotation_logticks(sides = "b") +
-  scale_linewidth_manual(name = "model type", values = c("Non-temporal" = 1, "Temporal" = 0.7)) +
-  scale_linetype_manual(name = "model type", values = c("Non-temporal" = "solid", "Temporal" = "dashed")) + 
+  scale_linewidth_manual(name = "model type", values = c("Non-temporal" = 1, "Temporal" = 0.7, "Non-temporal, no baseflow" = 1)) +
+  scale_linetype_manual(name = "model type", values = c("Non-temporal" = "solid", "Temporal" = "dotted", "Non-temporal, no baseflow" = "dashed")) + 
   ggtitle("Temporal WUA Estimates: HabiStat vs CBEC")  +
   scale_color_manual(name = "dataset", 
                      values = c("CBEC Study (LYR SRH2D)" = "#6388b4",
@@ -3380,5 +3392,7 @@ ggplot() +
 
     ## Warning: Removed 30 rows containing missing values (`geom_line()`).
     ## Removed 30 rows containing missing values (`geom_line()`).
+
+    ## Warning: Removed 5 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/yuba-comparison-temporal-1.png)<!-- -->

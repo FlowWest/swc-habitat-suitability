@@ -91,8 +91,8 @@ water_year_types <- read_csv(here::here("data-raw", "source", "water_year_type",
 
 # select a representative best flow gage to use for each reach, ideally available 25+ years
 # refer to https://cdec.water.ca.gov/dynamicapp/staMeta?station_id=### start 10/1/1997 - 09/30/2023
-# drainage areas from StreamStats gage-pages
-# mean annual flow is joined in based on the comid that the gage is located in
+# drainage areas from StreamStats gage-pages: https://streamstats.usgs.gov/ss/?gage=### using USGS ID
+# mean annual flow is joined in based on the comid that the gage is located in - refer to https://rivers.codefornature.org/#/map
 
 # get list of modelled flows for each dataset
 training_flows <- flow_to_suitable_area |>
@@ -107,11 +107,12 @@ training_reach_gages <- tribble(
   ~river, ~usgs_id, ~cdec_sta, ~cdec_sen, ~cdec_dur, ~start_date, ~end_date, ~da_gauge_sq_mi, ~gauge_comid, ~flows,
   "Deer Creek",       11383500, "DVD", 20, "E", mdy("10/1/1997"), mdy("9/30/2023"), 208, 8020924, training_flows[["Deer Creek"]],
   "Lower Yuba River", 11421000, "MRY", 20, "E", mdy("10/1/1997"), mdy("9/30/2023"), 1339, 7981844, training_flows[["Lower Yuba River"]],
-  "Stanislaus River", 11303000, "RIP", 20, "E", mdy("10/1/1997"), mdy("9/30/2023"), 1075, 2819818, training_flows[["Stanislaus River"]]
+  "Stanislaus River", 11303000, "RIP", 20, "E", mdy("10/1/1997"), mdy("9/30/2023"), 1075, 2819818, training_flows[["Stanislaus River"]],
+  "Tuolumne River (Basso-La Grange)", 11289650, "LGN", 20, "E", mdy("10/1/1997"), mdy("9/30/2023"), 1538, 2823750, training_flows[["Tuolumne River (Basso-La Grange)"]],
 ) |>
   mutate(da_gauge_sq_km = da_gauge_sq_mi * 1.609344^2) |>
   mutate(filename = pmap_chr(list(cdec_sta, cdec_sen, cdec_dur), 
-                             function(x, y, z) retrieve_cdec_csv(sta=x, sen=y, dur=z))) |>
+                             function(x, y, z) retrieve_cdec_csv(sta=x, sen=y, dur=z, dir=here::here("data-raw", "temp")))) |>
   left_join(flowline_attributes |> 
               transmute(comid, maf_gauge = erom_q_ma_cfs), by=join_by(gauge_comid == comid))
 
@@ -132,9 +133,9 @@ training_cdec_data <- training_reach_gages |>
   glimpse() 
 ```
 
-    ## Rows: 15,982
+    ## Rows: 22,341
     ## Columns: 4
-    ## Groups: river [3]
+    ## Groups: river [4]
     ## $ river      <chr> "Deer Creek", "Deer Creek", "Deer Creek", "Deer Creek", "De…
     ## $ date       <date> 1997-11-01, 1997-11-02, 1997-11-03, 1997-11-04, 1997-11-05…
     ## $ q_gauge    <dbl> 68.28125, 65.77083, 64.25000, 64.32292, 63.40625, 66.07292,…
@@ -250,7 +251,7 @@ durhsi_by_model_q <-
   glimpse()
 ```
 
-    ## Rows: 55
+    ## Rows: 71
     ## Columns: 14
     ## $ river                   <chr> "Deer Creek", "Deer Creek", "Deer Creek", "Dee…
     ## $ model_q                 <dbl> 100, 250, 300, 400, 500, 600, 1000, 3000, 5000…
@@ -298,6 +299,17 @@ durhsi_by_model_q |>
 ```
 
 ![](inundation-duration_files/figure-gfm/calc-duration-hsi-3.png)<!-- -->
+
+``` r
+durhsi_by_model_q |> ggplot() +
+  facet_wrap(~river, ncol=1) + 
+  geom_line(aes(x = model_q, y = pmin(240,max_days_inundated))) + # 240 because we are looking at a 8-month sub-water year
+  scale_x_log10(labels = scales::label_comma()) +
+  scale_y_continuous(limits = c(0,240), breaks = c(0,60,120,180,240), minor_breaks=NULL) +
+  xlab("Flow (cfs)") + ylab("Maximum contiguous days inundated (days)") + ggtitle("Inundation Duration")
+```
+
+![](inundation-duration_files/figure-gfm/calc-duration-hsi-4.png)<!-- -->
 
 ### Revised Version 2: Max Contiguous Days Inundated by Water Year
 
@@ -524,7 +536,7 @@ durhsi_by_model_q |>
   geom_hline(aes(yintercept = if_else(gradient_class=="vf", 10, 25)))
 ```
 
-    ## Warning: Removed 1 row containing missing values (`geom_line()`).
+    ## Warning: Removed 2 rows containing missing values (`geom_line()`).
 
 ![](inundation-duration_files/figure-gfm/unnamed-chunk-4-1.png)<!-- -->
 

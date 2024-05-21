@@ -27,6 +27,18 @@ flowlines <- readRDS(here::here("data-raw", "results", "flowline_geometries_proj
 flowlines_gcs <- readRDS(here::here("data-raw", "results", "flowline_geometries.Rds"))
 
 flowline_attributes <- readRDS(here::here("data-raw", "results", "flowline_attributes.Rds"))
+
+# for context mapping
+flowlines_sac_valley_major <- 
+  flowlines_gcs |>
+  filter(comid %in% (
+    flowline_attributes |> 
+      filter(gnis_name %in% 
+               c("Sacramento River", 
+                 "Feather River", 
+                 "Pit River")) |>
+      pull(comid)
+  ))
 ```
 
 ## Soils
@@ -102,7 +114,10 @@ geomorph_site_data <-
   st_transform(project_crs) |> 
   st_join(flowlines |> select(comid), join=st_nearest_feature)
 
-geomorph_site_data |> ggplot() + geom_sf(aes(color=geomorph_class))
+geomorph_site_data |> 
+  ggplot() + 
+  geom_sf(aes(color=geomorph_class)) + 
+  geom_sf(data=flowlines_sac_valley_major, color="darkgray")
 
 flowlines_gcs |> 
   inner_join(geomorph_site_data |> st_drop_geometry()) |> 
@@ -169,7 +184,11 @@ flowlines_gcs |>
 
 flowlines_gcs |> 
   inner_join(geomorph_pred, by=join_by(comid)) |> 
-  ggplot() + geom_sf(aes(color=geomorph_riffles))
+  ggplot() + geom_sf(aes(color=geomorph_riffles)) 
+
+flowlines_gcs |> 
+  inner_join(geomorph_pred, by=join_by(comid)) |> 
+  ggplot() + geom_sf(aes(color=geomorph_gravel)) 
 
 # # validation matrix
 # geomorph_training_data |>
@@ -179,6 +198,6 @@ flowlines_gcs |>
 #   tally() |> 
 #   mutate(n=coalesce(n,0)) |>
 #   spread(geomorph_class_actual, n)
-  
+
 ```
 

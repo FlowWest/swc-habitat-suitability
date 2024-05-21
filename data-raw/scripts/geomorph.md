@@ -1,7 +1,7 @@
 Predictor Data Prep: Geomorphology and Soils
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-04-26
+2024-05-21
 
 - [Soils](#soils)
 - [UCD Geomorphology classes
@@ -121,7 +121,10 @@ geomorph_site_data <-
     ## ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
 
 ``` r
-geomorph_site_data |> ggplot() + geom_sf(aes(color=geomorph_class))
+geomorph_site_data |> 
+  ggplot() + 
+  geom_sf(aes(color=geomorph_class)) + 
+  geom_sf(data=flowlines_sac_valley_major, color="darkgray")
 ```
 
 ![](geomorph_files/figure-gfm/geomorph-data-import-1.png)<!-- -->
@@ -208,10 +211,18 @@ flowlines_gcs |>
 ``` r
 flowlines_gcs |> 
   inner_join(geomorph_pred, by=join_by(comid)) |> 
-  ggplot() + geom_sf(aes(color=geomorph_riffles))
+  ggplot() + geom_sf(aes(color=geomorph_riffles)) 
 ```
 
 ![](geomorph_files/figure-gfm/geomorph-fill-gaps-4.png)<!-- -->
+
+``` r
+flowlines_gcs |> 
+  inner_join(geomorph_pred, by=join_by(comid)) |> 
+  ggplot() + geom_sf(aes(color=geomorph_gravel)) 
+```
+
+![](geomorph_files/figure-gfm/geomorph-fill-gaps-5.png)<!-- -->
 
 ``` r
 # # validation matrix

@@ -1,17 +1,20 @@
-SWC Habitat Model Data Discovery
+Predictor Data Preparation and Consolidation
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-02-23
+2024-05-22
 
 - [Case study geographic scope](#case-study-geographic-scope)
+  - [Import Flowline Geometry](#import-flowline-geometry)
 - [Data Import](#data-import)
   - [Consolidating NHDPlusV2 Flowline
     Attributes](#consolidating-nhdplusv2-flowline-attributes)
   - [Combine all attributes](#combine-all-attributes)
-  - [Import Flowline Geometry](#import-flowline-geometry)
+- [Join to Flowline Geometry](#join-to-flowline-geometry)
 - [Maps of attribute data
   (exploratory)](#maps-of-attribute-data-exploratory)
 - [Import catchments](#import-catchments)
+- [Export GCS versions of spatial
+  data](#export-gcs-versions-of-spatial-data)
 
 ## Case study geographic scope
 
@@ -26,7 +29,7 @@ selected_huc_8 <- c("18020107", "18020125")
 # HUC-12 watersheds and higher level hierarchies
 watersheds <-
   drive_file_by_id("1ncwKAUNoJUNkPLEy6NzrUKCYqVG681p-", vsizip=T) |>
-  st_read() |> 
+  read_sf() |> 
   janitor::clean_names() |>
   filter(huc_8 %in% selected_huc_8) |>
   st_transform(project_crs)
@@ -43,21 +46,59 @@ watersheds <-
 
     ## ℹ The googledrive package is using a cached token for 'slewis@flowwest.com'.
 
-    ## temp/WBD_Subwatershed.zip already exists and will be used...
+    ## Auto-refreshing stale OAuth token.
 
-    ## Reading layer `WBD_Subwatershed' from data source 
-    ##   `/vsizip/temp/WBD_Subwatershed.zip' using driver `ESRI Shapefile'
-    ## Simple feature collection with 4564 features and 21 fields
-    ## Geometry type: POLYGON
-    ## Dimension:     XY
-    ## Bounding box:  xmin: -124.5351 ymin: 32.133 xmax: -114.6198 ymax: 43.34273
-    ## Geodetic CRS:  NAD83
+    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/WBD_Subwatershed.zip already exists and will be used...
 
 ``` r
 watersheds |> ggplot() + geom_sf()
 ```
 
 ![](data-discovery_files/figure-gfm/watersheds-1.png)<!-- -->
+
+### Import Flowline Geometry
+
+``` r
+flowline_geom <- 
+  drive_file_by_id("1UiG8AeMr6mFOw7Jx--LyNRzez7GsDhzK", vsizip=T) |>
+  read_sf() |>
+  janitor::clean_names() |>
+  select(comid) |>
+  st_zm()
+```
+
+    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/NHDFlowline.zip already exists and will be used...
+
+``` r
+# note that these are in NAD83, not the project CRS
+flowline_geom |> saveRDS(here::here("data-raw", "results", "flowline_geometries.Rds"))
+
+flowline_geom |> usethis::use_data(overwrite = T)
+```
+
+    ## ✔ Setting active project to
+    ## 'C:/Users/skylerlewis/Github/swc-habitat-suitability'
+
+    ## ✔ Saving 'flowline_geom' to 'data/flowline_geom.rda'
+    ## • Document your data (see 'https://r-pkgs.org/data.html')
+
+``` r
+# projected version
+flowline_geom_proj <- flowline_geom |> 
+  st_transform(project_crs)
+
+flowline_geom_proj |> saveRDS(here::here("data-raw", "results", "flowline_geometries_proj.Rds"))
+
+flowline_geom_proj |> usethis::use_data(overwrite = T)
+```
+
+    ## ✔ Saving 'flowline_geom_proj' to 'data/flowline_geom_proj.rda'
+    ## • Document your data (see 'https://r-pkgs.org/data.html')
+
+``` r
+#hs_flowlines <- flowline_geom
+#usethis::use_data(hs_flowlines, overwrite = TRUE)
+```
 
 ## Data Import
 
@@ -94,15 +135,35 @@ fcodes <-
 
 # flowline shapefile attribute table
 drive_file_by_id("1UiG8AeMr6mFOw7Jx--LyNRzez7GsDhzK") |>
-  archive::archive_extract(dir = "temp", file = "NHDFlowline.dbf")
+  archive::archive_extract(dir = here::here("data-raw", "temp"), file = "NHDFlowline.dbf")
 flowline_table <- 
-  foreign::read.dbf("temp/NHDFlowline.dbf") |> 
+  foreign::read.dbf(here::here("data-raw", "temp", "NHDFlowline.dbf")) |> 
   janitor::clean_names() |>
   select(comid, reachcode, gnis_id, gnis_name, lengthkm, ftype, fcode) |>
-  mutate(huc_8 = substr(reachcode, 1, 8),
-         huc_10 = substr(reachcode, 1, 10),
-         huc_12 = substr(reachcode, 1, 12)) |>
+  mutate(rc_huc_8 = substr(reachcode, 1, 8),
+         rc_huc_10 = substr(reachcode, 1, 10),
+         rc_huc_12 = substr(reachcode, 1, 12)) |>
   inner_join(fcodes |> select(fcode, ftype_desc))
+```
+
+#### WBD (HUC-12) Watersheds
+
+``` r
+wbd_watersheds <- 
+  drive_file_by_id("1ncwKAUNoJUNkPLEy6NzrUKCYqVG681p-", vsizip=T) |>
+  read_sf() |> 
+  st_transform(project_crs) |>
+  janitor::clean_names() |>
+  select(huc_8, huc_10, hu_10_name, huc_12, hu_12_type, hu_12_name, hu_12_ds)
+```
+
+    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/WBD_Subwatershed.zip already exists and will be used...
+
+``` r
+comid_huc_12 <- 
+  flowline_geom_proj |> 
+  st_join(wbd_watersheds, left=F) |>
+  st_drop_geometry()
 ```
 
 #### NHDPlusV2 tables
@@ -117,10 +178,10 @@ flowline_table <-
 
 # flow routing attributes as described in https://www.usgs.gov/national-hydrography/value-added-attributes-vaas
 drive_file_by_id("1sf3hKUmo6ZvJwnfyR9m4PoeY9V2n4hou") |>
-  archive::archive_extract(dir = "temp")
+  archive::archive_extract(dir = here::here("data-raw", "temp"))
 
 flowline_vaattr <- 
-  foreign::read.dbf("temp/PlusFlowlineVAA.dbf") |> 
+  foreign::read.dbf(here::here("data-raw", "temp", "PlusFlowlineVAA.dbf")) |> 
   as_tibble() |> 
   select(comid = ComID, 
          hydro_seq = Hydroseq,
@@ -131,12 +192,13 @@ flowline_vaattr <-
          ds_length_km = Pathlength,
          da_area_sq_km = DivDASqKM, # using divergence-routed version 
          #da_area_sq_km_tot = TotDASqKM,
-         reach_length_km = LengthKM
-         )
+         reach_length_km = LengthKM,
+         ) |>
+  mutate(reach_length_ft = reach_length_km * 1000 / 0.3048) 
 
 # slopes and endpoint elevations
 flowline_slopes <- 
-  foreign::read.dbf("temp/elevslope.dbf") |> 
+  foreign::read.dbf(here::here("data-raw", "temp", "elevslope.dbf")) |> 
   as_tibble() |> 
   mutate(slope = if_else(SLOPE==-9998, NA, SLOPE),
          elev_min = MINELEVSMO/100, # convert from cm to m
@@ -149,10 +211,10 @@ flowline_slopes <-
 ``` r
 # vogel method mean annual flow and mean annual velocity
 drive_file_by_id("1SiiIXQmr4mFD4Q-EVp1-7K-wAAnMoJ94") |> 
-  archive::archive_extract(dir = "temp")
+  archive::archive_extract(dir = here::here("data-raw", "temp"))
 
 vogel_flow <- 
-  foreign::read.dbf("temp/vogelflow.dbf") |> 
+  foreign::read.dbf(here::here("data-raw", "temp", "vogelflow.dbf")) |> 
   as_tibble() |>
   janitor::clean_names() |>
   mutate(across(maflowv:mavelv, function(x) if_else(x>=0, x, NA))) |>
@@ -162,16 +224,16 @@ vogel_flow <-
 ``` r
 # VPU attribute extension
 drive_file_by_id("1loos7RIjkQR8RHQjvcKOL9M-TmyE1SFV") |> 
-  archive::archive_extract(dir = "temp")
+  archive::archive_extract(dir = here::here("data-raw", "temp"))
 
   # incremental precipitation at reach
 loc_precip_annual <- 
-  read_delim("temp/IncrPrecipMA.txt") |>
+  read_delim(here::here("data-raw", "temp", "IncrPrecipMA.txt")) |>
   mutate(comid = as.numeric(FeatureID), loc_ppt_mean_mm = PrecipV/100) |>
   select(comid, loc_ppt_mean_mm)
 import_loc_precip <- function(m) {
   mm <- str_pad(m, width=2, pad="0")
-  read_delim(paste0("temp/IncrPrecipMM", mm, ".txt")) |>
+  read_delim(here::here("data-raw", "temp", paste0("IncrPrecipMM", mm, ".txt"))) |>
     mutate(month = m) |>
     mutate(comid = as.numeric(FeatureID), loc_ppt_mean_mm = PrecipV/100) |>
     select(month, comid, loc_ppt_mean_mm)
@@ -184,12 +246,12 @@ loc_precip_monthly <-
 
 # cumulative precipitation in upstream drainage area
 precip_annual <- 
-  read_delim("temp/CumTotPrecipMA.txt") |>
+  read_delim(here::here("data-raw", "temp", "CumTotPrecipMA.txt")) |>
   mutate(comid = as.numeric(ComID), da_ppt_mean_mm = PrecipVC/100) |>
   select(comid, da_ppt_mean_mm)
 import_precip <- function(m) {
   mm <- str_pad(m, width=2, pad="0")
-  read_delim(paste0("temp/CumTotPrecipMM", mm, ".txt")) |>
+  read_delim(here::here("data-raw", "temp", paste0("CumTotPrecipMM", mm, ".txt"))) |>
     mutate(month = m) |>
     mutate(comid = as.numeric(ComID), da_ppt_mean_mm = PrecipVC/100) |>
     select(month, comid, da_ppt_mean_mm)
@@ -204,10 +266,10 @@ precip_monthly <-
 ``` r
 # EROM method mean annual and monthly flows
 drive_file_by_id("1VUYyewjm-0nxUxyBWA7-Ch8H1fni55N0") |> 
-  archive::archive_extract(dir = "temp")
+  archive::archive_extract(dir = here::here("data-raw", "temp"))
 
 erom_annual <- 
-  foreign::read.dbf("temp/EROM_MA0001.DBF") |>
+  foreign::read.dbf(here::here("data-raw", "temp", "EROM_MA0001.DBF")) |>
   as_tibble() |>
   select(comid = ComID, erom_q_ma_cfs = Q0001E, erom_v_ma_fps = V0001E, 
          #temp = Temp0001, ppt = PPT0001, pet = PET0001, qetloss = QLoss0001,
@@ -216,7 +278,7 @@ erom_annual <-
   mutate(across(erom_q_ma_cfs:erom_v_ma_fps, function(x) if_else(x>=0, x, NA)))
 import_erom <- function(m) {
   mm <- str_pad(m, width=2, pad="0")
-  foreign::read.dbf(paste0("temp/EROM_", mm, "0001.dbf")) |>
+  foreign::read.dbf(here::here("data-raw", "temp", paste0("EROM_", mm, "0001.dbf"))) |>
     as_tibble() |>
     mutate(month = m) |>
     select(month, comid = ComID, erom_q_ma_cfs = Q0001E, erom_v_ma_fps = V0001E, 
@@ -395,7 +457,8 @@ TNC data:
 <https://www.scienceforconservation.org/products/california-freshwater-species-database>
 
 ``` r
-aquatic_species_cdfw <- readRDS('../data/attr_cdfw_aquatic_species_rank.RDS') |> 
+aquatic_species_cdfw <- 
+  readRDS(here::here("data-raw", "results", "attr_cdfw_aquatic_species_rank.Rds")) |> 
   glimpse()
 ```
 
@@ -405,7 +468,8 @@ aquatic_species_cdfw <- readRDS('../data/attr_cdfw_aquatic_species_rank.RDS') |>
     ## $ bio_aq_rank_sw <int> NA, NA, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,…
 
 ``` r
-aquatic_species_tnc <- readRDS('../data/attr_tnc_aquatic_species_rank.RDS') |> 
+aquatic_species_tnc <- 
+  readRDS(here::here("data-raw", "results", "attr_tnc_aquatic_species_rank.Rds")) |> 
   glimpse()
 ```
 
@@ -449,7 +513,7 @@ aquatic_species_tnc <- readRDS('../data/attr_tnc_aquatic_species_rank.RDS') |>
 Data source: <https://hydro.iis.u-tokyo.ac.jp/~yamadai/MERIT_Hydro/>
 
 ``` r
-width_data <- readRDS('width_data/merit_width_dataset_comid_join.RDS') 
+width_data <- readRDS(here::here("data-raw", "source", "width_data", "merit_width_dataset_comid_join.Rds")) 
 width_data <- width_data |> group_by(comid) |> summarize(merit_width_m = mean(merit_width_m)) |> ungroup()
 ```
 
@@ -479,7 +543,7 @@ hyd_cls_tbl <- tribble(~class, ~hyd_cls, ~hyd_cat, ~hyd_cls_descrip,
                        9, "HLP", 1, "High elevation, low precipitation"
                        )
 hyd_cls <- drive_file_by_id("1qABq_Y-ZzuH_Am6pkqpno4K5nGYhYd1R", vsizip=T) |>
-  st_read(as_tibble=T) |>
+  read_sf() |>
   janitor::clean_names() |>
   st_drop_geometry() |>
   left_join(hyd_cls_tbl, by=join_by(class)) |>
@@ -490,17 +554,8 @@ hyd_cls <- drive_file_by_id("1qABq_Y-ZzuH_Am6pkqpno4K5nGYhYd1R", vsizip=T) |>
   glimpse()
 ```
 
-    ## temp/Final_Classification_9CLASS.zip already exists and will be used...
+    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/Final_Classification_9CLASS.zip already exists and will be used...
 
-    ## Reading layer `Final_Classification_9CLASS' from data source 
-    ##   `/vsizip/temp/Final_Classification_9CLASS.zip' using driver `ESRI Shapefile'
-    ## Simple feature collection with 70720 features and 5 fields
-    ## Geometry type: MULTILINESTRING
-    ## Dimension:     XY, XYZM
-    ## Bounding box:  xmin: -124.4025 ymin: 32.54011 xmax: -114.6555 ymax: 42.00744
-    ## z_range:       zmin: 0 zmax: 0
-    ## m_range:       mmin: 0 mmax: 100
-    ## Geodetic CRS:  NAD83
     ## Rows: 67,163
     ## Columns: 3
     ## $ comid   <dbl> 8200535, 8200545, 8200931, 8201087, 8201891, 8202565, 8202567,…
@@ -517,7 +572,7 @@ nf <-
   filter(comid %in% flowline_table$comid)
 ```
 
-    ## temp/ffm-final-v1.2.1.zip already exists and will be used...
+    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/ffm-final-v1.2.1.zip already exists and will be used...
 
     ## Rows: 8151537 Columns: 15
     ## ── Column specification ────────────────────────────────────────────────────────
@@ -574,7 +629,7 @@ mTPI (multi-scale topographic position index)
 
 ``` r
 attr_mtpi <- 
-  readRDS("../data/attr_mtpi.Rds") |> 
+  readRDS(here::here("data-raw", "results", "attr_mtpi.Rds")) |> 
   glimpse()
 ```
 
@@ -586,7 +641,8 @@ attr_mtpi <-
 #### Valley Bottom Calculations via Slope Cutoff
 
 ``` r
-valley_bottoms <- readRDS("../data/attr_vb1.Rds") |> 
+valley_bottoms <- 
+  readRDS(here::here("data-raw", "results", "attr_vb1.Rds")) |> 
   select(comid, vb_width_transect) |> 
   filter(vb_width_transect>0) |> 
   glimpse()
@@ -600,7 +656,9 @@ valley_bottoms <- readRDS("../data/attr_vb1.Rds") |>
 #### Levee Confinement Calculations
 
 ``` r
-levee_confinement <- readRDS("../data/attr_frac_leveed.Rds") |> glimpse()
+levee_confinement <- 
+  readRDS(here::here("data-raw", "results", "attr_frac_leveed.Rds")) |> 
+  glimpse()
 ```
 
     ## Rows: 178,868
@@ -612,34 +670,26 @@ levee_confinement <- readRDS("../data/attr_frac_leveed.Rds") |> glimpse()
 #### Geomorph class (experimental!)
 
 ``` r
-geomorph_class <- readRDS("../data/attr_geomorph_class.Rds") |> glimpse()
+geomorph_class <- 
+  readRDS(here::here("data-raw", "results", "attr_geomorph_class.Rds")) |> 
+  glimpse()
 ```
 
-    ## Rows: 85,613
+    ## Rows: 66,503
     ## Columns: 2
-    ## $ comid          <dbl> 8320105, 8320111, 8321245, 8320119, 8320125, 8320133, 8…
-    ## $ geomorph_class <fct> "Partly-confined, cobble-boulder, uniform", "Partly-con…
+    ## $ comid          <dbl> 7916755, 7916551, 7916539, 7916525, 7917485, 7916425, 7…
+    ## $ geomorph_class <fct> "Unconfined, low width-to-depth ratio, gravel", "Unconf…
 
 #### HQT boundaries
 
 ``` r
-cv_alluvial <- st_read("/vsizip/hqt/Alluvial_Bnd.shp.zip") |> 
+cv_alluvial <- read_sf(file.path("/vsizip", here::here("data-raw", "source", "hqt", "Alluvial_Bnd.shp.zip"))) |> 
   st_transform("ESRI:102039") |> 
   select(geometry)
-```
-
-    ## Reading layer `Alluvial_Bnd' from data source `/vsizip/hqt/Alluvial_Bnd.shp.zip' using driver `ESRI Shapefile'
-    ## Simple feature collection with 1 feature and 2 fields
-    ## Geometry type: MULTIPOLYGON
-    ## Dimension:     XY
-    ## Bounding box:  xmin: -221390.2 ymin: 1317285 xmax: 127998 ymax: 1965683
-    ## Projected CRS: NAD_1983_Albers
-
-``` r
-# valley_lowland <- st_read("hqt/hqt_valley_lowland.kml") |> 
+# valley_lowland <- read_sf("hqt/hqt_valley_lowland.kml") |> 
 #   st_transform("ESRI:102039") |>
 #   mutate(hqt_gradient_class = "Valley Foothill")
-valley_lowland <- readRDS("hqt/hqt_valley_lowland.Rds") |> 
+valley_lowland <- readRDS(here::here("data-raw", "source", "hqt", "hqt_valley_lowland.Rds")) |> 
   st_transform("ESRI:102039") |> 
   st_sf() |>
   st_set_geometry("geometry") |>
@@ -653,20 +703,22 @@ valley_foothill <- st_difference(cv_alluvial, valley_lowland) |>
 
 ``` r
 hqt_gradient_class <- bind_rows(valley_lowland, valley_foothill) 
-hqt_gradient_class |> saveRDS("../data/hqt_gradient_class.Rds")
+hqt_gradient_class |> saveRDS(here::here("data-raw", "results", "hqt_gradient_class.Rds"))
 hqt_gradient_class |> ggplot() + geom_sf(aes(fill = hqt_gradient_class))
 ```
 
 ![](data-discovery_files/figure-gfm/import-hqt-bounds-1.png)<!-- -->
 
 ``` r
-hqt_cls <- readRDS("../data/flowline_geometries.Rds") |>
-  st_transform("ESRI:102039") |>
+hqt_cls <- flowline_geom |>
   st_zm() |>
+  st_transform("ESRI:102039") |> 
   st_point_on_surface() |>
   st_join(hqt_gradient_class) |>
   st_drop_geometry() |> 
   select(comid, hqt_gradient_class) |>
+  mutate(hqt_gradient_class = coalesce(hqt_gradient_class, "Bedrock"),
+         hqt_gradient_class = factor(hqt_gradient_class, levels=c("Valley Lowland", "Valley Foothill", "Bedrock"))) |>
   glimpse()
 ```
 
@@ -675,7 +727,97 @@ hqt_cls <- readRDS("../data/flowline_geometries.Rds") |>
     ## Rows: 178,868
     ## Columns: 2
     ## $ comid              <int> 20245062, 24085230, 22226684, 22226720, 22226732, 2…
-    ## $ hqt_gradient_class <chr> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA,…
+    ## $ hqt_gradient_class <fct> Bedrock, Bedrock, Bedrock, Bedrock, Bedrock, Bedroc…
+
+#### UCD PISCES Ranges
+
+``` r
+# Shapefiles downloaded from PISCES 2.0.4
+pisces_ranges <- tribble(~sp_id, ~species, ~dataset, ~filename,
+        "WR",  "Central Valley Winter Run Chinook Salmon",    "Historical", "Oncorhynchus_tshawytscha_SOT05_historical_expert_16.shp.zip",
+        "WR",  "Central Valley Winter Run Chinook Salmon",    "Extant",     "Oncorhynchus_tshawytscha_SOT05_extant_1.shp.zip",
+        "WR",  "Central Valley Winter Run Chinook Salmon",    "Observed",   "Oncorhynchus_tshawytscha_SOT05_observed_2.shp.zip",
+        "SR",  "Central Valley Spring Run Chinook Salmon",    "Historical", "Oncorhynchus_tshawytscha_SOT06_historical_expert_16.shp.zip",
+        "SR",  "Central Valley Spring Run Chinook Salmon",    "Extant",     "Oncorhynchus_tshawytscha_SOT06_extant_1.shp.zip",
+        "SR",  "Central Valley Spring Run Chinook Salmon",    "Observed",   "Oncorhynchus_tshawytscha_SOT06_observed_2.shp.zip",
+        "LFR", "Central Valley Late Fall Run Chinook Salmon", "Historical", "Oncorhynchus_tshawytscha_SOT07_historical_expert_16.shp.zip",
+        "LFR", "Central Valley Late Fall Run Chinook Salmon", "Extant",     "Oncorhynchus_tshawytscha_SOT07_extant_1.shp.zip",
+        "FR",  "Central Valley Fall Run Chinook Salmon",      "Historical", "Oncorhynchus_tshawytscha_SOT08_historical_expert_16.shp.zip",
+        "FR",  "Central Valley Fall Run Chinook Salmon",      "Extant",     "Oncorhynchus_tshawytscha_SOT08_extant_1.shp.zip") |>
+  mutate(filepath = file.path("/vsizip", here::here("data-raw/source/ucd_pisces_ranges", filename))) |>
+  mutate(result = map(filepath, read_sf)) |>
+  unnest(result) |>
+  janitor::clean_names() |>
+  st_sf() |> 
+  st_transform(project_crs)
+
+# Summarize Ranges
+range_historical <- 
+  pisces_ranges |> 
+  filter(dataset=="Historical") |> 
+  summarize() |> 
+  st_union()
+
+range_extant <- 
+  pisces_ranges |> 
+  filter(dataset=="Extant") |> 
+  summarize() |> 
+  st_union()
+
+ggplot() +
+  geom_sf(data=range_historical, aes(fill = "Historical")) +
+  geom_sf(data=range_extant, aes(fill = "Extant"))
+```
+
+![](data-discovery_files/figure-gfm/import-pisces-1.png)<!-- -->
+
+``` r
+# Ranges by COMID
+pisces_range_search <- function(s, d) {
+  rng <- 
+    pisces_ranges |>
+    filter(sp_id==s & dataset==d) 
+  res <- flowline_geom_proj |>
+    st_drop_geometry() |>
+    mutate(range = comid %in% st_filter(flowline_geom_proj, rng)$comid) 
+  return(res)
+  #return(flowlines$comid %in% st_filter(flowlines, rng)$comid)
+}
+
+pisces_ranges_comid <- 
+  pisces_ranges |>
+  st_drop_geometry() |>
+  group_by(sp_id, dataset) |>
+  summarize() |>
+  ungroup() |>
+  mutate(result = map2(sp_id, dataset, pisces_range_search)) |>
+  unnest(result) |>
+  pivot_wider(names_from = c(sp_id, dataset), 
+              values_from = range,
+              names_glue = "range_{sp_id}_{dataset}") |>
+  mutate(range_cvchinook_historical = (range_FR_Historical | range_LFR_Historical | range_SR_Historical | range_WR_Historical),
+         range_cvchinook_extant = (range_FR_Extant | range_LFR_Extant | range_SR_Extant | range_WR_Extant)) |>
+  glimpse()
+```
+
+    ## `summarise()` has grouped output by 'sp_id'. You can override using the
+    ## `.groups` argument.
+
+    ## Rows: 178,868
+    ## Columns: 13
+    ## $ comid                      <int> 20245062, 24085230, 22226684, 22226720, 222…
+    ## $ range_FR_Extant            <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, F…
+    ## $ range_FR_Historical        <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, F…
+    ## $ range_LFR_Extant           <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, F…
+    ## $ range_LFR_Historical       <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, F…
+    ## $ range_SR_Extant            <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, F…
+    ## $ range_SR_Historical        <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, F…
+    ## $ range_SR_Observed          <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, F…
+    ## $ range_WR_Extant            <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, F…
+    ## $ range_WR_Historical        <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, F…
+    ## $ range_WR_Observed          <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, F…
+    ## $ range_cvchinook_historical <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, F…
+    ## $ range_cvchinook_extant     <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, F…
 
 ### Combine all attributes
 
@@ -690,7 +832,7 @@ nu_cgs <- 0.01
 
 flowline_attributes <-
   flowline_table |>
-  #filter(huc_8 %in% selected_huc_8) |>
+  left_join(comid_huc_12) |>
   left_join(flowline_vaattr) |> 
   left_join(flowline_slopes) |>
   mutate(stream_power = slope * da_area_sq_km) |>
@@ -713,6 +855,7 @@ flowline_attributes <-
   left_join(levee_confinement) |>
   left_join(geomorph_class) |>
   left_join(hqt_cls) |>
+  left_join(pisces_ranges_comid) |>
   # fill in gaps in the RF bankfull estimates with the simple Bieger model
   mutate(bf_width_m = coalesce(bf_width_m, 2.76*da_area_sq_km^0.399),
          bf_depth_m = coalesce(bf_depth_m, 0.23*da_area_sq_km^0.294),
@@ -743,37 +886,18 @@ flowline_attributes <-
                                      vb_width_transect),
          vb_bf_w_ratio = vb_width_transect / chan_width_m,) 
 
-flowline_attributes |> saveRDS("../data/flowline_attributes.Rds")
-  
+flowline_attributes |> saveRDS(here::here("data-raw", "results", "flowline_attributes.Rds"))
+
+flowline_attr <- flowline_attributes
+flowline_attr |> usethis::use_data(overwrite = TRUE)
 #}
 ```
 
-### Import Flowline Geometry
+## Join to Flowline Geometry
 
 ``` r
-flowlines_sf <- 
-  drive_file_by_id("1UiG8AeMr6mFOw7Jx--LyNRzez7GsDhzK", vsizip=T) |>
-  st_read() |>
-  janitor::clean_names() |>
-  select(comid) 
-```
-
-    ## temp/NHDFlowline.zip already exists and will be used...
-
-    ## Reading layer `NHDFlowline' from data source `/vsizip/temp/NHDFlowline.zip' using driver `ESRI Shapefile'
-    ## Simple feature collection with 178868 features and 14 fields
-    ## Geometry type: LINESTRING
-    ## Dimension:     XYZM
-    ## Bounding box:  xmin: -124.4096 ymin: 32.50006 xmax: -114.5885 ymax: 43.33627
-    ## z_range:       zmin: 0 zmax: 0
-    ## m_range:       mmin: 0 mmax: 100
-    ## Geodetic CRS:  NAD83
-
-``` r
-flowlines_sf |> saveRDS("../data/flowline_geometries.Rds")
-
 flowlines <- 
-  flowlines_sf |>
+  flowline_geom |>
   inner_join(flowline_attributes) |>
   filter(huc_8 %in% selected_huc_8) |>
   arrange(hydro_seq) |>
@@ -783,27 +907,24 @@ flowlines <-
     ## Joining with `by = join_by(comid)`
 
 ``` r
+# for visualizing
 waterbodies <- 
   drive_file_by_id("1ZGS3M97xTPb87k-78sGPJx_c1QkSq3AZ", vsizip=T) |>
-  st_read() |>
+  read_sf() |>
   janitor::clean_names() |>
-  mutate(huc_8 = substr(reachcode, 1, 8),
-         huc_10 = substr(reachcode, 1, 10),
-         huc_12 = substr(reachcode, 1, 12)) |>
-  filter(huc_8 %in% selected_huc_8) |>
+  mutate(rc_huc_8 = substr(reachcode, 1, 8),
+         rc_huc_10 = substr(reachcode, 1, 10),
+         rc_huc_12 = substr(reachcode, 1, 12)) |>
+  filter(rc_huc_8 %in% selected_huc_8) |>
   arrange(comid) |>
   st_transform(project_crs)
 ```
 
-    ## temp/NHDWaterbody.zip already exists and will be used...
+    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/NHDWaterbody.zip already exists and will be used...
 
-    ## Reading layer `NHDWaterbody' from data source `/vsizip/temp/NHDWaterbody.zip' using driver `ESRI Shapefile'
-    ## Simple feature collection with 9651 features and 12 fields
-    ## Geometry type: POLYGON
-    ## Dimension:     XYZ
-    ## Bounding box:  xmin: -124.3796 ymin: 32.54717 xmax: -114.9462 ymax: 43.24877
-    ## z_range:       zmin: 0 zmax: 0
-    ## Geodetic CRS:  NAD83
+``` r
+# TODO: HUCs derived from the reachcode may not align with WBD HUC definitions
+```
 
 ## Maps of attribute data (exploratory)
 
@@ -1175,7 +1296,6 @@ flowlines |>
 ![](data-discovery_files/figure-gfm/plot-aqu-rank-1.png)<!-- -->
 
 ``` r
-# plot showing number of CDFW aquatic biodiversity rank
 flowlines |> 
   st_zm() |>
   filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
@@ -1187,13 +1307,25 @@ flowlines |>
 
 ![](data-discovery_files/figure-gfm/plot-geomorph-class-1.png)<!-- -->
 
+``` r
+flowlines |> 
+  st_zm() |>
+  filter(gnis_name %in% c("Yuba River", "South Yuba River", "Middle Yuba River", "North Yuba River")) |>
+  ggplot() + 
+  geom_sf(data=st_zm(flowlines), aes(color = factor(hqt_gradient_class))) +
+  geom_sf(aes(color = factor(hqt_gradient_class)), linewidth=1) + 
+  geom_sf(data=waterbodies, fill="gray", color="gray") 
+```
+
+![](data-discovery_files/figure-gfm/plot-hqt-class-1.png)<!-- -->
+
 ## Import catchments
 
 ``` r
 # local catchment associated with each flowline reach (COMID)
 catchments <- 
   drive_file_by_id("16RXk1BplBr8v-IO0QodGEnjBlvOGhbM3", vsizip=T) |>
-  st_read() |> 
+  read_sf() |> 
   janitor::clean_names() |>
   mutate(comid = as.numeric(featureid)) |>
   inner_join(flowlines |> st_drop_geometry() |> select(comid)) |>
@@ -1201,14 +1333,7 @@ catchments <-
   st_transform(project_crs) 
 ```
 
-    ## temp/Catchment.zip already exists and will be used...
-
-    ## Reading layer `Catchment' from data source `/vsizip/temp/Catchment.zip' using driver `ESRI Shapefile'
-    ## Simple feature collection with 140835 features and 4 fields
-    ## Geometry type: MULTIPOLYGON
-    ## Dimension:     XY
-    ## Bounding box:  xmin: -124.4098 ymin: 32.13295 xmax: -114.6198 ymax: 43.34269
-    ## Geodetic CRS:  NAD83
+    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/Catchment.zip already exists and will be used...
 
     ## Joining with `by = join_by(comid)`
 
@@ -1222,5 +1347,23 @@ ggplot() + geom_sf(data = catchments, color="orange") +
 ![](data-discovery_files/figure-gfm/catchments-1.png)<!-- -->
 
 ``` r
-catchments |> saveRDS("../data/catchments.Rds")
+catchments |> saveRDS(here::here("data-raw", "results", "catchments.Rds"))
+```
+
+## Export GCS versions of spatial data
+
+``` r
+flowlines_gcs <- flowlines |>
+  st_transform("+proj=longlat +datum=NAD83") |> 
+  st_zm()
+
+# just redefine NAD83 to WGS84 for leaflet, this is ok because just for rough visualization not analysis
+st_crs(flowlines_gcs) <- "+proj=longlat +datum=WGS84"
+```
+
+    ## Warning: st_crs<- : replacing crs does not reproject data; use st_transform for
+    ## that
+
+``` r
+flowlines_gcs |> saveRDS(here::here("data-raw", "results", "flowline_geometries_leaflet.Rds"))
 ```

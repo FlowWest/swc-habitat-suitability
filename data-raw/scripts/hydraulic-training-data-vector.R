@@ -1,8 +1,9 @@
 library(tidyverse)
 library(sf)
 
-source(here::here("data-raw", "scripts", "data-functions.R"))
-source(here::here("data-raw", "scripts", "suitability-functions.R"))
+#source(here::here("data-raw", "scripts", "data-functions.R"))
+#source(here::here("data-raw", "scripts", "suitability-functions.R"))
+library(habistat)
 
 flowlines <- readRDS(here::here("data-raw", "results", "flowline_geometries_proj.Rds"))
 
@@ -63,7 +64,7 @@ stan_mesh_prepped <-
 
 stan_result <-
   vector_summarize_hsi(stan_mesh_prepped, stan_hsi_by_flow) |>
-  postprocess(stan_comid, .group_var = comid)
+  suitability_postprocess(stan_comid, .group_var = comid)
 
 outpath <- here::here("data-raw", "results", "fsa_stan.Rds")
 
@@ -144,7 +145,7 @@ yuba_output_by_reach <-
   mutate(hsi_output = pmap(list(mesh_prepped, tbl_hsi),
                            function(x, y) vector_summarize_hsi(x, y, .group_var=comid, .id_var=vid))) |>
   mutate(hsi_final = pmap(list(hsi_output, reach),
-                          function(x, y) postprocess(x, yuba_comid |> filter(reach==y), .group_var=comid))) |>
+                          function(x, y) suitability_postprocess(x, yuba_comid |> filter(reach==y), .group_var=comid))) |>
   select(reach, hsi_final)
 
 yuba_output_by_reach |> saveRDS(file.path(yuba_dir, "yuba_output_by_reach.Rds"))

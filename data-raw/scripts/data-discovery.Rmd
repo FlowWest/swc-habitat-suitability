@@ -17,9 +17,11 @@ library(tidyverse)
 library(sf)
 library(stars)
 
+library(habistat)
+
 theme_set(theme_minimal())
 
-source(here::here("data-raw", "scripts", "data-functions.R"))
+#source(here::here("data-raw", "scripts", "data-functions.R"))
 ```
 
 ## Case study geographic scope
@@ -96,8 +98,10 @@ fcodes <-
 # flowline shapefile attribute table
 drive_file_by_id("1UiG8AeMr6mFOw7Jx--LyNRzez7GsDhzK") |>
   archive::archive_extract(dir = here::here("data-raw", "temp"), file = "NHDFlowline.dbf")
+
 flowline_table <- 
-  foreign::read.dbf(here::here("data-raw", "temp", "NHDFlowline.dbf")) |> 
+  foreign::read.dbf(here::here("data-raw", "temp", "NHDFlowline.dbf")) |>
+  as_tibble() |>
   janitor::clean_names() |>
   select(comid, reachcode, gnis_id, gnis_name, lengthkm, ftype, fcode) |>
   mutate(rc_huc_8 = substr(reachcode, 1, 8),
@@ -118,7 +122,7 @@ wbd_watersheds <-
 
 comid_huc_12 <- 
   flowline_geom_proj |> 
-  st_join(wbd_watersheds, left=F) |>
+  st_join(wbd_watersheds, left=F, largest=T) |>
   st_drop_geometry()
 ```
 
@@ -642,30 +646,30 @@ nu_cgs <- 0.01
 
 flowline_attributes <-
   flowline_table |>
-  left_join(comid_huc_12) |>
-  left_join(flowline_vaattr) |> 
-  left_join(flowline_slopes) |>
+  left_join(comid_huc_12, by=join_by(comid), relationship="one-to-one") |>
+  left_join(flowline_vaattr, by=join_by(comid), relationship="one-to-one") |> 
+  left_join(flowline_slopes, by=join_by(comid), relationship="one-to-one") |>
   mutate(stream_power = slope * da_area_sq_km) |>
-  left_join(precip_annual) |>
-  left_join(loc_precip_annual) |>
-  left_join(vogel_flow) |>
-  left_join(erom_annual) |>
-  left_join(flowline_sinuosity) |>
-  left_join(da_suppl_attrs) |> 
-  left_join(streamcat_data) |>
-  left_join(catchment_ndvi) |> 
-  left_join(aquatic_species_cdfw) |> 
-  left_join(aquatic_species_tnc) |>  
-  left_join(catchment_ndvi) |>
-  left_join(hyd_cls) |>
-  left_join(nf_ffm) |>
-  left_join(peak_flows) |>
-  left_join(width_data) |>
-  left_join(valley_bottoms) |>
-  left_join(levee_confinement) |>
-  left_join(geomorph_class) |>
-  left_join(hqt_cls) |>
-  left_join(pisces_ranges_comid) |>
+  left_join(precip_annual, by=join_by(comid), relationship="one-to-one") |>
+  left_join(loc_precip_annual, by=join_by(comid), relationship="one-to-one") |>
+  left_join(vogel_flow, by=join_by(comid), relationship="one-to-one") |>
+  left_join(erom_annual, by=join_by(comid), relationship="one-to-one") |>
+  left_join(flowline_sinuosity, by=join_by(comid), relationship="one-to-one") |>
+  left_join(da_suppl_attrs, by=join_by(comid), relationship="one-to-one") |> 
+  left_join(streamcat_data, by=join_by(comid), relationship="one-to-one") |>
+  left_join(catchment_ndvi, by=join_by(comid), relationship="one-to-one") |> 
+  left_join(aquatic_species_cdfw, by=join_by(comid), relationship="one-to-one") |> 
+  left_join(aquatic_species_tnc, by=join_by(comid), relationship="one-to-one") |>  
+  left_join(catchment_ndvi, by=join_by(comid), relationship="one-to-one") |>
+  left_join(hyd_cls, by=join_by(comid), relationship="one-to-one") |>
+  left_join(nf_ffm, by=join_by(comid), relationship="one-to-one") |>
+  left_join(peak_flows, by=join_by(comid), relationship="one-to-one") |>
+  left_join(width_data, by=join_by(comid), relationship="one-to-one") |>
+  left_join(valley_bottoms, by=join_by(comid), relationship="one-to-one") |>
+  left_join(levee_confinement, by=join_by(comid), relationship="one-to-one") |>
+  left_join(geomorph_class, by=join_by(comid), relationship="one-to-one") |>
+  left_join(hqt_cls, by=join_by(comid), relationship="one-to-one") |>
+  left_join(pisces_ranges_comid, by=join_by(comid), relationship="one-to-one") |>
   # fill in gaps in the RF bankfull estimates with the simple Bieger model
   mutate(bf_width_m = coalesce(bf_width_m, 2.76*da_area_sq_km^0.399),
          bf_depth_m = coalesce(bf_depth_m, 0.23*da_area_sq_km^0.294),
@@ -686,7 +690,7 @@ flowline_attributes <-
          grain_size_suspended_ndim = sqrt(5832 * settling_velocity_ndim),
          grain_size_suspended_mm = 10 * grain_size_suspended_ndim * rho_cgs * nu_cgs^2 /
                          ((rho_s_cgs - rho_cgs) * g_cgs)^(1/3)) |>
-  left_join(attr_mtpi) |>
+  left_join(attr_mtpi, by=join_by(comid), relationship="one-to-one") |>
   mutate(#confined_topo = if_else(is.na(vb_width_transect),1,0),
          #confined_levee = if_else(frac_leveed_longitudinal>=0.5,1,0),
          vb_width_transect = pmax(coalesce(vb_width_transect, chan_width_m), chan_width_m),
@@ -724,7 +728,6 @@ waterbodies <-
   filter(rc_huc_8 %in% selected_huc_8) |>
   arrange(comid) |>
   st_transform(project_crs)
-# TODO: HUCs derived from the reachcode may not align with WBD HUC definitions
 ```
 
 ## Maps of attribute data (exploratory)

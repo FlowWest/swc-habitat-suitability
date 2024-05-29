@@ -35,6 +35,8 @@ library(sf)
 library(stars)
 library(lubridate)
 
+library(habistat)
+
 knitr::opts_chunk$set(eval=TRUE, fig.width=6.5, fig.height=4, dpi=300)
 
 theme_set(theme_minimal())
@@ -66,41 +68,6 @@ water_year_types <- read_csv(here::here("data-raw", "source", "water_year_type",
 
 ## Import Flow Time Series Data
 
-```{r cdec-functions}
-# functions from interoperable flows
-
-retrieve_cdec_csv <- function(sta=character(), sen=character(), dur=character(), 
-                     start_date=ymd("1900-10-01"), end_date=ymd("2023-09-30"),
-                     dir="temp") {
-  name <- str_to_upper(paste0(sta, "_", sen, "_", dur))
-  filename <- file.path(dir, paste0(name,".csv.gz"))
-  if(!file.exists(filename)){
-    message(paste0("downloading to ",filename))
-    dir.create(dir, recursive = TRUE)
-    data_raw <-
-      httr::GET(
-      url="https://cdec.water.ca.gov/dynamicapp/req/CSVDataServlet",
-      query=list(Stations=sta, SensorNums=sen, dur_code=dur, 
-                 Start=format(start_date,"%Y-%m-%d"), End=format(end_date,"%Y-%m-%d"))) |> 
-      httr::content("raw") 
-    gzf <- gzcon(file(filename, "wb"))
-    data_raw |> writeBin(gzf)
-    close(gzf)
-  } else {
-    message(paste0(filename, " exists, loading"))
-  }
-  return(filename)
-}
-
-parse_cdec_csv <- function(filename) {
-  read_csv(filename, 
-           col_select = c(date_time = "DATE TIME", value = "VALUE"),
-           col_types = list(col_datetime(), col_double())) |>
-    janitor::clean_names() |>
-    mutate(water_year = if_else(month(date_time)>=10, year(date_time)+1, year(date_time)))
-}
-```
-
 ```{r cdec-gage-data, message=FALSE, warning=FALSE}
 # refer to https://cdec.water.ca.gov/webgis/?appid=cdecstation
 # refer to https://docs.google.com/spreadsheets/d/1OaohqeYbp-dTyIim3mFDYP11GEqIZWqSYIfT67b5-eE/edit
@@ -127,7 +94,7 @@ training_reach_gages <- tribble(
 ) |>
   mutate(da_gauge_sq_km = da_gauge_sq_mi * 1.609344^2) |>
   mutate(filename = pmap_chr(list(cdec_sta, cdec_sen, cdec_dur), 
-                             function(x, y, z) retrieve_cdec_csv(sta=x, sen=y, dur=z))) |>
+                             function(x, y, z) cdec_csv_retrieve(sta=x, sen=y, dur=z))) |>
   left_join(flowline_attributes |> 
               transmute(comid, maf_gauge = erom_q_ma_cfs), by=join_by(gauge_comid == comid))
 
@@ -135,7 +102,7 @@ training_reach_gages <- tribble(
 training_cdec_data <- training_reach_gages |> 
   select(river, filename) |> 
   deframe() |>
-  lapply(parse_cdec_csv) |>
+  lapply(cdec_csv_parse) |>
   bind_rows(.id = "river") |>
   mutate(q_gauge = as.numeric(value),
          q_gauge = case_when(q_gauge>=0 ~ q_gauge)) |>
@@ -244,27 +211,28 @@ durhsi_by_model_q |>
 
 ```{r}
 # simple version, for data within one water year only
-calculate_days_inundated <- function(q_gauge, q_crit, stat="max") {
-  
-  n_days <- length(q_gauge)
-  
-  exceedence_intervals <- 
-    tibble(exceeds_q = q_gauge > q_crit,
-           exceedence_event = with(rle(exceeds_q), rep(seq_along(lengths), lengths))) |>
-    group_by(exceedence_event) |>
-    mutate(cumulative_exceedence = if_else(exceeds_q, seq_along(exceedence_event), 0)) |>
-    filter(exceeds_q) |>
-    summarize(duration_days = max(cumulative_exceedence))
-  
-  if(stat=="sum"){
-    return(sum(exceedence_intervals$duration_days))
-  } else if(stat=="max") {
-    return(pmax(max(exceedence_intervals$duration_days),0))
-  }
-}
-
+# calculate_days_inundated <- function(q_gauge, q_crit, stat="max") {
+#   
+#   n_days <- length(q_gauge)
+#   
+#   exceedence_intervals <- 
+#     tibble(exceeds_q = q_gauge > q_crit,
+#            exceedence_event = with(rle(exceeds_q), rep(seq_along(lengths), lengths))) |>
+#     group_by(exceedence_event) |>
+#     mutate(cumulative_exceedence = if_else(exceeds_q, seq_along(exceedence_event), 0)) |>
+#     filter(exceeds_q) |>
+#     summarize(duration_days = max(cumulative_exceedence))
+#   
+#   if(stat=="sum"){
+#     return(sum(exceedence_intervals$duration_days))
+#   } else if(stat=="max") {
+#     return(pmax(max(exceedence_intervals$duration_days),0))
+#   }
+# }
+# 
+# update: moved to the habistat package
 # example usage
-calculate_days_inundated(filter(training_cdec_data, river=="Deer Creek" & water_year==2017)$q_gauge, 500)
+duration_calc_days_inundated(filter(training_cdec_data, river=="Deer Creek" & water_year==2017)$q_gauge, 500)
 ```
 
 ```{r calc-inundation-by-wy, message=FALSE, warning=FALSE}
@@ -278,7 +246,7 @@ durhsi_by_model_q_wy <-
   nest(gauge_ts = c(date, q_gauge)) |>
   unnest(flows) |> rename(model_q = flows) |>
   mutate(max_days_inundated = map2_dbl(gauge_ts, model_q, 
-                                       function(df, q) calculate_days_inundated(df$q_gauge, q, stat="max"))) |>
+                                       function(df, q) duration_calc_days_inundated(df$q_gauge, q, stat="max"))) |>
   select(-gauge_ts) |>
   mutate(location = case_when(
          river=="Deer Creek" ~ "Sacramento Valley",
@@ -524,7 +492,6 @@ fsa_duration_posthoc |>
   scale_x_log10(labels = scales::label_comma())
 ```
 
-
 ```{r wet-dry-normal, eval=FALSE, include=FALSE}
 #durhsi_by_model_q_wyt <- 
 #  training_reach_gages |> 
@@ -697,43 +664,43 @@ example_result |>
   scale_y_continuous(name="WUA (ac)", sec.axis=sec_axis(name="Flow (cfs)", trans = ~.*10))
 ```
 
-
 ### Revised Version 2
 
 ```{r posthoc-duration-func-simple}
 # https://stackoverflow.com/a/73215592
-cummean.na.rm <- function(x) {
-  idx <- cumsum(!is.na(x))
-  x_filtered <- x[!is.na(x)]
-  cummean(x_filtered)[idx]
-}
+# cummean.na.rm <- function(x) {
+#   idx <- cumsum(!is.na(x))
+#   x_filtered <- x[!is.na(x)]
+#   cummean(x_filtered)[idx]
+# }
 
 # simple version
-apply_durations_to_fsa_curve <- function(fsa, drc, fsa_q=q, fsa_wua=wua, drc_q=q, drc_dhsi=dhsi) {
-  full_join(fsa |> transmute(q={{fsa_q}}, wua={{fsa_wua}}),
-            drc |> transmute(q={{drc_q}}, dhsi={{drc_dhsi}}),
-            by = join_by(q)) |>
-    # fill in any gaps with linear interpolation
-    arrange(q) |>
-    mutate(wua = zoo::na.approx(wua, q, na.rm=F),
-           dhsi = zoo::na.approx(dhsi, q, na.rm=F)) |>
-    drop_na() |>
-    # start by computing the marginal WUA added at each step
-    mutate(marginal_wua = if_else(row_number()==1, wua, wua - lag(wua))) |>
-    # apply each flow's DHSI to whatever area is added or removed at that flow
-### mutate(marginal_durwua = pmin(dhsi * marginal_wua, marginal_wua), 
-###       # pmin is a simplification to account for loss; this will end up overestimating the magnitude of the marginal drop in habitat 
-###       durwua = pmax(cumsum(marginal_durwua), 0))
-    mutate(wua_added = if_else(marginal_wua > 0, marginal_wua, 0),
-           marginal_durwua_added = dhsi * wua_added,
-           wua_removed = (-1) * if_else(marginal_wua < 0, marginal_wua, 0), 
-           marginal_durwua_removed = cummean(dhsi) * wua_removed,
-###        marginal_durwua_removed = cummean.na.rm(if_else(dhsi > 0, dhsi, NA)) * wua_removed,
-           marginal_durwua = marginal_durwua_added - marginal_durwua_removed,
-           durwua = pmin(pmax(cumsum(marginal_durwua), 0), wua))
-}
+# apply_durations_to_fsa_curve <- function(fsa, drc, fsa_q=q, fsa_wua=wua, drc_q=q, drc_dhsi=dhsi) {
+#   full_join(fsa |> transmute(q={{fsa_q}}, wua={{fsa_wua}}),
+#             drc |> transmute(q={{drc_q}}, dhsi={{drc_dhsi}}),
+#             by = join_by(q)) |>
+#     # fill in any gaps with linear interpolation
+#     arrange(q) |>
+#     mutate(wua = zoo::na.approx(wua, q, na.rm=F),
+#            dhsi = zoo::na.approx(dhsi, q, na.rm=F)) |>
+#     drop_na() |>
+#     # start by computing the marginal WUA added at each step
+#     mutate(marginal_wua = if_else(row_number()==1, wua, wua - lag(wua))) |>
+#     # apply each flow's DHSI to whatever area is added or removed at that flow
+# ### mutate(marginal_durwua = pmin(dhsi * marginal_wua, marginal_wua), 
+# ###       # pmin is a simplification to account for loss; this will end up overestimating the magnitude of the marginal drop in habitat 
+# ###       durwua = pmax(cumsum(marginal_durwua), 0))
+#     mutate(wua_added = if_else(marginal_wua > 0, marginal_wua, 0),
+#            marginal_durwua_added = dhsi * wua_added,
+#            wua_removed = (-1) * if_else(marginal_wua < 0, marginal_wua, 0), 
+#            marginal_durwua_removed = cummean(dhsi) * wua_removed,
+# ###        marginal_durwua_removed = cummean.na.rm(if_else(dhsi > 0, dhsi, NA)) * wua_removed,
+#            marginal_durwua = marginal_durwua_added - marginal_durwua_removed,
+#            durwua = pmin(pmax(cumsum(marginal_durwua), 0), wua))
+# }
 
-apply_durations_to_fsa_curve <- possibly(apply_durations_to_fsa_curve, otherwise=NA)
+# apply_durations_to_fsa_curve <- possibly(apply_durations_to_fsa_curve, otherwise=NA)
+# Functions were moved to the habistat package
 ```
 
 Example
@@ -766,7 +733,7 @@ drc |> ggplot() + geom_step(aes(x=model_q, y=dhsi), direction="vh") +
 
 # APPLY 
 
-res <- apply_durations_to_fsa_curve(fsa, drc, 
+res <- duration_apply_dhsi_to_fsa_curve(fsa, drc, 
                                     # specify variable names
                                     fsa_q = flow_cfs, fsa_wua = wua,
                                     drc_q = model_q, drc_dhsi = dhsi) |>
@@ -804,7 +771,7 @@ batch_drc <- durhsi_by_model_q_wy |>
 batch_res <-
   inner_join(batch_fsa, batch_drc, by=join_by(dataset==river, hqt_cls), relationship="many-to-many") |>
   mutate(result = map2(tbl_fsa, tbl_drc, 
-                       function(f, d) apply_durations_to_fsa_curve(f, d, 
+                       function(f, d) duration_apply_dhsi_to_fsa_curve(f, d, 
                        # specify variable names
                        fsa_q = flow_cfs, fsa_wua = wua,
                        drc_q = model_q, drc_dhsi = dhsi))) |>

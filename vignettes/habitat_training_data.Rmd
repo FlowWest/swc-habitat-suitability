@@ -1,0 +1,84 @@
+---
+title: "Habitat Training Data"
+author: "[Maddee Rubenson](mailto:mrubenson@flowwest.com) & [Skyler Lewis](slewis@flowwest.com)"
+date: "`r Sys.Date()`"
+output: 
+  rmarkdown::html_vignette:
+    default
+vignette: >
+  %\VignetteIndexEntry{Habitat Training Data}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.path = "man/figures/training-data-"
+)
+```
+
+## Data Sources
+
+Depth and velocity outputs from existing two-dimensional hydraulic models were assembled for "training reaches" within the study area, at a variety of flows. The model is currently trained on the following models:
+
+| Stream | Extent | Length | Author | Year | Platform | Flow Range |
+| ------ | ------ | ------ | ------ | ---- | -------- | ---------- |
+| Deer Creek | Delaney Slough to Sacramento River confluence | 40,000 LF | FlowWest | 2021 | HEC-RAS 2D | ___ - ___ cfs |
+| Lower Yuba River | Englebright Dam to Feather River confluence | 120,000 LF | CBEC | 2020 | SRH-2D | ___ - ___ cfs |
+| Stanislaus River | Knights Ferry to San Joaquin River confluence | 90,000 LF | NewFields | 2013 | SRH-2D | ___ - ___ cfs |
+| Tuolumne River | Basso-La Grange Reach | ___ LF | FlowWest | ___ | HEC-RAS 2D | ___ - ___ cfs |
+
+![](../man/figures/training_reaches.png){width=50%}
+
+The depth and velocity raster grids (for HEC-RAS 2D models) or vector meshes (for SRH-2D models) were divided up based on ComID reach delineations. Currently, this is a manual process that requires importing the model domain polygon into a GIS system, splitting it up into reaches, and assigning each reach a ComID number that corresponds to the overlapping NHDPlusV2 flowline.
+
+## Habiat Suitability Index
+
+A habitat suitability index was applied to each grid/mesh cell based on depth and velocity values. The simplest habitat suitability indices are binary, *i.e.*, 1 if a cell is within suitable depth and velocity range, else 0), and this approach is currently being used. However, it is possible to instead use a habitat suitability index that includes "somewhat suitable" fractional values between 0 and 1. 
+
+For model development, we applied the following habitat suitability index (all units are in feet):
+
+> HSI = 1 if (d>1.0 & d<=3.28 & v>0 & v<=1.5) else 0
+
+This was developed for floodplain rearing for the [Chinook Salmon Habitat Quantification Tool](https://www.sfei.org/sites/default/files/biblio_files/SalmonHQT_UserGuide_2019.pdf) published by SFEI. According to this report,
+
+> Suitable depths support foraging behavior and predator avoidance (Gregory 1993) and contribute to favorable primary production conditions. Juvenile Chinook salmon habitat suitability models for depth and velocity have been developed previously for numerous rivers in the Central Valley and elsewhere (Aceituno 1990) and applied to floodplain habitat estimates for the San Joaquin River (SJRRP 2012). These estimates suggest optimal depth values exist between 0.3 and 1 m (1–3.28 ft) in floodplain or off-channel conditions, and these depths are used in accepted HSI (Habitat Suitability Index) models (Figure A.6; Aceituno 1990, SJRRP 2012). The same studies, based on the velocity requirements for juvenile Chinook salmon, assigned optimal velocity values for those habitat types at between 0–0.46 m/sec (0–1.5 ft/sec; Figure A.6; Aceituno 1990). 
+
+An alternative habitat suitability index was also tested:
+
+> HSI = 1 if (d>0.5 & d<=5.2 & v>0 & v<=4.0) else 0
+
+This index, derived from "juvenile salmonid observations from 11 different northern California rivers," was "developed for the California State Water Resources Control Board Voluntary Settlement Agreement and ... agreed upon by a committee of interested stakeholders as part of the Voluntary Settlement Agreement process during a meeting held November 9, 2017." It was previously applied by CBEC in the [Yuba River Flow Effects Modeling Project](https://drive.google.com/file/d/1UUjj0BxwIvbgL2k-frld6Fytx-bmi2Of/view).  
+
+## Depth and Velocity Data Processing
+
+The selected habitat suitability index was applied to the depth and velocity raster grids (for HEC-RAS 2D models) or vector meshes (for SRH-2D models). The habistat team developed a series of R functions--built with the `dplyr`, `sf`, and `terra` libraries--to import model geometry and depth/velocity results, apply habitat suitability indices, and summarize results by ComID reach. Both workflows consist of the following steps:
+
+* Import depth and velocity grid/mesh for a particular flow.
+* Calculate area (ft<sup>2</sup>) of each grid/mesh cell
+* Calculate suitability (between 1 and 0) for each grid/mesh cell
+* Calculate suitable area of each grid/mesh cell by multiplying area by suitability
+* Aggregate grid/mesh cells by ComID (reach) polygon, calculating total area and total suitable area
+* Divide total area and total suitable area by the length of the corresponding flowline (linear ft)
+
+This process is conducted for each set of depth/velocity rasters corresponding to each flow. 
+
+The result is two values for each ComID (reach) at each flow. Units are ft2/ft, which simplifies to ft:
+
+* **suitable area per linear ft** is our habitat variable of interest-- the effective habitat area in the channel, normalized by reach length so that the (somewhat arbitrary) division of reaches does not influence model outputs. Because it's an area divided by a length, it can also be thought of as an "effective width of habitat." 
+
+* **total area per linear ft** can likewise be interpreted as the average width of wetted channel at the given flow. This is useful for comparison purposes.
+
+### Vector (SRH-2D)
+
+> (Discuss the detailed procedures here)
+
+### Raster (HEC-RAS 2D)
+
+> (Discuss the detailed procedures here)
+
+## Output
+
+The summarized habitat training dataset by reach is available in the data package as _______.

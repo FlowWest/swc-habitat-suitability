@@ -2,7 +2,9 @@
 title: "Predictor Variables"
 author: "[Maddee Rubenson](mailto:mrubenson@flowwest.com) & [Skyler Lewis](slewis@flowwest.com)"
 date: "`r Sys.Date()`"
-output: rmarkdown::html_vignette
+output: 
+  rmarkdown::html_vignette:
+    default
 vignette: >
   %\VignetteIndexEntry{Predictor Variables}
   %\VignetteEngine{knitr::rmarkdown}
@@ -12,6 +14,56 @@ vignette: >
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(
   collapse = TRUE,
-  comment = "#>"
+  comment = "#>",
+  fig.path = "man/figures/predictor-variables-"
 )
 ```
+
+## Data Sources
+
+Datasets publicly available by ComID reach:
+
+* [USGS NHDPlusV2](https://nhdplus.com/NHDPlus/NHDPlusV2_home.php) [EPA Distribution](https://www.epa.gov/waterdata/get-nhdplus-national-hydrography-dataset-plus-data) including Value Added Attribute tables
+* NHDPlusV2 [WSC Supplements](https://www.sciencebase.gov/catalog/item/57976a0ce4b021cadec97890)^[Wieczorek, M.E., Jackson, S.E., and Schwarz, G.E., 2018, Select Attributes for NHDPlus Version 2.1 Reach Catchments and Modified Network Routed Upstream Watersheds for the Conterminous United States (ver. 4.0, August 2023): U.S. Geological Survey data release, https://doi.org/10.5066/F7765D7V.]
+* [US EPA StreamCat Dataset](https://www.epa.gov/national-aquatic-resource-surveys/streamcat-dataset)
+* [Natural Flows Database](https://rivers.codefornature.org/)^[California Environmental Flows Working Group (CEFWG). California Natural Flows Database: Functional flow metrics v1.2.1, May 2021. https://rivers.codefornature.org/]
+
+Transformation and calculation required to map onto ComID reach:
+
+* HQT
+* UC Davis eFlows
+* MERIT Hydro Width Dataset
+* MODIS
+* CDFW ACE & California Freshwater Species Database V2
+
+## Covariates by Type
+
+### Local Reach Characteristics
+
+* ...
+
+### Drainage Area Characteristics
+
+* ...
+
+### Flow Characteristics
+
+* ...
+
+### Topographic and Spatial Confinement Indicators
+
+* ...
+
+### Aquatic Habitat Quality
+
+* ...
+
+### Categorical
+
+* ...
+
+## Inventory Table
+
+<iframe src="https://docs.google.com/spreadsheets/d/e/2PACX-1vQAb8qg7jJkOE-zxzCZ6NpO3ot1JZhGxkdQdZA9gFJj3Iy5TGkgPijE2109EWMXWBm2rMrqBBB0IdUh/pubhtml?gid=0&amp;single=true&amp;widget=true&amp;headers=false" style="width:100%; border:0; height:100vh; overflow:scroll;"></iframe>
+
+> NEEDS TO BE UPDATED

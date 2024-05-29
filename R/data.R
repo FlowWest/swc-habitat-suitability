@@ -1,19 +1,34 @@
-#' @name flowline_geom
-#' @title NHD Flowline (ComID) Geometries
+#' NHD Flowline (ComID) Geometries
+#'
+#' @examples
+#' flowline_geom |> pillar::glimpse()
+#' @export
 "flowline_geom"
 
-#' @name flowline_geom_proj
-#' @title NHD Flowline (ComID) Geometries - Projected
+#' NHD Flowline (ComID) Geometries - Projected
+#'
+#' @examples
+#' flowline_geom_proj |> pillar::glimpse()
+#' @export
 "flowline_geom_proj"
 
-#' @name flowline_attr
-#' @title NHD Flowline (ComID) Attributes
+#' NHD Flowline (ComID) Attributes
+#'
+#' @examples
+#' flowline_attr |> pillar::glimpse()
+#' @export
 "flowline_attr"
 
-#' @name wua_hydraulic
-#' @title WUA/LF by ComID by Flow (training dataset)
+#' WUA/LF by ComID by Flow (training dataset)
+#'
+#' @examples
+#' wua_hydraulic |> pillar::glimpse()
+#' @export
 "wua_hydraulic"
 
-#' @name wua_predicted
-#' @title WUA/LF by ComID by Flow (predicted by statistical model)
+#' WUA/LF by ComID by Flow (predicted by statistical model)
+#'
+#' @examples
+#' wua_predicted |> pillar::glimpse()
+#' @export
 "wua_predicted"

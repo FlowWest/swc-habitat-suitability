@@ -1,9 +1,11 @@
 #' @keywords internal
 "_PACKAGE"
-#' @import tidyr
-#' @import dplyr
-#' @import ggplot2
-#' @import zoo
+#' @import tidyverse
+#' @import sf
+#' @import future
+#' @import future.apply
+#' @import furrr
+
 ## usethis namespace: start
 ## usethis namespace: end
 NULL

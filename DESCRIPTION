@@ -17,13 +17,19 @@ Imports:
     tibble,
     purrr,
     readr,
+    lubridate,
     zoo,
     ggplot2,
+    sf,
+    terra,
     shiny,
     DT,
     parsnip,
     recipes,
     workflows,
     broom,
-    ranger
+    ranger,
+    future,
+    future.apply,
+    furrr
 RoxygenNote: 7.2.3

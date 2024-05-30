@@ -115,6 +115,7 @@ perpendicular_transects <- function(ls=sf::st_linestring(), length=numeric()) {
 #' cummean.na.rm(v)
 #'
 #' @export
+#' @keywords internal
 cummean.na.rm <- function(x) {
   idx <- cumsum(!is.na(x))
   x_filtered <- x[!is.na(x)]
@@ -124,27 +125,32 @@ cummean.na.rm <- function(x) {
 #' Semi Inverse Hyperbolic Sine Transform
 #'
 #' @export
+#' @keywords internal
 semiIHS <- function(x) asinh(x / 2)
 
 #' Semi Inverse Hyperbolic Sine Transform (Inverse)
 #'
 #' @export
+#' @keywords internal
 semiIHS_inv <- function(y) 2 * sinh(y)
 
 #' Semi Inverse Hyperbolic Sine Transform * 100
 #'
 #' @export
+#' @keywords internal
 semiIHS00 <- function(x) asinh(x * 100 / 2)
 
 #' Semi Inverse Hyperbolic Sine Transform * 100 (Inverse)
 #'
 #' @export
+#' @keywords internal
 semiIHS00_inv <- function(y) 2 * sinh(y) / 100
 
 
 #' Semi Inverse Hyperbolic Sine Transform (scales transformation for ggplot)
 #'
 #' @export
+#' @keywords internal
 trans_semiIHS <- scales::trans_new("semiIHS",
                                    transform = function(x) asinh(x / 2),
                                    inverse = function(y) 2 * sinh(y),
@@ -165,6 +171,7 @@ trans_semiIHS <- scales::trans_new("semiIHS",
 #' oom_range(9, 47000)
 #'
 #' @export
+#' @keywords internal
 oom_range <- function(from, to) {
   from_mag <- floor(log10(if (from > 0) from else 1))
   to_mag <- ceiling(log10(to))
@@ -186,6 +193,7 @@ oom_range <- function(from, to) {
 #' hex_color_blend("#55ad89", "#c3bc3f")
 #'
 #' @export
+#' @keywords internal
 hex_color_blend <- function(x, y){
   hex_r <- as.character.hexmode((strtoi(substr(x,2,3), base=16L) + strtoi(substr(y,2,3), base=16L)) / 2)
   hex_g <- as.character.hexmode((strtoi(substr(x,4,5), base=16L) + strtoi(substr(y,4,5), base=16L)) / 2)

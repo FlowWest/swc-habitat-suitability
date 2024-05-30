@@ -15,7 +15,9 @@ vignette: >
 knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>",
-  fig.path = "man/figures/statistical-model-"
+  base.dir = "./",
+  base.url = "./articles",
+  fig.path = "figures/statistical-model-"
 )
 ```
 
@@ -54,13 +56,19 @@ Additionally, all predictor variables were centered and scaled after transformat
 
 The length (linear ft) of each reach (`comid`) was applied as a case weight. Reaches vary substantially in length from several feet to 26 miles, with a mean length of 1.2 miles. Weighting the estimate by linear ft allows longer reaches to have greater influence on the model and makes the somewhat arbitrary `comid` delineations less relevant.
 
-```{r asinh-transform}
-x <- seq(-50,50)
-ggplot() + 
-  geom_line(aes(x=x, y=log(x), color="log(x)")) +
-  geom_line(aes(x=x, y=asinh(x), color="asinh(x)")) + 
-  geom_line(aes(x=x, y=asinh(x/2), color="asinh(x/2)")) + 
-  geom_hline(yintercept=0) + geom_vline(xintercept=0) + xlab("") + ylab("")
+```{r asinh-transform, echo=FALSE}
+x <- seq(-30, 30)
+ggplot2::ggplot() + 
+  ggplot2::geom_line(ggplot2::aes(x=x, y=log(x), color="log(x)"), linewidth=1) +
+  ggplot2::geom_line(ggplot2::aes(x=x, y=asinh(x/2), color="asinh(x/2)"), linewidth=1) + 
+  ggplot2::geom_line(ggplot2::aes(x=x, y=log(x), color="log(x)"), linetype="dashed", linewidth=1) +
+#  ggplot2::geom_line(ggplot2::aes(x=x, y=asinh(x), color="asinh(x)")) + 
+  ggplot2::geom_hline(yintercept=0) + 
+  ggplot2::geom_vline(xintercept=0) + 
+  ggplot2::xlab("") + 
+  ggplot2::ylab("") + 
+  ggplot2::theme_minimal() + 
+  ggplot2::theme(legend.title = ggplot2::element_blank())
 ```
 
 ### Three Model Versions Tested

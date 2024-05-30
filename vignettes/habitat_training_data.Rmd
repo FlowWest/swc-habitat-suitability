@@ -15,7 +15,9 @@ vignette: >
 knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>",
-  fig.path = "man/figures/training-data-"
+  base.dir = "./",
+  base.url = "./articles",
+  fig.path = "figures/training-data-"
 )
 ```
 
@@ -30,7 +32,7 @@ Depth and velocity outputs from existing two-dimensional hydraulic models were a
 | Stanislaus River | Knights Ferry to San Joaquin River confluence | 90,000 LF | NewFields | 2013 | SRH-2D | ___ - ___ cfs |
 | Tuolumne River | Basso-La Grange Reach | ___ LF | FlowWest | ___ | HEC-RAS 2D | ___ - ___ cfs |
 
-![](../man/figures/training_reaches.png){width=50%}
+![](figures/training_reaches.png){width=50%}
 
 The depth and velocity raster grids (for HEC-RAS 2D models) or vector meshes (for SRH-2D models) were divided up based on ComID reach delineations. Currently, this is a manual process that requires importing the model domain polygon into a GIS system, splitting it up into reaches, and assigning each reach a ComID number that corresponds to the overlapping NHDPlusV2 flowline.
 

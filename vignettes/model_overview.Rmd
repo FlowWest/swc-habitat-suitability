@@ -15,7 +15,9 @@ vignette: >
 knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>",
-  fig.path = "man/figures/model-overview-"
+  base.dir = "./",
+  base.url = "./articles",
+  fig.path = "figures/model-overview-"
 )
 ```
 
@@ -34,4 +36,4 @@ While the statistical model will produce predictions for any stream with valid p
 
 5. **Applying duration criteria**: Suitable habitat area predictions up to this point are based only on depth and velocity factors, but inundation duration is also a relevant factor. The perennially-inundated baseflow channel lacks sufficient food (invertebrates) for rearing juveniles and should be excluded regardless of depth and velocity. Meanwhile, channel areas that are inundated for only short periods of time have reduced habitat benefit as invertebrates have not had sufficient time to develop. R functions developed for this project will apply duration-based suitability criteria to an empirically or statistically derived flow-to-suitable-area curve by inputting (a) a water year hydrograph and/or (b) a flow threshold that defines the baseflow channel. These methods are defined in the [Duration Analysis](duration_analysis.html) article.
 
-![](../man/figures/flowchart.png){width=100%}
+![](figures/flowchart.png){width=100%}

@@ -15,7 +15,9 @@ vignette: >
 knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>",
-  fig.path = "man/figures/predictor-variables-"
+  base.dir = "./",
+  base.url = "./articles",
+  fig.path = "figures/predictor-variables-"
 )
 ```
 

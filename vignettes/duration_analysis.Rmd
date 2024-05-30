@@ -1,10 +1,12 @@
 ---
-title: "Modeling Approach"
+title: "Duration Analysis"
 author: "[Maddee Rubenson](mailto:mrubenson@flowwest.com) & [Skyler Lewis](slewis@flowwest.com)"
 date: "`r Sys.Date()`"
-output: rmarkdown::html_vignette
+output: 
+  rmarkdown::html_vignette:
+    default
 vignette: >
-  %\VignetteIndexEntry{Modeling Approach}
+  %\VignetteIndexEntry{Duration Analysis}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -12,6 +14,9 @@ vignette: >
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(
   collapse = TRUE,
-  comment = "#>"
+  comment = "#>",
+  base.dir = "./",
+  base.url = "./articles",
+  fig.path = "figures/duration-analysis-"
 )
 ```

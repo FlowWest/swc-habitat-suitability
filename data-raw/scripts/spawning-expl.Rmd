@@ -1,0 +1,208 @@
+---
+title: "Spawning Data Exploration"
+author: "[Skyler Lewis](mailto:slewis@flowwest.com)"
+date: "`r Sys.Date()`"
+output: 
+  github_document:
+    toc: true
+    toc_depth: 3
+    number_sections: false
+    math_method:
+      engine: webtex
+      url: https://latex.codecogs.com/svg.image?
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(sf)
+library(terra)
+```
+
+```{r import, message=FALSE, warning=FALSE}
+flowlines <- readRDS(here::here("data-raw", "results", "flowline_geometries_proj.Rds"))
+
+flowline_attributes <- readRDS(here::here("data-raw", "results", "flowline_attributes.Rds"))
+
+source(here::here("data-raw", "scripts", "data-functions.R"))
+```
+
+Potential spawning area = intersection of 
+
+* UCD PISCES habitat areas polygons - current and historic - cross checked against CVPIA spawning ranges
+* UCD eFlows geomorph classes that include gravel or step pool systems
+
+Examine existing redd surveys and define ranges of river gradients and other characteristics that predict spawning
+
+* https://catalog.data.gov/dataset/salmon-spawning-locations-redds-mapped-in-the-field-along-the-american-river-california-no
+
+Map the known redd locations like sailor bar
+
+### HQT gradient class and known spawning reaches
+
+```{r}
+valley_lowland <- 
+  readRDS(here::here("data-raw", "source", "hqt", "hqt_valley_lowland.Rds")) |> 
+  st_transform(project_crs) |> 
+  st_sf() |>
+  st_set_geometry("geometry") |>
+  mutate(hqt_gradient_class = "Valley Lowland")
+
+cvpia_extents <- 
+  read_sf(file.path("/vsizip", here::here("data-raw", "source", "rearing_spatial_data", "habitat_extents_combined_gradients_v3.shp.zip"))) |>
+  janitor::clean_names() |>
+  st_cast("LINESTRING") |>
+  st_transform(project_crs)
+
+cvpia_extents_spawning <-
+  cvpia_extents |> 
+  filter(habitat == "spawning")
+
+cvpia_extents_nhd <- 
+  read_sf(file.path("/vsizip", here::here("data-raw", "source", "rearing_spatial_data", "nhdplusv2_comid_habitat_xw.shp.zip"))) |>
+  st_zm() |>
+  janitor::clean_names() |>
+  st_cast("LINESTRING") |>
+  st_transform(project_crs)
+
+cvpia_extents_nhd_spawning <- 
+  cvpia_extents_nhd |> 
+  filter(str_detect(habitat, "spawning"))
+```
+
+```{r, fig.width=6, fig.height=6, dpi=300}
+ggplot() +
+  geom_sf(data = valley_lowland, color=NA, fill="lightgoldenrod") +
+  geom_sf(data = cvpia_extents, color="gray") +
+  geom_sf(data = cvpia_extents_spawning, color="black") +
+  geom_sf(data = cvpia_extents_spawning |> filter(species=="Spring Run Chinook"), color="red") 
+```
+
+### UCD eFlows Geomorph Classes
+
+```{r, fig.width=12, fig.height=12, dpi=300}
+#geomorph_class <- readRDS(here::here("data-raw", "results", "attr_geomorph_class.Rds"))
+geomorph_classes <- readRDS(here::here("data-raw", "results", "attr_geomorph_class.Rds"))
+geomorph_site_data <- readRDS(here::here("data-raw", "results", "geomorph_sites_ucd.Rds"))
+
+geomorph_selected_reaches <- 
+  flowlines |>
+  inner_join(geomorph_classes, by=join_by(comid)) |>
+  #filter(geomorph_class == "Unconfined, gravel-cobble, riffle-pool")
+  #filter(str_detect(geomorph_class, "riffle-pool") | 
+  #       str_detect(geomorph_class, "gravel") | 
+  #       str_detect(geomorph_class, "low-gradient step-pool")) |>
+  # for display purposes
+  filter(comid %in% filter(flowline_attributes, da_area_sq_km > 50)$comid) 
+
+ggplot() +
+  geom_sf(data = valley_lowland, color=NA, fill="lightgoldenrod") +
+  geom_sf(data = cvpia_extents, color="gray") +
+  geom_sf(data = geomorph_selected_reaches, aes(color=geomorph_class)) +
+  geom_sf(data = geomorph_site_data, aes(fill=geomorph_class), shape=21) +
+  scale_fill_brewer(type="qual", palette="Paired", aesthetics = c("fill", "color")) +
+  geom_sf(data = cvpia_extents_spawning |> st_line_sample(sample=c(0, 1)), color="black", size=1, shape=15)
+```
+
+```{r fig.width=12, fig.height=12, dpi=300}
+# breakdown of geomorph classes of geomorph sites that are within spawning reaches
+spawning_reach_geomorph_sites <- 
+  geomorph_site_data |> 
+  filter(comid %in% cvpia_extents_nhd_spawning$comid) 
+
+spawning_reach_geomorph_sites |>
+  st_drop_geometry() |>
+  group_by(geomorph_class) |>
+  summarize(count = n()) |>
+  arrange(-count)
+
+# breakdown of spawning reaches by predicted geomorph class
+spawning_reach_geomorph_classes <- 
+  cvpia_extents_nhd_spawning |>
+  left_join(geomorph_classes) 
+
+spawning_reach_geomorph_classes |>
+  st_drop_geometry() |>
+  group_by(geomorph_class) |>
+  summarize(total_mi = sum(lengthkm) * 1000 / 0.3048 / 5280) |>
+  arrange(-total_mi)
+
+# plot
+ggplot() + 
+  geom_sf(data = spawning_reach_geomorph_classes, aes(color = geomorph_class)) + 
+  geom_sf(data = spawning_reach_geomorph_sites, aes(fill = geomorph_class), shape=21) + 
+  scale_fill_brewer(type="qual", palette="Paired", aesthetics = c("fill", "color"))
+```
+
+### Filter by Gradient and Elevation
+
+```{r}
+cvpia_extents_nhd_spawning |>
+  left_join(flowline_attributes) |>
+  ggplot() + 
+  geom_histogram(data=flowline_attributes, aes(x = slope, y = (after_stat(count / sum(count)))), alpha=0.5) + 
+  geom_histogram(aes(x = slope, y = (after_stat(count / sum(count)))), fill="red", alpha=0.5) + 
+  scale_x_log10() + 
+  annotation_logticks(sides="b") + 
+  geom_vline(aes(xintercept = 1E-02), linetype="dashed") +
+  theme(panel.grid.minor = element_blank())
+
+cvpia_extents_nhd_spawning |>
+  left_join(flowline_attributes) |>
+  ggplot() + 
+  geom_histogram(data=flowline_attributes, aes(x = da_elev_min, y = (after_stat(count / sum(count)))), alpha=0.5) + 
+  geom_histogram(aes(x = da_elev_min, y = (after_stat(count / sum(count)))), fill="red", alpha=0.5) +
+  scale_x_log10() + 
+  annotation_logticks(sides="b") + 
+  geom_vline(aes(xintercept = 300), linetype="dashed") +
+  theme(panel.grid.minor = element_blank())
+
+cvpia_extents_nhd_spawning |>
+  left_join(flowline_attributes) |>
+  ggplot() + 
+  geom_histogram(data=flowline_attributes, aes(x = da_area_sq_km, y = (after_stat(count / sum(count)))), alpha=0.5) + 
+  geom_histogram(aes(x = da_area_sq_km, y = (after_stat(count / sum(count)))), fill="red", alpha=0.5) + 
+  scale_x_log10() + 
+  annotation_logticks(sides="b") + 
+  geom_vline(aes(xintercept = 1E02), linetype="dashed") +
+  theme(panel.grid.minor = element_blank())
+
+```
+
+
+
+## Combine all filters
+
+
+```{r}
+lyr <- flowlines |>
+  left_join(flowline_attributes) |>
+  filter(range_cvchinook_extant) |> 
+  filter(hqt_gradient_class != "Valley Lowland")  |>
+  filter(str_detect(geomorph_class, "riffle-pool") | 
+         str_detect(geomorph_class, "gravel") | 
+         str_detect(geomorph_class, "low-gradient step-pool")) |>
+  filter(slope <= 1E-2)
+  #filter(comid %in% filter(flowline_attributes, range_cvchinook_extant)$comid) |>
+  #filter(comid %in% filter(flowline_attributes, hqt_gradient_class != "Valley Lowland")$comid) |>
+  #filter(comid %in% filter(geomorph_class, geomorph_gravel)$comid) |>
+  #filter(comid %in% filter(flowline_attributes, da_area_sq_km > 10)$comid) |>
+  #filter(comid %in% filter(flowline_attributes, slope*100 >= 0.05 & slope*100 <= 0.4)$comid) |>
+# |>
+  #filter(comid %in% filter(flowline_attributes, da_area_sq_km > 50)$comid) #|>
+ # filter(comid %in% filter(flowline_attributes, slope <= 1E-2)$comid)# |>
+  #filter(comid %in% filter(flowline_attributes, hqt_gradient_class != "Valley Lowland")$comid)
+
+#leaflet::leaflet() |> leaflet::addPolylines(data=lyr)
+```
+
+
+```{r}
+ggplot() +
+  geom_sf(data=cvpia_extents, color="gray") +
+  geom_sf(data=lyr, color="red") +
+  geom_sf(data=cvpia_extents_spawning |> st_line_sample(sample=c(0, 1)), color="black", size=0.5) 
+```
+
+
+
+

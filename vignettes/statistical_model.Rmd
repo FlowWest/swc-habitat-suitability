@@ -1,0 +1,156 @@
+---
+title: "Statistical Model Development, Training, and Prediction"
+author: "[Maddee Rubenson](mailto:mrubenson@flowwest.com) & [Skyler Lewis](slewis@flowwest.com)"
+date: "`r Sys.Date()`"
+output: 
+  rmarkdown::html_vignette:
+    default
+vignette: >
+  %\VignetteIndexEntry{Statistical Model Development, Training, and Prediction}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  base.dir = "./",
+  base.url = "./articles",
+  fig.path = "figures/statistical-model-"
+)
+```
+
+## 
+
+We are currently developing and refining a statistical model to predict flow-to-suitable-habitat-area relationships for stream reaches in the Sacramento-San Joaquin Basin, based on a variety of widely-available geospatial and hydrologic variables. Predictor variable data collection is detailed in the [Predictor Variables](predictor_variables.html) article.
+
+## Model Development
+
+### General Model Form
+
+In practice, suitable habitat area is modeled as a function of flow, the suite of predictor variables, and the interactions between each predictor variable and flow. As applied in a linear regression model, the general functional form for the model is as follows. The use of the interaction terms allows the model to estimate not only the average effect of each predictor variable on suitable area, but also the effect of each predictor variable on the flow-to-suitable-area relationship.
+
+$\mathbf{h} = \alpha + \beta\mathbf{q} + \pmb{\gamma}\mathbf{X} + \pmb{\delta}\mathbf{q}\mathbf{X} + \epsilon$
+
+-   $\mathbf{h}$ = suitable habitat area, WUA per linear ft (response variable)
+-   $\mathbf{q}$ = streamflow (cfs)
+-   $\mathbf{X}$ = matrix of predictor variables (slope, drainage area, etc.)
+-   $\alpha$ = estimated intercept
+-   $\beta$ = estimated coefficient on flow (i.e. constant effect of flow on habitat)
+-   $\pmb{\gamma}$ = estimated coefficients of predictor variables (i.e., constant effect of each predictor on habitat)
+-   $\pmb{\delta}$ = estimated coefficients of interactions (i.e., effect of each predictor on the flow-to-habitat relationship)
+-   $\epsilon$ = error term
+
+Expressed without using matrix notation, the model estimate for each NHD ComID reach $i$ and flow $q$ is...
+
+${SuitableHabitatArea}_{i,q} = \alpha + \beta{Flow}_{q} + \gamma_1{Slope}_{i} + \delta_1{Flow}_{q}{Slope}_{i} + \gamma_2{DrainageArea}_{i} + \delta_2{Flow}_{q}{DrainageArea}_{i} + ... + \epsilon$
+
+... and so on for all other predictor variables with estimated coefficients $\gamma_3$, $\delta_3$, $\gamma_4$, $\delta_4$, etc.
+
+### Transformations and Weights
+
+We originally log-transformed the habitat, flow, and predictor variables for three reasons: (a) to limit the effect of extreme values; (b) to align with typical hydrologic conventions of using power series models; and (c) for interpretability because log-log model coefficients represent elasticities ("percent change in y per percent change in x). Because some predictor variables include values less than or equal to zero, the log transformation was replaced with a variation on the inverse hyperbolic sine (asinh) transformation. Because $\mathrm{asinh}(x) = \ln(x + \sqrt{x^2+1})$, this transformation behaves like a log transformation for positive values ($\mathrm{asinh}(x) \rightarrow \ln(2x) \text{ as } x \rightarrow \infty$) but remains defined for zero values and has a comparable, mirrored shape for negative values.
+
+Additionally, all predictor variables were centered and scaled after transformations were applied.
+
+The length (linear ft) of each reach (`comid`) was applied as a case weight. Reaches vary substantially in length from several feet to 26 miles, with a mean length of 1.2 miles. Weighting the estimate by linear ft allows longer reaches to have greater influence on the model and makes the somewhat arbitrary `comid` delineations less relevant.
+
+```{r asinh-transform, echo=FALSE}
+x <- seq(-30, 30)
+ggplot2::ggplot() + 
+  ggplot2::geom_line(ggplot2::aes(x=x, y=log(x), color="log(x)"), linewidth=1) +
+  ggplot2::geom_line(ggplot2::aes(x=x, y=asinh(x/2), color="asinh(x/2)"), linewidth=1) + 
+  ggplot2::geom_line(ggplot2::aes(x=x, y=log(x), color="log(x)"), linetype="dashed", linewidth=1) +
+#  ggplot2::geom_line(ggplot2::aes(x=x, y=asinh(x), color="asinh(x)")) + 
+  ggplot2::geom_hline(yintercept=0) + 
+  ggplot2::geom_vline(xintercept=0) + 
+  ggplot2::xlab("") + 
+  ggplot2::ylab("") + 
+  ggplot2::theme_minimal() + 
+  ggplot2::theme(legend.title = ggplot2::element_blank())
+```
+
+### Three Model Versions Tested
+
+Three forms of the model were tested, discussed in sequence in the following sections.
+
+#### Model Version 1: Habitat Area/LF vs Flow
+
+This is the simplest and most straightforward version of the model. 
+
+> **Habitat variable**: Suitable habitat area (WUA) per linear ft, aka "effective habitat width"
+>
+> **Flow variable**: Flow (cfs)
+>
+> **Predictor variables**:
+>
+> -   **Reach characteristics**: slope, bankfull depth, bankfull width-depth ratio, baseflow index, % clay, % sand, permeability, depth to bedrock, mean annual precipitation, MTPI (topographic position index), valley bottom width, valley bottom-bankfull width ratio, fractional levee confinement, channel sinuosity
+> -   **Catchment characteristics**: drainage area, mean elevation, mean annual precipitation, avg erodibility, avg slope, avg NDVI
+>
+> **Transformations**:
+>
+> -   Inverse hyperbolic sine
+> -   Interaction between slope and drainage area
+> -   Center and scale all predictors
+>
+> **Model forms**: Linear regression; Random forest regression
+
+#### Model Version 2: Normalized Habitat Area/LF vs Normalized Flow
+
+This model is a variation on Version 1. It is intended to deal with the problem of differing ranges of flows across training datasets on account of the differing sizes of the river systems. 
+
+A scalar was defined for each reach (`comid`), representing the magnitude of flow in the watershed. A product of the drainage area and mean annual precipitation with units of million acre feet (Maf), this value represents the average quantity of water input into the reach's catchment in a year:
+
+${Scalar [\mathrm{Maf}]} = 10^{-6} \times {DA [\mathrm{ac}]} \times {MAP [\mathrm{ft}]}$
+
+The habitat and flow variables are multiplied by this scalar prior to prediction, then divided by the scalar after prediction. 
+
+> **Habitat variable**: Suitable habitat area (WUA) per linear ft **normalized by DA\*MAP**
+>
+> **Flow variable**: Flow (cfs) **normalized by DA\*MAP**
+>
+> **Predictor variables**:
+>
+> -   **Reach characteristics**: slope, ~~bankfull depth~~, bankfull width-depth ratio, baseflow index, % clay, % sand, permeability, depth to bedrock, ~~mean annual precipitation~~, MTPI (topographic position index), valley bottom width, valley bottom-bankfull width ratio, fractional levee confinement, channel sinuosity
+> -   **Catchment characteristics**: drainage area, mean elevation, mean annual precipitation, avg erodibility, avg slope, avg NDVI
+>
+> **Transformations**:
+>
+> -   Inverse hyperbolic sine
+> -   ~~Interaction between slope and drainage area~~
+> -   Center and scale all predictors
+>
+> **Model forms**: Linear regression; Random forest regression
+
+Compared to Version 1, the normalized Version 2 model creates flow-to-suitable-area curves that are more strongly proportional to the size of the river.
+
+#### Model Version 3: (Total Area/LF vs Flow) \* (% Habitat vs Normalized Flow)
+
+...details here...
+
+## Linear Regression Results
+
+-   Doesn't produce a great fit, but useful for exploring effects of predictor variables
+
+-   Collinearity between variables is not addressed as this is only exploratory
+
+## Random Forest Regression
+
+Random Forest Regression is a decision tree based machine learning alternative to linear regression. The model specifications are essentially identical to the linear regression formulations previously dicsussed. Unlike linear regression, there is no constraint on the functional form of the flow-to-habitat relationship or the effects of predictor variables. 
+
+### Model Results
+
+## Predictions
+
+### Overview
+
+### By
+
+## Functional Regression
+
+Conceptually, we are thinking of suitable area to flow relationship is a function of a suite of predictor variables.
+
+3.  **Training statistical model**: The hydraulically modeled flow-to-suitable-area relationships developed for reaches in Step 2 are joined to the reach predictor variable table from Step 1. This dataset (one observation per flow per reach) is then used to train a statistical model that can be used to predict flow-to-suitable-area curves for reaches that are not hydraulically modeled. Random Forest Regression, a decision tree-based machine learning approach, allows for non-linear relationships between suitable habitat, flow, and the array of predictor variables. The model development process is detailed in the [Statistical Model](statistical_model.html) article.
+
+4.  **Predicting habitat output**: The trained statistical model can now be used to predict flow-to-suitable-area relationships for other streams within the study area. While the statistical model will produce predictions for any stream with valid predictor data, the validity and trustworthiness of predictions will depend on those streams' similarity to the training dataset. As training datasets are currently limited to foothill alluvial systems on major tributary streams, only these should be considered valid. The prediction process is detailed in the [Statistical Model](statistical_model.html) article, and *preliminary* flow-to-suitable-habitat predictions are included in the data package [Map App](https://flowwest.shinyapps.io/habistat/).

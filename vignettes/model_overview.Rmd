@@ -1,0 +1,39 @@
+---
+title: "Model Overview"
+author: "[Maddee Rubenson](mailto:mrubenson@flowwest.com) & [Skyler Lewis](slewis@flowwest.com)"
+date: "`r Sys.Date()`"
+output: 
+  rmarkdown::html_vignette:
+    default
+vignette: >
+  %\VignetteIndexEntry{Model Overview}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  base.dir = "./",
+  base.url = "./articles",
+  fig.path = "figures/model-overview-"
+)
+```
+
+## Rearing Model Overview
+
+The modeling method consists of the following fundamental steps:
+
+1.  **Predictor variable preparation**: A variety of hydrologic and geospatial attributes were collected for all stream reaches within the study area (the Sacramento and San Joaquin river basins, HUC-4 hydrologic subregions 1802 and 1804). The basis of stream reach delineation is the ComID reach as defined in [NHDPlusV2](https://nhdplus.com/NHDPlus/NHDPlusV2_home.php). Attributes include local characteristics like stream gradient, sinuosity, and depth to bedrock; upstream drainage characteristics like drainage area size, elevation, mean annual precipitation, and soil erodibility; and custom modeled confinement measures like topographic position index (mTPI) and levee confinement. These are discussed further in the [Predictor Variables](predictor_variables.html) article. 
+
+2.  **Hydraulic model training data preparation**: Depth and velocity outputs from existing two-dimensional hydraulic models were assembled for "training reaches" within the study area, at a variety of flows. The depth and velocity raster grids (for HEC-RAS 2D models) or vector meshes (for SRH-2D models) were divided up based on ComID reach delineations. A habitat suitability index was applied based on depth and velocity values (e.g. 1 if a cell is within suitable depth and velocity range, else 0). Then, habitat suitability was summarized for each reach, at each flow, into a measure of total suitable habitat area per linear foot of channel (aka WUA/LF), for each flow. The result is a flow-to-suitable-area curve for each reach in the training dataset, normalized by linear feet to be independent of arbitrary reach length. The habitat suitability process and datasets are discussed further in the [Habitat Training Data](habitat_training_data.html) article. 
+
+3. **Training statistical model**: The hydraulically modeled flow-to-suitable-area relationships developed for reaches in Step 2 are joined to the reach predictor variable table from Step 1. This dataset (one observation per flow per reach) is then used to train a statistical model that can be used to predict flow-to-suitable-area curves for reaches that are not hydraulically modeled. Random Forest Regression, a decision tree-based machine learning approach, allows for non-linear relationships between suitable habitat, flow, and the array of predictor variables. The model development process is detailed in the [Statistical Model](statistical_model.html) article.
+
+4. **Predicting habitat output**: The trained statistical model can now be used to predict flow-to-suitable-area relationships for other streams within the study area.
+While the statistical model will produce predictions for any stream with valid predictor data, the validity and trustworthiness of predictions will depend on those streams' similarity to the training dataset. As training datasets are currently limited to foothill alluvial systems on major tributary streams, only these should be considered valid. The prediction process is detailed in the [Statistical Model](statistical_model.html) article, and *preliminary* flow-to-suitable-habitat predictions are included in the data package [Map App](https://flowwest.shinyapps.io/habistat/).  
+
+5. **Applying duration criteria**: Suitable habitat area predictions up to this point are based only on depth and velocity factors, but inundation duration is also a relevant factor. The perennially-inundated baseflow channel lacks sufficient food (invertebrates) for rearing juveniles and should be excluded regardless of depth and velocity. Meanwhile, channel areas that are inundated for only short periods of time have reduced habitat benefit as invertebrates have not had sufficient time to develop. R functions developed for this project will apply duration-based suitability criteria to an empirically or statistically derived flow-to-suitable-area curve by inputting (a) a water year hydrograph and/or (b) a flow threshold that defines the baseflow channel. These methods are defined in the [Duration Analysis](duration_analysis.html) article.
+
+![](figures/flowchart.png){width=100%}

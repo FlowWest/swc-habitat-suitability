@@ -2,8 +2,9 @@ library(tidyverse)
 library(sf)
 library(terra)
 
-source(here::here("data-raw", "scripts", "data-functions.R"))
-source(here::here("data-raw", "scripts", "suitability-functions.R"))
+#source(here::here("data-raw", "scripts", "data-functions.R"))
+#source(here::here("data-raw", "scripts", "suitability-functions.R"))
+library(habistat)
 
 flowlines <- readRDS(here::here("data-raw", "results", "flowline_geometries_proj.Rds"))
 
@@ -49,7 +50,7 @@ if(!file.exists(outpath)) {
 
   basso_result <- basso_rast |>
     raster_summarize_hsi(basso_groups, .group_var = comid) |>
-    postprocess(basso_groups, .group_var = comid)
+    suitability_postprocess(basso_groups, .group_var = comid)
 
   basso_result |> saveRDS(outpath)
 
@@ -58,6 +59,10 @@ if(!file.exists(outpath)) {
   basso_result <- readRDS(outpath)
 
 }
+
+#readRDS(here::here("data-raw", "results", "fsa_basso.Rds")) |>
+#  mutate(flow_cfs = as.numeric(flow_cfs)) |>
+#  saveRDS(here::here("data-raw", "results", "fsa_basso.Rds"))
 
 # DEER CREEK -------------------------------------------------------------------
 
@@ -104,7 +109,7 @@ if(!file.exists(outpath)) {
 
   deer_result <- deer_rast |>
     raster_summarize_hsi(deer_groups, .group_var = comid, parallel = FALSE) |>
-    postprocess(deer_groups, .group_var = comid)
+    suitability_postprocess(deer_groups, .group_var = comid)
 
   deer_result |> saveRDS(outpath)
 

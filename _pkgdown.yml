@@ -6,8 +6,43 @@ authors:
     href: mailto:slewis@flowwest.com
 navbar:
   structure:
-    left:  [reference, articles, maplink]
+    left:  [articles, reference, maplink]
+    right: [search]
   components:
     maplink:
       href: https://flowwest.shinyapps.io/habistat/
       text: "Interactive Map"
+articles:
+- title: Articles
+  navbar: ~
+  contents:
+  - model_overview
+  - habitat_training_data
+  - predictor_variables
+  - statistical_model
+  - duration_analysis
+reference:
+- title: "Datasets"
+  desc: "Packaged Datasets"
+  contents:
+  - starts_with("flowline_")
+  - starts_with("wua_")
+- title: "Suitability Functions"
+  desc: "..."
+  contents:
+  - starts_with("vector_")
+  - starts_with("raster_")
+  - starts_with("suitability_")
+- title: "Duration Time Series Functions"
+  desc: "..."
+  contents:
+  - starts_with("cdec_csv_")
+  - starts_with("duration_")
+  - starts_with("flow_threshold_")
+- title: "Other"
+  desc: "Used Internally"
+  contents:
+  - starts_with("const_")
+  - starts_with("linterp")
+  - starts_with("drive_file_by_id")
+  - starts_with("perpendicular_")

@@ -274,7 +274,7 @@ raster_first_inundating_flow <- function(rasters) {
 # Prep Flowlines Helper Function -----------------------------------------------
 # Extract NHD flowlines that correspond to polys and calculate length
 
-prep_flowlines <- function(group_polygons, .group_var = comid) {
+suitability_prep_flowlines <- function(group_polygons, .group_var = comid) {
 
   flowlines <- readRDS(here::here("data-raw", "results", "flowline_geometries_proj.Rds"))
   # TODO: Update this reference to flowline data to use the packaged flowline data
@@ -291,9 +291,9 @@ prep_flowlines <- function(group_polygons, .group_var = comid) {
 
 # Postprocess raster, adding reach lengths -------------------------------------
 
-postprocess <- function(result_tbl, group_polygons, .group_var = comid) {
+suitability_postprocess <- function(result_tbl, group_polygons, .group_var = comid) {
 
-  flowlines_prepped <- group_polygons |> prep_flowlines(.group_var = {{.group_var}})
+  flowlines_prepped <- group_polygons |> suitability_prep_flowlines(.group_var = {{.group_var}})
 
   result_tbl |>
     left_join(st_drop_geometry(flowlines_prepped),

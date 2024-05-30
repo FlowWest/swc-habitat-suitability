@@ -1,7 +1,7 @@
 Predictor Data Prep: Geomorphology and Soils
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-04-26
+2024-05-23
 
 - [Soils](#soils)
 - [UCD Geomorphology classes
@@ -121,15 +121,22 @@ geomorph_site_data <-
     ## ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
 
 ``` r
-geomorph_site_data |> ggplot() + geom_sf(aes(color=geomorph_class))
+geomorph_site_data |> 
+  ggplot() + 
+  geom_sf(aes(color=geomorph_class)) + 
+  geom_sf(data=flowlines_sac_valley_major, color="darkgray")
 ```
 
 ![](geomorph_files/figure-gfm/geomorph-data-import-1.png)<!-- -->
 
 ``` r
+geomorph_site_data |> select(comid, starts_with("geomorph_")) |>
+  saveRDS(here::here("data-raw", "results", "geomorph_sites_ucd.Rds"))
+
 flowlines_gcs |> 
   inner_join(geomorph_site_data |> st_drop_geometry()) |> 
-  ggplot() + geom_sf(aes(color=geomorph_class))
+  ggplot() + geom_sf(aes(color=geomorph_class)) + 
+  scale_fill_brewer(type="qual", palette="Paired", aesthetics = c("fill", "color"))
 ```
 
     ## Joining with `by = join_by(comid)`
@@ -137,20 +144,88 @@ flowlines_gcs |>
 ![](geomorph_files/figure-gfm/geomorph-data-import-2.png)<!-- -->
 
 ``` r
-geomorph_training_data <- 
+geomorph_attr <- 
   geomorph_site_data |>
   left_join(flowline_attributes |> select(-starts_with("geomorph_")), by=join_by(comid)) |>
+  mutate(geomorph_confined = str_split_i(geomorph_class, ", ", 1) |> as_factor(),
+         geomorph_uniform = str_detect(geomorph_class, "uniform"),
+         geomorph_steppool = str_detect(geomorph_class, "step-pool"), 
+         geomorph_riffles = str_detect(geomorph_class, "riffle"),
+         geomorph_gravel = str_detect(geomorph_class, "gravel"),
+         geomorph_spawning = (geomorph_riffles | geomorph_steppool)) 
+```
+
+    ## Warning in sf_column %in% names(g): Detected an unexpected many-to-many relationship between `x` and `y`.
+    ## ℹ Row 4 of `x` matches multiple rows in `y`.
+    ## ℹ Row 29868 of `y` matches multiple rows in `x`.
+    ## ℹ If a many-to-many relationship is expected, set `relationship =
+    ##   "many-to-many"` to silence this warning.
+
+``` r
+geomorph_attr |>
+  ggplot() +
+  geom_point(aes(x = slope*100, y = da_area_sq_km, color = geomorph_riffles)) + 
+  scale_x_log10() + scale_y_log10() + annotation_logticks() +
+  theme(panel.grid.minor = element_blank()) 
+```
+
+![](geomorph_files/figure-gfm/unnamed-chunk-1-1.png)<!-- -->
+
+``` r
+geomorph_attr |>
+  ggplot() +
+  geom_point(aes(x = slope*100, y = da_area_sq_km, color = geomorph_class)) + 
+  scale_x_log10() + scale_y_log10() + annotation_logticks() +
+  theme(panel.grid.minor = element_blank()) 
+```
+
+![](geomorph_files/figure-gfm/unnamed-chunk-1-2.png)<!-- -->
+
+``` r
+geomorph_training_data <- 
+  geomorph_site_data |>
+  left_join(flowline_attributes |> select(-starts_with("geomorph_")), by=join_by(comid), relationship="many-to-many") |>
   select(comid, geomorph_class, geomorph_class_num,
-         da_area_sq_km, slope, bf_depth_m, bf_width_m, bf_w_d_ratio,  
-         mtpi30_min, loc_k_erodibility, sinuosity, da_elev_mean, da_ppt_mean_mm, 
-         ) |>
+         slope, da_area_sq_km, da_elev_min, da_elev_max, da_elev_rel, da_ppt_mean_mm, mtpi30_min, hqt_gradient_class, hyd_cls) |>
   drop_na() |>
+  filter(slope>1E-5) |>
   st_drop_geometry()
 
+pca <- princomp(scale(geomorph_training_data |> select(-comid, -starts_with("geomorph_"), -hqt_gradient_class, -hyd_cls)))
+factoextra::fviz_eig(pca, choice="variance", addlabels = TRUE)
+```
+
+![](geomorph_files/figure-gfm/geomorph-fill-gaps-train-1.png)<!-- -->
+
+``` r
+factoextra::fviz_pca_var(pca, axes=c(1,2), col.var = "cos2", repel = TRUE)
+```
+
+![](geomorph_files/figure-gfm/geomorph-fill-gaps-train-2.png)<!-- -->
+
+``` r
+factoextra::fviz_pca_var(pca, axes=c(1,3), col.var = "cos2", repel = TRUE)
+```
+
+![](geomorph_files/figure-gfm/geomorph-fill-gaps-train-3.png)<!-- -->
+
+``` r
+factoextra::fviz_pca_var(pca, axes=c(1,4), col.var = "cos2", repel = TRUE)
+```
+
+![](geomorph_files/figure-gfm/geomorph-fill-gaps-train-4.png)<!-- -->
+
+``` r
 geomorph_rec <- 
-  recipe(geomorph_class ~ da_area_sq_km + slope + bf_depth_m + bf_width_m + bf_w_d_ratio + 
-         mtpi30_min + loc_k_erodibility + sinuosity + da_elev_mean + da_ppt_mean_mm,
-         data=geomorph_training_data)
+  recipe(geomorph_class ~ slope + da_area_sq_km + da_elev_min + da_elev_max + da_elev_rel + da_ppt_mean_mm + mtpi30_min + hqt_gradient_class + hyd_cls,
+         data=geomorph_training_data) |>
+  #step_log(all_numeric_predictors()) |>#, -mtpi30_min) |>
+  step_mutate_at(all_numeric_predictors(), fn = asinh) |>
+  step_normalize(all_numeric_predictors()) |>
+  step_pca(all_numeric_predictors(), num_comp = 4) |>
+  step_dummy(hqt_gradient_class) |>
+  step_dummy(hyd_cls) |>
+  step_naomit()
 
 geomorph_spec <- rand_forest(mode = "classification", trees = 256)
 
@@ -159,15 +234,16 @@ geomorph_fit <-
   add_recipe(geomorph_rec) |>
   add_model(geomorph_spec) |>
   fit(data=geomorph_training_data)
+```
 
+``` r
 geomorph_prediction_data <- flowlines_gcs |>
   left_join(flowline_attributes, by=join_by(comid)) |>
-  filter(substr(reachcode,1, 4) %in% c("1802", "1803", "1804", "1805")) |>
+  filter(substr(reachcode,1, 4) %in% c("1802", "1803", "1804")) |>
   select(comid, 
-         da_area_sq_km, slope, bf_depth_m, bf_width_m, bf_w_d_ratio,  
-         mtpi30_min, loc_k_erodibility, sinuosity, da_elev_mean, da_ppt_mean_mm
-         ) |>
+         slope, da_area_sq_km, da_elev_min, da_elev_max, da_elev_rel, da_ppt_mean_mm, hqt_gradient_class, hyd_cls, mtpi30_min) |>
   drop_na() |>
+ # filter(da_elev_min > 0) |>
   st_drop_geometry()
   
 geomorph_pred <- 
@@ -177,49 +253,96 @@ geomorph_pred <-
          geomorph_uniform = str_detect(geomorph_class, "uniform"),
          geomorph_steppool = str_detect(geomorph_class, "step-pool"), 
          geomorph_riffles = str_detect(geomorph_class, "riffle"),
-         geomorph_gravel = str_detect(geomorph_class, "gravel"))
-
-geomorph_pred |> select(comid, geomorph_class) |> 
-  saveRDS(here::here("data-raw", "results", "attr_geomorph_class.Rds"))
+         geomorph_gravel = str_detect(geomorph_class, "gravel"),
+         geomorph_spawning = (geomorph_riffles | geomorph_steppool))
   
 flowlines_gcs |> 
   inner_join(geomorph_pred, by=join_by(comid)) |> 
-  ggplot() + geom_sf(aes(color=geomorph_class))
+  ggplot() + geom_sf(aes(color=geomorph_class)) + 
+  scale_fill_brewer(type="qual", palette="Paired", aesthetics = c("fill", "color"))
 ```
 
-![](geomorph_files/figure-gfm/geomorph-fill-gaps-1.png)<!-- -->
+![](geomorph_files/figure-gfm/geomorph-fill-gaps-predict-1.png)<!-- -->
 
 ``` r
-flowlines_gcs |> 
-  inner_join(geomorph_pred, by=join_by(comid)) |> 
-  ggplot() + geom_sf(aes(color=geomorph_confined))
+# validation matrix
+geomorph_training_data |>
+  select(comid, geomorph_class_actual=geomorph_class) |>
+  inner_join(geomorph_pred |> select(comid, geomorph_class_pred=geomorph_class)) |>
+  group_by(geomorph_class_actual, geomorph_class_pred) |>
+  tally() |> 
+  mutate(n=coalesce(n,0)) |>
+  spread(geomorph_class_actual, n) |>
+  knitr::kable()
 ```
 
-![](geomorph_files/figure-gfm/geomorph-fill-gaps-2.png)<!-- -->
+    ## Joining with `by = join_by(comid)`
+
+    ## Warning in inner_join(select(geomorph_training_data, comid, geomorph_class_actual = geomorph_class), : Detected an unexpected many-to-many relationship between `x` and `y`.
+    ## ℹ Row 4 of `x` matches multiple rows in `y`.
+    ## ℹ Row 1579 of `y` matches multiple rows in `x`.
+    ## ℹ If a many-to-many relationship is expected, set `relationship =
+    ##   "many-to-many"` to silence this warning.
+
+| geomorph_class_pred                                                    | Unconfined, boulder-bedrock, bed undulating | Confined, boulder, high gradient, step-pool/cascade | Confined, boulder-bedrock, uniform | Confined, boulder-bedrock, low-gradient step-pool | Confined, gravel-cobble, uniform | Partly-confined, low width-to-depth ratio, gravel-cobble, riffle-pool | Partly-confined, cobble-boulder, uniform | Partly-confined, high width-to-depth ratio, gravel-cobble, riffle-pool | Unconfined, low width-to-depth ratio, gravel | Unconfined, gravel-cobble, riffle-pool |
+|:-----------------------------------------------------------------------|--------------------------------------------:|----------------------------------------------------:|-----------------------------------:|--------------------------------------------------:|---------------------------------:|----------------------------------------------------------------------:|-----------------------------------------:|-----------------------------------------------------------------------:|---------------------------------------------:|---------------------------------------:|
+| Unconfined, boulder-bedrock, bed undulating                            |                                           3 |                                                  NA |                                 NA |                                                NA |                               NA |                                                                    NA |                                       NA |                                                                     NA |                                           NA |                                     NA |
+| Confined, boulder, high gradient, step-pool/cascade                    |                                          NA |                                                  29 |                                  2 |                                                 1 |                               NA |                                                                    NA |                                       NA |                                                                     NA |                                           NA |                                      1 |
+| Confined, boulder-bedrock, uniform                                     |                                          NA |                                                   3 |                                 76 |                                                 5 |                               NA |                                                                     2 |                                        4 |                                                                      1 |                                           NA |                                     NA |
+| Confined, boulder-bedrock, low-gradient step-pool                      |                                          NA |                                                   2 |                                  2 |                                                35 |                                1 |                                                                    NA |                                       NA |                                                                      1 |                                           NA |                                     NA |
+| Confined, gravel-cobble, uniform                                       |                                          NA |                                                  NA |                                  2 |                                                NA |                               39 |                                                                     2 |                                       NA |                                                                      1 |                                           NA |                                     NA |
+| Partly-confined, low width-to-depth ratio, gravel-cobble, riffle-pool  |                                           1 |                                                   2 |                                  2 |                                                NA |                                3 |                                                                    45 |                                        3 |                                                                      4 |                                            2 |                                      2 |
+| Partly-confined, cobble-boulder, uniform                               |                                          NA |                                                  NA |                                  1 |                                                 1 |                                2 |                                                                    NA |                                       40 |                                                                      3 |                                           NA |                                     NA |
+| Partly-confined, high width-to-depth ratio, gravel-cobble, riffle-pool |                                          NA |                                                  NA |                                 NA |                                                NA |                                2 |                                                                    NA |                                       NA |                                                                     21 |                                           NA |                                     NA |
+| Unconfined, low width-to-depth ratio, gravel                           |                                          NA |                                                  NA |                                 NA |                                                NA |                               NA |                                                                     1 |                                       NA |                                                                     NA |                                           39 |                                     NA |
+| Unconfined, gravel-cobble, riffle-pool                                 |                                          NA |                                                  NA |                                 NA |                                                NA |                               NA |                                                                    NA |                                       NA |                                                                     NA |                                            1 |                                     18 |
 
 ``` r
-flowlines_gcs |> 
-  inner_join(geomorph_pred, by=join_by(comid)) |> 
-  ggplot() + geom_sf(aes(color=geomorph_steppool))
+ggplot() +
+  geom_point(data=geomorph_pred, aes(y = slope, x = da_area_sq_km, color = geomorph_class), size=0.25) + 
+  geom_point(data=geomorph_attr, aes(y = slope, x = da_area_sq_km, fill = geomorph_class), shape=21, size=2) + 
+  scale_y_log10(labels  = scales::label_percent()) + scale_x_log10(labels  = scales::label_comma()) + annotation_logticks() +
+  theme(panel.grid.minor = element_blank())  + 
+  scale_fill_brewer(type="qual", palette="Paired", aesthetics = c("fill", "color")) +
+  theme(legend.position = "none") + ylab("Slope (%)") + xlab("Drainage Area (km2)")
 ```
 
-![](geomorph_files/figure-gfm/geomorph-fill-gaps-3.png)<!-- -->
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+
+![](geomorph_files/figure-gfm/geomorph-fill-gaps-predict-2.png)<!-- -->
 
 ``` r
-flowlines_gcs |> 
-  inner_join(geomorph_pred, by=join_by(comid)) |> 
-  ggplot() + geom_sf(aes(color=geomorph_riffles))
+ggplot() +
+  geom_point(data=geomorph_pred, aes(x = da_area_sq_km, y = da_elev_min/0.3048, color = geomorph_class), size=0.25) + 
+  geom_point(data=geomorph_attr, aes(x = da_area_sq_km, y = da_elev_min/0.3048, fill = geomorph_class), shape=21, size=2) + 
+  scale_y_sqrt(labels = scales::label_comma()) + scale_x_log10(labels  = scales::label_comma())  + annotation_logticks(sides="b") +
+  theme(panel.grid.minor = element_blank())  + 
+  scale_fill_brewer(type="qual", palette="Paired", aesthetics = c("fill", "color")) +
+  theme(legend.position = "none") + xlab("Drainage Area (km2)") + ylab("Elevation (ft)")
 ```
 
-![](geomorph_files/figure-gfm/geomorph-fill-gaps-4.png)<!-- -->
+    ## Warning in self$trans$transform(x): NaNs produced
+
+    ## Warning: Transformation introduced infinite values in continuous y-axis
+
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 487 rows containing missing values (`geom_point()`).
+
+![](geomorph_files/figure-gfm/geomorph-fill-gaps-predict-3.png)<!-- -->
 
 ``` r
-# # validation matrix
-# geomorph_training_data |>
-#   select(comid, geomorph_class_actual=geomorph_class) |>
-#   inner_join(geomorph_pred |> select(comid, geomorph_class_pred=geomorph_class)) |>
-#   group_by(geomorph_class_actual, geomorph_class_pred) |>
-#   tally() |> 
-#   mutate(n=coalesce(n,0)) |>
-#   spread(geomorph_class_actual, n)
+ggplot() + 
+  geom_sf(data = left_join(flowlines, geomorph_pred), aes(color = geomorph_class)) + 
+  geom_sf(data = geomorph_site_data, aes(fill = geomorph_class), shape=21) + 
+  scale_fill_brewer(type="qual", palette="Paired", aesthetics = c("fill", "color"))
+```
+
+    ## Joining with `by = join_by(comid)`
+
+![](geomorph_files/figure-gfm/geomorph-export2-1.png)<!-- -->
+
+``` r
+geomorph_pred |> select(comid, starts_with("geomorph_")) |>  #select(comid, geomorph_class) |> 
+  saveRDS(here::here("data-raw", "results", "attr_geomorph_class.Rds"))
 ```

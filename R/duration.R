@@ -92,10 +92,9 @@ duration_calc_days_inundated <- function(q_gauge, q_crit, stat="max") {
 #' @param drc_q The unquoted name of the flow column in `drc` (defaults to `q`)
 #' @param drc_dhsi The unquoted name of the duration suitability factor column in `drc` (defaults to `dhsi`)
 #'
-#' @return A `tbl_df` data frame with one row per flow (`q`) containing columns for the original suitable area (`wua`) and the new duration-weighted suitable area (`durwua`) along with interim calculation columns.
+#' @returns A `tbl_df` data frame with one row per flow (`q`) containing columns for the original suitable area (`wua`) and the new duration-weighted suitable area (`durwua`) along with interim calculation columns.
 #' @md
 #'
-#' @examples
 #' @export
 duration_apply_dhsi_to_fsa_curve <- function(fsa, drc,
                                          fsa_q=q, fsa_wua=wua,
@@ -135,13 +134,81 @@ duration_apply_dhsi_to_fsa_curve <- function(fsa, drc,
              drc_q={{drc_q}}, drc_dhsi={{drc_dhsi}}))
 }
 
+#' Remove Baseflow via Flow Threshold (Single)
+#'
+#' @param data A `data.frame` or `tbl_df` containing a flow-to-suitable-area curve
+#' @param flow_threshold A numeric value for a flow threshold defining baseflow.
+#' @param .flow_var Unquoted column name for the flow in cfs, defaults to `flow_cfs`
+#' @param .habitat_var Unquoted column name for the suitable area, defaults to `wua_per_lf`
+#'
+#' @returns A `tbl_df` data frame with one row per flow containing two columns: the flow and the modified suitable habitat area with baseflow removed.
+#' @md
+#'
+#' @export
+flow_threshold_remove_baseflow <- function(data, flow_threshold,
+                                           .flow_var = flow_cfs, .habitat_var = wua_per_lf) {
+  # # reuses the code already written for the DSHI analysis to apply a baseflow threshold
+  #
+  # weights <- tibble(q = c(0, flow_threshold), w = c(0, 1))
+  #
+  # result <- duration_apply_dhsi_to_fsa_curve(drc = weights, drc_q = q, drc_dhsi = w,
+  #                                            fsa = data, fsa_q = .flow_var, fsa_wua = .habitat_var)
+  #
+  # return(result)
+
+  min_q <- 0
+  max_q <- data |> pull({{.flow_var}}) |> max()
+
+  baseflow_removal_drc <-
+    data |>
+    #complete({{.flow_var}} := flow_threshold) |>
+    arrange({{.flow_var}}) |>
+    mutate(dhsi = if_else({{.flow_var}} <= flow_threshold, 0, 1))
+
+  result <-
+    duration_apply_dhsi_to_fsa_curve(fsa=data, drc=baseflow_removal_drc,
+                                     fsa_q={{.flow_var}}, fsa_wua={{.habitat_var}},
+                                     drc_q={{.flow_var}}, drc_dhsi = dhsi)
+
+  #if(!is.na(result[[1]])) {
+     return(result |>
+              transmute({{.flow_var}} := q,
+                        {{.habitat_var}} := durwua) |>
+              rename_with(function(x) paste0(x, "_nbfc"), everything()))
+  #} else {
+  #  return(tibble({{.flow_var}} := c(NA),
+  #                {{.habitat_var}} := c(NA)))
+  #}
+}
+
+#' Remove Baseflow via Flow Threshold (Multiple)
+#'
+#' @param data A `data.frame` or `tbl_df` containing flow-to-suitable-area curves for multiple groups. All variables except for the `.flow_var` and `.habitat_var` will be treated as groups.
+#' @param .flow_threshold_var Unquoted column name for the flow threshold defining baseflow for each group.
+#' @param .flow_var Unquoted column name for the flow in cfs, defaults to `flow_cfs`
+#' @param .habitat_var Unquoted column name for the suitable area, defaults to `wua_per_lf`
+#'
+#' @returns A modified version of the original `data.frame` or `tbl_df` with additional flow and habitat columns identified by "_nbfc" ("no baseflow channel)
+#' @md
+
+#' @export
+flow_threshold_remove_baseflow_apply <- function(data, .flow_threshold_var,
+                                                 .flow_var = flow_cfs, .habitat_var = wua_per_lf) {
+  data |>
+    nest(fsa_raw = c({{.flow_var}}, {{.habitat_var}})) |>
+    mutate(fsa_nbfc = pmap(list(fsa_raw, {{.flow_threshold_var}}),
+                           function(x, q) flow_threshold_remove_baseflow(x, q, .flow_var = {{.flow_var}}, .habitat_var = {{.habitat_var}}))) |>
+    unnest(c(fsa_raw, fsa_nbfc))
+
+}
+
 #' Split Flow-to-Suitable-Area Curve at Flow Threshold (Helper Function)
 #'
 #' @param suitable_area A numeric vector of suitable area values, e.g. in ft2 per lf
 #' @param flow A numeric vector of flow values in cfs, same length as `suitable_area`
 #' @param flow_threshold A numeric value for the instream-floodplain flow threshold in cfs
 #'
-#' @returns A named list including the original `suitable_area` and `flow` vectors, an identifier of instream versus floodplain (`is_floodplain`), and suitable area values for instream and floodplain (`habitat_instream` and `habitat_floodplain`)
+#' @returns A named list including the original `suitable_area` and `flow` vectors, an identifier of instream versus floodplain (`above_threshold`), and suitable area values for instream and floodplain (`habitat_below` and `habitat_above`)
 #' @md
 #'
 #' @export
@@ -159,9 +226,14 @@ flow_threshold_split <- function(suitable_area, flow, flow_threshold) {
 
     below_at_threshold <- if (any(flow < qt)) suitable_area_below_flow_threshold[[length(suitable_area_below_flow_threshold)]] else 0
 
-    suitable_area_below <- pmax(0, if_else(suitable_area <= below_at_threshold, suitable_area, below_at_threshold))
+    #suitable_area_below <- pmax(0, if_else(suitable_area <= below_at_threshold, suitable_area, below_at_threshold))
 
-    suitable_area_above <- pmax(0, suitable_area - suitable_area_below) #
+    #uitable_area_above <- pmax(0, suitable_area - suitable_area_below) #
+
+    suitable_area_below <- if_else((suitable_area <= below_at_threshold) & (flow <= flow_threshold), suitable_area, below_at_threshold)
+
+    suitable_area_above <- suitable_area - suitable_area_below #
+
 
     return(list(flow = flow,
                 suitable_area = suitable_area,
@@ -184,34 +256,30 @@ flow_threshold_split <- function(suitable_area, flow, flow_threshold) {
 #'
 #' @param data A `data.frame` or `tbl_df` containing flow-to-suitable area curves (one row per flow per site, columns for flow and suitable area)
 #' @param flow_threshold A numeric value for a flow threshold defining the instream-floodplain split
-#' @param mode optionally, `"floodplain"` or `"baseflow"` to rename output variables for instream-floodplain split or baseflow channel removal
 #' @param .flow_threshold_var, An unquoted column name for the flow threshold column in the data frame. Ignored if `flow_threshold` is provided.
 #' @param .id_var Unquoted column name for the variable id, defaults to `comid`
 #' @param .flow_var Unquoted column name for the flow in cfs, defaults to `flow_cfs`
-#' @param .area_var Unquoted column name for the suitable area, defaults to `wua_per_lf`
+#' @param .habitat_var Unquoted column name for the suitable area, defaults to `wua_per_lf`
 #' @param .group_var Unquoted column name for an optional grouping variable
 #'
-#' @returns A new version of the `data.frame` or `tbl_df` containing additional columns for the instream and floodplain split
-#' @export
+#' @returns A new version of the `data.frame` or `tbl_df` containing additional columns for the instream and floodplain (below or above threshold) split
+#' @md
 #'
-#' @examples
+#' @export
 flow_threshold_split_apply <- function(data,
                                        flow_threshold = NULL,
-                                       mode = "floodplain",
                                        .flow_threshold_var = NULL,
                                        .id_var = comid,
                                        .flow_var = flow_cfs,
-                                       .area_var = wua_per_lf,
+                                       .habitat_var = wua_per_lf,
                                        .group_var = NULL) {
-
-  #fun <- if (mode=="floodplain") flow_threshold_split_floodplain else if(mode=="baseflow") flow_threshold_split_baseflow
 
   if (!is.null(flow_threshold)) {
 
       summarized <-
         data |>
         group_by({{.id_var}}, {{.group_var}}) |>
-        summarize(result = list(flow_threshold_split(suitable_area = {{.area_var}},
+        summarize(result = list(flow_threshold_split(suitable_area = {{.habitat_var}},
                                                      flow = {{.flow_var}},
                                                      flow_threshold = flow_threshold))) |>
         ungroup()
@@ -221,7 +289,7 @@ flow_threshold_split_apply <- function(data,
     summarized <-
       data |>
       group_by({{.id_var}}, {{.group_var}}, {{.flow_threshold_var}}) |>
-      summarize(result = list(flow_threshold_split(suitable_area = {{.area_var}},
+      summarize(result = list(flow_threshold_split(suitable_area = {{.habitat_var}},
                                                    flow = {{.flow_var}},
                                                    flow_threshold = {{.flow_threshold_var}}))) |>
       ungroup() |>
@@ -234,40 +302,6 @@ flow_threshold_split_apply <- function(data,
            unnest(c(-{{.id_var}}, -{{.group_var}})) |>
            rename_with(function(x) str_replace(x, "result_", ""), starts_with("result_")) |>
            rename({{.flow_var}} := flow,
-                  {{.area_var}} := suitable_area)
+                  {{.habitat_var}} := suitable_area)
 
-if (mode == "floodplain") {
-
-  out |>
-    rename(habitat_instream = habitat_below,
-           habitat_floodplain = habitat_above,
-           fp_threshold = threshold,
-           is_floodplain = above_threshold)
-
-} else if (mode == "baseflow") {
-
-  out |>
-    select(-habitat_below) |>
-    rename(bf_threshold = threshold,
-           original_habitat_area = {{.area_var}}) |>
-    rename({{.area_var}} := habitat_above)
-
-} else {
-
-  out
-
-}
-
-}
-
-flow_threshold_baseflow_remove <- function(data, flow_threshold,
-                                           .flow_var = flow_cfs, .habitat_var = wua_per_lf) {
-  # reuses the code already written for the DSHI analysis to apply a baseflow threshold
-
-  weights <- tibble(q = c(0, flow_threshold), w = c(0, 1))
-
-  result <- duration_apply_dhsi_to_fsa_curve(drc = weights, drc_q = q, drc_dhsi = w,
-                                             fsa = data, fsa_q = .flow_var, fsa_wua = .habitat_var)
-
-  return(result)
 }

@@ -856,30 +856,10 @@ batch_res_ts |>
 Function for simple elimination of baseflow given a threshold flow, without needing to know a full hydrology: 
 
 ```{r eliminate-bfc}
-# EDIT: Moved this to inundation-duration-functions.R
-# eliminate_baseflow <- function(fsa, baseflow_threshold_flow, fsa_q=q, fsa_wua=wua, ...) {
-# 
-#   min_q <- 0
-#   max_q <- fsa |> pull({{fsa_q}}) |> max()
-# 
-#   baseflow_removal_drc <-
-#     fsa |>
-#     complete(flow_cfs = baseflow_threshold_flow) |>
-#     arrange(flow_cfs) |>
-#     transmute(q = flow_cfs,
-#               dhsi = if_else(flow_cfs <= baseflow_threshold_flow, 0, 1))
-# 
-#   apply_durations_to_fsa_curve(fsa=fsa, drc=baseflow_removal_drc,
-#                                fsa_q={{fsa_q}}, fsa_wua={{fsa_wua}}, ...) |>
-#     transmute({{fsa_q}} := q,
-#               {{fsa_wua}} := durwua)
-# 
-# }
-
 test_threshold <- 330 #cfs
 
 test_output <- fsa |> 
-  eliminate_baseflow(test_threshold, fsa_q=flow_cfs, fsa_wua=wua) |>
+  flow_threshold_remove_baseflow(test_threshold, .flow_var=flow_cfs, .habitat_var=wua) |>
   glimpse()
 
 test_output |> 
@@ -893,16 +873,14 @@ test_output |>
 
 ```
 
-## Floodplain-Instream Split 
+## Floodplain-Instream Split (test/ not run)
 
-(eventually move this to its own file)
-
-Need method to determine the flow theshold (aka bankfull flow) to use to split instream and floodplain
+Need method to determine the flow threshold (aka bankfull flow) to use to split instream and floodplain
 
 As a placeholder, is there a bankfull flow contained in the flowline_attributes? 
 Or assume some channel shape and derive from bf w and bf d using Manning's
 
-```{r floodplain-split-func}
+```{r floodplain-split-func, eval=FALSE, include=FALSE}
 fp <- function(suitable_area, flow, flow_threshold) {
   
   if (length(flow) > 0 & 
@@ -943,7 +921,7 @@ fp <- function(suitable_area, flow, flow_threshold) {
 }
 ```
 
-```{r floodplain-split-example}
+```{r floodplain-split-example, eval=FALSE, include=FALSE}
 # rough example of instream-floodplain flow thresholds derived from bankfull width/depth
 bankfull_flows <- 
   flowline_attributes |>

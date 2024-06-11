@@ -1,13 +1,14 @@
 Predictor Data Preparation and Consolidation
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-05-30
+2024-06-06
 
 - [Case study geographic scope](#case-study-geographic-scope)
   - [Import Flowline Geometry](#import-flowline-geometry)
 - [Data Import](#data-import)
   - [Consolidating NHDPlusV2 Flowline
     Attributes](#consolidating-nhdplusv2-flowline-attributes)
+  - [Range and watershed summary](#range-and-watershed-summary)
   - [Combine all attributes](#combine-all-attributes)
 - [Join to Flowline Geometry](#join-to-flowline-geometry)
 - [Maps of attribute data
@@ -46,7 +47,9 @@ watersheds <-
 
     ## ℹ The googledrive package is using a cached token for 'slewis@flowwest.com'.
 
-    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/WBD_Subwatershed.zip already exists and will be used...
+    ## Auto-refreshing stale OAuth token.
+
+    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/WBD_Subwatershed.shp.zip already exists and will be used...
 
 ``` r
 watersheds |> ggplot() + geom_sf()
@@ -157,7 +160,7 @@ wbd_watersheds <-
   select(huc_8, huc_10, hu_10_name, huc_12, hu_12_type, hu_12_name, hu_12_ds)
 ```
 
-    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/WBD_Subwatershed.zip already exists and will be used...
+    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/WBD_Subwatershed.shp.zip already exists and will be used...
 
 ``` r
 comid_huc_12 <- 
@@ -828,6 +831,29 @@ pisces_ranges_comid <-
     ## $ range_cvchinook_historical <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, F…
     ## $ range_cvchinook_extant     <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, F…
 
+### Range and watershed summary
+
+From watershed_delineation.R
+
+``` r
+cv_mainstems <- readRDS(here::here("data-raw", "results", "cv_mainstems.Rds"))
+
+cv_mainstems_comid <- cv_mainstems |>
+  st_drop_geometry()
+
+cv_watersheds <- readRDS(here::here("data-raw", "results", "cv_watersheds.Rds"))
+
+cv_watersheds_comid <- 
+  habistat::flowline_geom_proj |>
+  st_zm() |>
+  #st_point_on_surface() |>
+  st_join(cv_watersheds, largest=T) |>
+  st_drop_geometry() 
+```
+
+    ## Warning: attribute variables are assumed to be spatially constant throughout
+    ## all geometries
+
 ### Combine all attributes
 
 ``` r
@@ -864,6 +890,8 @@ flowline_attributes <-
   left_join(geomorph_class, by=join_by(comid), relationship="one-to-one") |>
   left_join(hqt_cls, by=join_by(comid), relationship="one-to-one") |>
   left_join(pisces_ranges_comid, by=join_by(comid), relationship="one-to-one") |>
+  left_join(cv_mainstems_comid, by=join_by(comid), relationship="one-to-one") |>
+  left_join(cv_watersheds_comid, by=join_by(comid), relationship="one-to-one") |>
   # fill in gaps in the RF bankfull estimates with the simple Bieger model
   mutate(bf_width_m = coalesce(bf_width_m, 2.76*da_area_sq_km^0.399),
          bf_depth_m = coalesce(bf_depth_m, 0.23*da_area_sq_km^0.294),
@@ -1338,7 +1366,7 @@ catchments <-
   st_transform(habistat::const_proj_crs()) 
 ```
 
-    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/Catchment.zip already exists and will be used...
+    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/Catchment.shp.zip already exists and will be used...
 
     ## Joining with `by = join_by(comid)`
 

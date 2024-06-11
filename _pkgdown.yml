@@ -43,6 +43,7 @@ reference:
   desc: "Used Internally"
   contents:
   - starts_with("const_")
-  - starts_with("linterp")
+  - ends_with("interp")
   - starts_with("drive_file_by_id")
   - starts_with("perpendicular_")
+  - starts_with("st_")

@@ -1913,7 +1913,7 @@ wua_predicted <-
  # td |> filter(comid==2823726)
 
 wua_predicted |> saveRDS(here::here("data-raw", "results", "predictions_table.Rds"))
-wua_predicted |> usethis::use_data(overwrite = TRUE)
+#wua_predicted |> usethis::use_data(overwrite = TRUE)
 
 # to run the leaflet map: shiny::runApp(here::here("inst", "app"))
 

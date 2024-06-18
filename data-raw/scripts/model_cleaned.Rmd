@@ -320,6 +320,8 @@ pd_attr <- habistat::flowline_attr |>
   filter_variable_ranges() |> #stream_level<=4 & !is.na(gnis_name) 
   filter(substr(reachcode,1, 4) %in% c("1802", "1803", "1804")) 
 
+#interp_flows_pred <- c(oom_range(100, 10000), 15000)
+
 pd <- pd_attr |>
   expand_grid(flow_cfs = interp_flows) |>
   mutate(flow_norm_cfs = coalesce(flow_cfs / da_scalar_maf, 0)) |> 
@@ -396,7 +398,15 @@ model_predicted_filtered <-
   model_predicted |> 
   filter(comid %in% flowlines_pred$comid) |>
   left_join(habistat::flowline_attr |>
-              select(comid, river_cvpia, starts_with("watershed_")), by=join_by(comid))
+              select(comid, river_cvpia, starts_with("watershed_")), by=join_by(comid)) |>
+  # select just the desired rows and columns for saving and reporting
+  filter((model_type == "RF") & (model_variant %in% c("SD2", "SN2"))) |>
+  transmute(comid, model_bfc, model_name, flow_cfs, wua_per_lf_pred, 
+         river_cvpia = as.factor(river_cvpia),
+         watershed_level_3 = as.factor(watershed_level_3)) |>
+  glimpse()
+
+model_predicted_filtered |> saveRDS(here::here("data-raw", "results", "model_predicted_filtered.Rds"))
 ```
 
 ## DSMHabitat comparison
@@ -502,16 +512,60 @@ dsm_habitat_suitable_ac <- dsm_habitat_combined |>
 ```{r}
 model_predicted_filtered |>
   filter(!is.na(river_cvpia)) |>
-  filter(model_type == "RF") |>
-  group_by(model_bfc, model_variant, river_cvpia, flow_cfs) |>
+  #filter(model_type == "RF") |>
+  #group_by(model_bfc, model_variant, river_cvpia, flow_cfs) |>
+  group_by(model_bfc, model_name, river_cvpia, flow_cfs) |>
   summarize(wua_per_lf_pred = sum(wua_per_lf_pred)) |>
   ggplot(aes(x = flow_cfs)) + 
-  geom_line(aes(y = wua_per_lf_pred, color = paste(model_bfc, model_variant))) +
+  geom_line(aes(y = wua_per_lf_pred, color = paste(model_bfc, model_name))) +
   geom_line(data=dsm_habitat_suitable_ac |> rename(river_cvpia = river), 
             aes(x = flow_cfs, y = value, color = name)) +
   facet_wrap(~river_cvpia) +
   scale_y_log10() + scale_x_log10() 
-
 ```
 
 TODO: Apply the nbfc correction for the nbfc runs
+
+```{r}
+baseflows_by_comid <- 
+  habistat::flowline_attr |>
+  transmute(comid, baseflow_cfs = nf_bfl_dry_cfs) |>
+  filter(!is.na(baseflow_cfs)) |>
+  filter(baseflow_cfs > 1E-7)
+
+baseflows_by_comid |> 
+  ggplot() + 
+  geom_histogram(aes(x = baseflow_cfs)) + 
+  scale_x_log10()
+```
+
+```{r}
+model_predicted_bfc_rm <-
+  model_predicted_filtered |>
+    filter(model_bfc) |> # select only the model runs that still have the baseflow channel included
+    inner_join(baseflows_by_comid, by = join_by(comid)) |> 
+    flow_threshold_remove_baseflow_apply(.flow_threshold_var = baseflow_cfs,
+                                         .flow_var = flow_cfs,
+                                         .habitat_var = wua_per_lf_pred)
+
+model_predicted_final <- bind_rows(
+  model_predicted_filtered |> 
+    filter((!model_bfc) & (comid %in% baseflows_by_comid$comid)),
+  model_predicted_bfc_rm |>
+    select(-wua_per_lf_pred) |>
+    rename(wua_per_lf_pred = wua_per_lf_pred_nbfc) |>
+    select(-flow_cfs_nbfc)) |>
+  left_join(habistat::wua_hydraulic |>
+              transmute(comid, flow_cfs, wua_per_lf_actual = wua_per_lf) |>
+              # remove dups
+              group_by(comid, flow_cfs) |> 
+              filter(row_number() == 1) |>
+              ungroup(), 
+            by = join_by(comid, flow_cfs))
+
+model_predicted_final |>
+  saveRDS(here::here("data-raw", "results", "wua_predicted2.Rds"))
+
+wua_predicted <- model_predicted_final
+usethis::use_data(wua_predicted, overwrite = TRUE)
+```

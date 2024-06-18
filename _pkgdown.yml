@@ -27,6 +27,7 @@ reference:
   contents:
   - starts_with("flowline_")
   - starts_with("wua_")
+  - starts_with("cv_")
 - title: "Suitability Functions"
   desc: "..."
   contents:

@@ -37,7 +37,7 @@ function(input, output, session){
   geom <- flowlines_gcs |>
     mutate(object_id = paste0("comid_", comid)) |>
     inner_join(habistat::flowline_attr |>
-                 mutate(chan_width_ft = chan_width_m/0.3048),
+                 transmute(comid, gnis_name), # chan_width_ft = chan_width_m/0.3048),
                by = join_by(comid))
 
   active_geom <- reactive({

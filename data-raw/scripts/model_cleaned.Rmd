@@ -401,12 +401,14 @@ model_predicted_filtered <-
   model_predicted |> 
   filter(comid %in% flowlines_pred$comid) |>
   left_join(habistat::flowline_attr |>
-              select(comid, river_cvpia, starts_with("watershed_")), by=join_by(comid)) |>
+              select(comid, river_cvpia, starts_with("watershed_"), reach_length_ft), by=join_by(comid)) |>
   # select just the desired rows and columns for saving and reporting
+  # pick the best variant of SD and SN models
   filter((model_type == "RF") & (model_variant %in% c("SD2", "SN2"))) |>
   transmute(comid, model_bfc, model_name, flow_cfs, wua_per_lf_pred, 
          river_cvpia = as.factor(river_cvpia),
-         watershed_level_3 = as.factor(watershed_level_3)) |>
+         watershed_level_3 = as.factor(watershed_level_3),
+         reach_length_ft) |>
   glimpse()
 
 model_predicted_filtered |> saveRDS(here::here("data-raw", "results", "model_predicted_filtered.Rds"))
@@ -512,22 +514,33 @@ dsm_habitat_suitable_ac <- dsm_habitat_combined |>
          value = if_else(value>0, value, NA))
 ```
 
-```{r}
+```{r fig.width=6.5, fig.height=6.5, dpi=300}
 model_predicted_filtered |>
   filter(!is.na(river_cvpia)) |>
+  filter(flow_cfs <= 15000) |>
   #filter(model_type == "RF") |>
   #group_by(model_bfc, model_variant, river_cvpia, flow_cfs) |>
   group_by(model_bfc, model_name, river_cvpia, flow_cfs) |>
-  summarize(wua_per_lf_pred = sum(wua_per_lf_pred)) |>
+  summarize(wua_per_lf_pred = sum(wua_per_lf_pred * reach_length_ft) / sum(reach_length_ft)) |>
   ggplot(aes(x = flow_cfs)) + 
-  geom_line(aes(y = wua_per_lf_pred, color = paste(model_bfc, model_name))) +
-  geom_line(data=dsm_habitat_suitable_ac |> rename(river_cvpia = river), 
-            aes(x = flow_cfs, y = value, color = name)) +
-  facet_wrap(~river_cvpia) +
-  scale_y_log10() + scale_x_log10() 
+  geom_line(aes(y = wua_per_lf_pred, 
+                color = case_when(model_name=="SD" ~ "Scale-Dependent", 
+                                  model_name=="SN" ~ "Scale-Normalized"), 
+                linetype = if_else(model_bfc, "Post-Model BFC Removal", "Prior BFC Removal"))) +
+  #geom_line(data=dsm_habitat_suitable_ac |> 
+  #            rename(river_cvpia = river), 
+  #          aes(x = flow_cfs, y = value, color = name)) +
+  facet_wrap(~river_cvpia, scales = "free_y") +
+  scale_x_continuous(limits = c(0,15000)) +
+  #scale_y_log10() + scale_x_log10()  +
+  scale_color_discrete(name = "Model Type") + 
+  scale_linetype_discrete(name = "Baseflow Method") + 
+  theme(panel.grid.minor = element_blank(), legend.position = "top", legend.box="vertical", axis.text.x = element_text(angle=90)) 
+
+# ggsave(here::here("vignettes", "figures", "model_comparison_raw.png"))
 ```
 
-TODO: Apply the nbfc correction for the nbfc runs
+## Apply the baseflow correction for the non-baseflow runs
 
 ```{r}
 baseflows_by_comid <- 
@@ -550,7 +563,11 @@ model_predicted_bfc_rm <-
     flow_threshold_remove_baseflow_apply(.flow_threshold_var = baseflow_cfs,
                                          .flow_var = flow_cfs,
                                          .habitat_var = wua_per_lf_pred)
+```
 
+Combine the outputs
+
+```{r}
 model_predicted_final <- bind_rows(
   model_predicted_filtered |> 
     filter((!model_bfc) & (comid %in% baseflows_by_comid$comid)),
@@ -567,8 +584,34 @@ model_predicted_final <- bind_rows(
             by = join_by(comid, flow_cfs))
 
 model_predicted_final |>
-  saveRDS(here::here("data-raw", "results", "wua_predicted2.Rds"))
+  saveRDS(here::here("data-raw", "results", "model_predicted_final.Rds"))
 
 wua_predicted <- model_predicted_final
 usethis::use_data(wua_predicted, overwrite = TRUE)
+```
+
+```{r fig.width=6.5, fig.height=6.5, dpi=300}
+model_predicted_final |>
+  filter(!is.na(river_cvpia)) |>
+  filter(flow_cfs <= 15000) |>
+  #filter(model_type == "RF") |>
+  #group_by(model_bfc, model_variant, river_cvpia, flow_cfs) |>
+  group_by(model_bfc, model_name, river_cvpia, flow_cfs) |>
+  summarize(wua_per_lf_pred = sum(wua_per_lf_pred * reach_length_ft) / sum(reach_length_ft)) |>
+  ggplot(aes(x = flow_cfs)) + 
+  geom_line(aes(y = wua_per_lf_pred, 
+                color = case_when(model_name=="SD" ~ "Scale-Dependent", 
+                                  model_name=="SN" ~ "Scale-Normalized"), 
+                linetype = if_else(model_bfc, "Post-Model BFC Removal", "Prior BFC Removal"))) +
+  #geom_line(data=dsm_habitat_suitable_ac |> 
+  #            rename(river_cvpia = river), 
+  #          aes(x = flow_cfs, y = value, color = name)) +
+  facet_wrap(~river_cvpia, scales = "free_y") +
+  scale_x_continuous(limits = c(0,15000)) +
+  #scale_y_log10() + scale_x_log10()  +
+  scale_color_discrete(name = "Model Type") + 
+  scale_linetype_discrete(name = "Baseflow Method") + 
+  theme(panel.grid.minor = element_blank(), legend.position = "top", legend.box="vertical", axis.text.x = element_text(angle=90)) 
+
+# ggsave(here::here("vignettes", "figures", "model_comparison.png"))
 ```

@@ -94,6 +94,9 @@ flow_to_suitable_area <-
   filter(flow_cfs %in% interp_flows) |>
   filter(!is.na(area_pct)) |>
   ungroup()
+
+wua_hydraulic_interp <- flow_to_suitable_area
+usethis::use_data(wua_hydraulic_interp, overwrite=T)
 ```
 
 Join predictor variables to habitat training data

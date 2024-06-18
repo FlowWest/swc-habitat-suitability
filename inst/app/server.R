@@ -2,24 +2,62 @@ function(input, output, session){
 
   # REACTIVE FLOW FILTER -------------------------------------------------------
 
+  predictions <- habistat::wua_predicted |>
+    mutate(model_bfc = if_else(model_bfc, "p", "a")) |> # baseflow channel removed pre (a) or post (p) prediction
+    mutate(model_id = paste0(model_name, "_", model_bfc)) |>
+    select(comid, flow_cfs, model_id, wua_per_lf_pred, river_cvpia, watershed_level_3) |>
+    pivot_wider(names_from = model_id,
+                values_from = wua_per_lf_pred,
+                #values_fn = first,
+                names_glue = c("wua_per_lf_pred_{model_id}")) |>
+    left_join(habistat::wua_hydraulic_interp |>
+                filter(!bfc) |> # only showing the actuals with prior bfc removed for now
+                select(comid, flow_cfs, wua_per_lf_actual = wua_per_lf),
+              by = join_by(comid, flow_cfs)) |>
+    left_join(habistat::flowline_attr |>
+                transmute(comid,
+                          chan_width_ft = chan_width_m/0.3048,
+                          baseflow_cfs = nf_bfl_dry_cfs),
+              by = join_by(comid))
+
+  message(paste(names(predictions), collapse = ", "))
+
   active_predictions <- reactive({
-    predictions_table |>
+    # predictions_table |>
+    #   filter(flow_cfs == input$active_flow) |>
+    #   mutate(wua_per_lf = !!sym(input$wua_var))
+    predictions |>
       filter(flow_cfs == input$active_flow) |>
-      mutate(wua_per_lf = !!sym(input$wua_var))
+      glimpse() #|>
+    # TODO could also filter for selected model and bfc removed/not removed
+    #message(nrow(result), " result rows")
+    #return(result)
   })
 
+  geom <- flowlines_gcs |>
+    mutate(object_id = paste0("comid_", comid)) |>
+    inner_join(habistat::flowline_attr |>
+                 mutate(chan_width_ft = chan_width_m/0.3048),
+               by = join_by(comid))
+
   active_geom <- reactive({
-    flowlines_gcs |>
+    geom |>
       inner_join(active_predictions(),
-                 by=join_by(comid),
-                 relationship="one-to-one") |>
-      mutate(tooltip_html = paste0("<strong>", comid, " ", gnis_name, "</strong>", "<br />",
-                                   "Scale-dependent model: ", round(wua_per_lf_pred_sd,2), " ft2/ft", "<br />",
-                                   "Scale-normalized model: ", round(wua_per_lf_pred_si2,2), " ft2/ft", "<br />",
-                                   "Two-step model: ", round(wua_per_lf_pred_sd2si,2), " ft2/ft",
-                                   if_else(!is.na(wua_per_lf_actual),
-                                           paste0("<br />", "Actual: ", round(wua_per_lf_actual,2), " ft2/ft"), "")))
-    })
+                 by = join_by(comid)) |>
+      mutate(wua_per_lf = !!sym(input$wua_var)) |>
+      filter(!is.na(wua_per_lf)) |>
+      mutate(object_label = paste0("<strong>", comid, " ", gnis_name, "</strong>", "<br />",
+                                   "Scale-Dependent Model (prior baseflow removal): ",
+                                   round(wua_per_lf_pred_SD_a,2), " ft2/ft", "<br />",
+                                   "Scale-Dependent Model (post-model baseflow removal): ",
+                                   round(wua_per_lf_pred_SD_p,2), " ft2/ft", "<br />",
+                                   "Scale-Normalized Model (prior baseflow removal): ",
+                                   round(wua_per_lf_pred_SN_a,2), " ft2/ft", "<br />",
+                                   "Scale-Normalized Model (post-model baseflow removal): ",
+                                   round(wua_per_lf_pred_SN_p,2), " ft2/ft", "<br />",
+                                   "Actual: ", round(wua_per_lf_actual,2), " ft2/ft")) |>
+      glimpse()
+  })
 
   # SELECTED COMID OBSERVER ----------------------------------------------------
 
@@ -40,11 +78,29 @@ function(input, output, session){
     }
   })
 
-  active_attr_table <- reactive({
+  active_pred_table <- reactive({
     if (!is.null(selected_point$object_id)) {
       active_predictions() |>
         filter(comid == selected_point$comid) |>
-        select(where(is.numeric), -wua_per_lf) |>
+        select(where(is.numeric)) |>
+        pivot_longer(everything()) |>
+        mutate(across(value, function(x) round(x, 2)))
+    }
+  })
+
+  output$pred_table <- DT::renderDT({
+    if (!is.null(selected_point$object_id)) {
+      DT::datatable(active_pred_table(),
+                    options = list(paging = F, searching = F))
+    }
+  })
+
+  active_attr_table <- reactive({
+    #if (!is.null(selected_point$object_id) & (length(selected_point$comid)>0)) {
+    if (!is.null(selected_point$object_id)) {
+      habistat::flowline_attr |>
+        filter(comid == selected_point$comid) |>
+        select(where(is.numeric)) |>
         pivot_longer(everything())
     }
   })
@@ -57,23 +113,25 @@ function(input, output, session){
   })
 
   output$fsa_plot <- renderPlot({
-    if (!is.null(selected_point$object_id)) {
-    predictions_table |>
+    if (!is.null(selected_point$object_id)) { #& (length(selected_point$comid)>0)) {
+    predictions |>
       filter(comid == selected_point$comid) |>
       ggplot(aes(x = flow_cfs)) +
-        geom_line(aes(y = wua_per_lf_pred_sd, color="Scale-Dependent Model")) +
-        geom_line(aes(y = wua_per_lf_pred_si2, color="Scale-Normalized Model")) +
-        geom_line(aes(y = wua_per_lf_pred_sd2si, color="Two-Step Model")) +
-        geom_line(aes(y = wua_per_lf_actual, color="Actual")) +
-        geom_hline(aes(yintercept = chan_width_ft, linetype="Channel Width (ft)")) +
-        scale_x_log10(labels = scales::label_comma()) +
-        #scale_y_continuous(trans = ihs, labels = scales::label_comma(), limits = c(0, NA)) +
-        theme_minimal() + theme(panel.grid.minor = element_blank(), legend.position = "top") +
-        xlab("Flow (cfs)") + ylab("WUA (ft2) per linear ft")
-    } else {
-      NULL
-    }
-  })
+      geom_line(aes(y = wua_per_lf_pred_SD_a, color="Scale-Dependent", linetype="Prior BFC Removal")) +
+      geom_line(aes(y = wua_per_lf_pred_SD_p, color="Scale-Dependent", linetype="Post-Model BFC Removal")) +
+      geom_line(aes(y = wua_per_lf_pred_SN_a, color="Scale-Normalized", linetype="Prior BFC Removal")) +
+      geom_line(aes(y = wua_per_lf_pred_SN_p, color="Scale-Normalized", linetype="Post-Model BFC Removal")) +
+      geom_line(aes(y = wua_per_lf_actual, color="Actual", linetype="Prior BFC Removal")) +
+      #geom_hline(aes(yintercept = chan_width_ft)) + #, linetype="Channel Width (ft)")) +
+      #geom_text(aes(x = 1, y = chan_width_ft, label = chan_width_ft)) +
+      scale_x_log10(labels = scales::label_comma()) +
+      #scale_y_continuous(trans = ihs, labels = scales::label_comma(), limits = c(0, NA)) +
+      theme_minimal() + theme(panel.grid.minor = element_blank(), legend.position = "top", legend.box="vertical") +
+      xlab("Flow (cfs)") + ylab("WUA (ft2) per linear ft") +
+      scale_color_discrete(name = "Model Type") + scale_linetype_discrete(name = "Baseflow Method")
+  } else {
+      ggplot()
+    }})
 
   # LEAFLET MAP FUNCTIONS ------------------------------------------------------
 
@@ -114,12 +172,13 @@ function(input, output, session){
 
   layer_flowlines <- function(m, show = TRUE) {
     if(show) {
+      #pal_limits <- c(0, 100) #,
       pal_limits <- c(min(active_geom()$wua_per_lf), max(active_geom()$wua_per_lf))
-
-      m |> leaflet::addPolylines(data = active_geom(),
+      message("plotting ", nrow(active_geom()), " flowlines")
+      #m |> leafgl::addGlPolylines(data = active_geom(),layerId = ~object_id)
+      m |> leaflet::addPolylines(data = active_geom(), # TODO switch to leafgl::addGlPolylines
                                  layerId = ~object_id,
-                                 popup = ~tooltip_html,
-                                 label = ~lapply(tooltip_html, htmltools::HTML),
+                                 label = ~lapply(object_label, htmltools::HTML),
                                  color = ~pal(wua_per_lf), #pal(wua_per_lf),
                                  opacity = 1,
                                  weight = 2,
@@ -136,6 +195,7 @@ function(input, output, session){
                            layerId = "clegend")
     } else {
       m |> leaflet::removeShape(active_geom()$comid) |> leaflet::removeControl("clegend")
+      # TODO switch to leaflet::removeGlPolylines
     }
   }
 
@@ -145,10 +205,10 @@ function(input, output, session){
     shinyjs::showElement(id = 'loading_action')
     make_leaflet() |>
       layer_flowlines() #|>
-      #leaflet::addLayersControl(baseGroups = c("watersheds", "none"),
-      #                          overlayGroups = c("flowlines", "aoi"),
-      #                          position = "bottomleft",
-      #                          options = leaflet::layersControlOptions(collapsed = FALSE))
+    #leaflet::addLayersControl(baseGroups = c("watersheds", "none"),
+    #                          overlayGroups = c("flowlines", "aoi"),
+    #                          position = "bottomleft",
+    #                          options = leaflet::layersControlOptions(collapsed = FALSE))
   })
 
 }

@@ -2,24 +2,6 @@ function(input, output, session){
 
   # REACTIVE FLOW FILTER -------------------------------------------------------
 
-  predictions <- habistat::wua_predicted |>
-    mutate(model_bfc = if_else(model_bfc, "p", "a")) |> # baseflow channel removed pre (a) or post (p) prediction
-    mutate(model_id = paste0(model_name, "_", model_bfc)) |>
-    select(comid, flow_cfs, model_id, wua_per_lf_pred, river_cvpia, watershed_level_3) |>
-    pivot_wider(names_from = model_id,
-                values_from = wua_per_lf_pred,
-                #values_fn = first,
-                names_glue = c("wua_per_lf_pred_{model_id}")) |>
-    left_join(habistat::wua_hydraulic_interp |>
-                filter(!bfc) |> # only showing the actuals with prior bfc removed for now
-                select(comid, flow_cfs, wua_per_lf_actual = wua_per_lf),
-              by = join_by(comid, flow_cfs)) |>
-    left_join(habistat::flowline_attr |>
-                transmute(comid,
-                          chan_width_ft = chan_width_m/0.3048,
-                          baseflow_cfs = nf_bfl_dry_cfs),
-              by = join_by(comid))
-
   message(paste(names(predictions), collapse = ", "))
 
   active_predictions <- reactive({
@@ -33,12 +15,6 @@ function(input, output, session){
     #message(nrow(result), " result rows")
     #return(result)
   })
-
-  geom <- flowlines_gcs |>
-    mutate(object_id = paste0("comid_", comid)) |>
-    inner_join(habistat::flowline_attr |>
-                 transmute(comid, gnis_name), # chan_width_ft = chan_width_m/0.3048),
-               by = join_by(comid))
 
   active_geom <- reactive({
     geom |>
@@ -95,22 +71,24 @@ function(input, output, session){
     }
   })
 
-  active_attr_table <- reactive({
-    #if (!is.null(selected_point$object_id) & (length(selected_point$comid)>0)) {
-    if (!is.null(selected_point$object_id)) {
-      habistat::flowline_attr |>
-        filter(comid == selected_point$comid) |>
-        select(where(is.numeric)) |>
-        pivot_longer(everything())
-    }
-  })
-
-  output$attr_table <- DT::renderDT({
-    if (!is.null(selected_point$object_id)) {
-      DT::datatable(active_attr_table(),
-                    options = list(paging = F, searching = F))
-    }
-  })
+#  active_attr_table <- reactive({
+#   #if (!is.null(selected_point$object_id) & (length(selected_point$comid)>0)) {
+#     if (!is.null(selected_point$object_id)) {
+#     result <- attr |>
+#       filter(comid == selected_point$comid) |>
+#       select(where(is.numeric)) |>
+#       pivot_longer(everything())
+#       #gc()
+#     return(result)
+#   }
+#  })
+#
+#  output$attr_table <- DT::renderDT({
+#      if (!is.null(selected_point$object_id)) {
+#        DT::datatable(active_attr_table(),
+#                      options = list(paging = F, searching = F))
+#      }
+#    })
 
   output$fsa_plot <- renderPlot({
     if (!is.null(selected_point$object_id)) { #& (length(selected_point$comid)>0)) {
@@ -123,6 +101,7 @@ function(input, output, session){
       geom_line(aes(y = wua_per_lf_pred_SN_p, color="Scale-Normalized", linetype="Post-Model BFC Removal")) +
       geom_line(aes(y = wua_per_lf_actual, color="Actual", linetype="Prior BFC Removal")) +
       #geom_hline(aes(yintercept = chan_width_ft)) + #, linetype="Channel Width (ft)")) +
+      #geom_vline(aes(xintercept = baseflow_cfs)) +
       #geom_text(aes(x = 1, y = chan_width_ft, label = chan_width_ft)) +
       scale_x_log10(labels = scales::label_comma()) +
       #scale_y_continuous(trans = ihs, labels = scales::label_comma(), limits = c(0, NA)) +

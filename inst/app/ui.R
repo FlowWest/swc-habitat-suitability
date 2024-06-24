@@ -25,9 +25,9 @@ shinyUI(
                      div(id = "predTable",
                          h3("Habitat Data"),
                          DT::DTOutput("pred_table")),
-                     div(id = "attrTable",
-                         h3("Flowline Attributes"),
-                         DT::DTOutput("attr_table"))
+#                     div(id = "attrTable",
+#                         h3("Flowline Attributes"),
+#                         DT::DTOutput("attr_table"))
                  ),
                  div(id = 'loading_radio', "Loading data, please wait...", style = "display: none;", class="sidebar-message")),
                mainPanel(

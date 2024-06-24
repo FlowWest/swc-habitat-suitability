@@ -39,7 +39,7 @@ Map the known redd locations like sailor bar
 
 ### HQT gradient class and known spawning reaches
 
-```{r}
+```{r reach-import}
 valley_lowland <- 
   readRDS(here::here("data-raw", "source", "hqt", "hqt_valley_lowland.Rds")) |> 
   st_transform(project_crs) |> 
@@ -69,7 +69,7 @@ cvpia_extents_nhd_spawning <-
   filter(str_detect(habitat, "spawning"))
 ```
 
-```{r, fig.width=6, fig.height=6, dpi=300}
+```{r hqt-classes, fig.width=6, fig.height=6, dpi=300}
 ggplot() +
   geom_sf(data = valley_lowland, color=NA, fill="lightgoldenrod") +
   geom_sf(data = cvpia_extents, color="gray") +
@@ -79,7 +79,7 @@ ggplot() +
 
 ### UCD eFlows Geomorph Classes
 
-```{r, fig.width=12, fig.height=12, dpi=300}
+```{r geomorph-classes-overlay, fig.width=12, fig.height=12, dpi=300}
 #geomorph_class <- readRDS(here::here("data-raw", "results", "attr_geomorph_class.Rds"))
 geomorph_classes <- readRDS(here::here("data-raw", "results", "attr_geomorph_class.Rds"))
 geomorph_site_data <- readRDS(here::here("data-raw", "results", "geomorph_sites_ucd.Rds"))
@@ -103,7 +103,7 @@ ggplot() +
   geom_sf(data = cvpia_extents_spawning |> st_line_sample(sample=c(0, 1)), color="black", size=1, shape=15)
 ```
 
-```{r fig.width=12, fig.height=12, dpi=300}
+```{r geomorph-classes-filter, fig.width=12, fig.height=12, dpi=300}
 # breakdown of geomorph classes of geomorph sites that are within spawning reaches
 spawning_reach_geomorph_sites <- 
   geomorph_site_data |> 
@@ -135,7 +135,7 @@ ggplot() +
 
 ### Filter by Gradient and Elevation
 
-```{r}
+```{r gradient-elevation-hist}
 cvpia_extents_nhd_spawning |>
   left_join(flowline_attributes) |>
   ggplot() + 
@@ -168,41 +168,175 @@ cvpia_extents_nhd_spawning |>
 
 ```
 
-
-
-## Combine all filters
-
-
-```{r}
-lyr <- flowlines |>
-  left_join(flowline_attributes) |>
+```{r geomorph-filter-output}
+geomorph_filter_comid <- habistat::flowline_attr |>
+  # FILTER MAPPED CV CHINOOK RANGE (PISCES)
   filter(range_cvchinook_extant) |> 
+  # FILTER HQT GRADIENT CLASS
   filter(hqt_gradient_class != "Valley Lowland")  |>
+  # FILTER GEOMORPH CLASSES
   filter(str_detect(geomorph_class, "riffle-pool") | 
          str_detect(geomorph_class, "gravel") | 
          str_detect(geomorph_class, "low-gradient step-pool")) |>
-  filter(slope <= 1E-2)
-  #filter(comid %in% filter(flowline_attributes, range_cvchinook_extant)$comid) |>
-  #filter(comid %in% filter(flowline_attributes, hqt_gradient_class != "Valley Lowland")$comid) |>
-  #filter(comid %in% filter(geomorph_class, geomorph_gravel)$comid) |>
-  #filter(comid %in% filter(flowline_attributes, da_area_sq_km > 10)$comid) |>
-  #filter(comid %in% filter(flowline_attributes, slope*100 >= 0.05 & slope*100 <= 0.4)$comid) |>
-# |>
-  #filter(comid %in% filter(flowline_attributes, da_area_sq_km > 50)$comid) #|>
- # filter(comid %in% filter(flowline_attributes, slope <= 1E-2)$comid)# |>
-  #filter(comid %in% filter(flowline_attributes, hqt_gradient_class != "Valley Lowland")$comid)
+  #filter(slope <= 1E-2) |>
+  pull(comid)
 
-#leaflet::leaflet() |> leaflet::addPolylines(data=lyr)
+habistat::flowline_geom_proj |>
+  filter(comid %in% geomorph_filter_comid) |>
+  ggplot() + geom_sf() + geom_sf(data=spawning_mainstems, color="red")
 ```
 
+```{r gradient-filter-output}
+gradient_range_comid <- habistat::flowline_attr |>
+  filter(range_cvchinook_extant) |> 
+  #filter(hqt_gradient_class != "Valley Lowland")  |>
+  #filter(slope <= 1E-2) |>
+  filter((slope <= 1E-1) & (slope >= 1E-3)) |>
+  pull(comid)
 
-```{r}
+habistat::flowline_geom_proj |>
+  filter(comid %in% gradient_range_comid) |>
+  ggplot() + geom_sf() + geom_sf(data=spawning_mainstems, color="red")
+```
+
+### Apply CVPIA watershed spawning ranges to adjacent tributaries
+
+```{r spawning-mainstems}
+spawning_mainstems <-
+  read_sf(here::here("data-raw", "source", "rearing_spatial_data", "nhdplusv2_comid_habitat_xw.shp.zip")) |>
+  janitor::clean_names() |>
+  filter(str_detect(habitat, "spawning")) |>
+  st_zm() |>
+  st_transform(habistat::const_proj_crs()) |>
+  select(river, comid) |>
+  rename(river_cvpia = river)
+```
+
+within each CVPIA watershed, get min and max of spawning flowline and apply it to all streams within that watershed
+
+```{r elevation-filter-output}
+# GET ELEVATION RANGES FOR EACH SPAWNING MAINSTEM
+spawning_elevation_ranges <- 
+  spawning_mainstems |> 
+  left_join(habistat::flowline_attr |>
+              select(comid, elev_min, elev_max)) |>
+  group_by(river_cvpia) |>
+  summarize(spawning_elev_min = min(elev_min), 
+            spawning_elev_max = max(elev_max)) |>
+  st_drop_geometry()
+
+# CHECK FOR MATCHES WITH WATERSHED DATASET
+habistat::cv_watersheds |>
+  st_drop_geometry() |>
+  group_by(watershed_level_3) |>
+  summarize() |> 
+  mutate(matches_name = (watershed_level_3 %in% spawning_elevation_ranges$river_cvpia))
+
+# PULL LIST OF COMIDS WITHIN SPAWNING ELEVATION RANGE
+elevation_range_comid <- 
+  habistat::flowline_attr |>
+  mutate(river_cvpia = watershed_level_3) |>
+  inner_join(spawning_elevation_ranges) |>
+  filter(((elev_min >= spawning_elev_min) & (elev_max <= spawning_elev_max))) |>
+  pull(comid)
+# version with max filter only
+elevation_max_comid <- 
+  habistat::flowline_attr |>
+  mutate(river_cvpia = watershed_level_3) |>
+  inner_join(spawning_elevation_ranges) |>
+  filter((elev_max <= spawning_elev_max)) |>
+  pull(comid)
+
+habistat::flowline_geom_proj |>
+  filter(comid %in% elevation_range_comid) |>
+  ggplot() + geom_sf() + geom_sf(data=spawning_mainstems, color="red")
+```
+
+eliminate those that are not physically connected to the mainstems
+
+use USGS COMID network search API to filter for tribs that flow into mainstem spawning reaches
+
+```{r tributary-network-search}
+# FUNCTION TO PULL 
+list_upstream_comids <- function(comid) {
+  # USGS upstream trib search service
+  # e.g. https://labs.waterdata.usgs.gov/api/nldi/linked-data/comid/12074740/navigation/UT/flowlines?f=json&distance=9999
+  result <- nhdplusTools::navigate_nldi(list(featureSource = "comid", 
+                                        featureID = comid), 
+                                        mode = "upstreamTributaries", 
+                                        distance_km = 9999)
+  # returns a geojson, want just the list of comids
+  return(as.integer(result$UT$nhdplus_comid))
+}
+
+# LIST COMIDS MATCHING NETWORK SEARCH AND ELEVATION RANGE FILTER
+spawning_trib_comid <- 
+  spawning_mainstems |>
+  st_drop_geometry() |>
+  left_join(habistat::flowline_attr |> select(comid, da_area_sq_km)) |>
+  # keep just the farthest DS to minimize amount of searching needed
+  group_by(river_cvpia) |> filter(da_area_sq_km == max(da_area_sq_km)) |> ungroup() |>
+  # get tribuary network using USGS service
+  mutate(trib_comids = map(comid, list_upstream_comids)) |>
+  unnest(trib_comids) |>
+  # apply the elevation range filter
+  #filter(trib_comids %in% potential_spawning_comid) |>
+  pull(trib_comids)
+
+habistat::flowline_geom_proj |>
+  filter(comid %in% spawning_trib_comid) |>
+  filter(comid %in% elevation_range_comid) |>
+  ggplot() + geom_sf() + geom_sf(data=spawning_mainstems, color="red")
+```
+
+## Combine all filters
+
+```{r combined-filters, fig.width=6, fig.height=6, dpi=300}
+# list of comids within the Sacramento-San Joaquin flow network
+# within_network_comids <- c(list_upstream_comids(15048261), list_upstream_comids(1889636))
+
+# filtered flowlines dataset
+flowlines_filtered <- habistat::flowline_geom_proj |>
+  # filter(comid %in% within_network_comids) |>
+  left_join(habistat::flowline_attr) |>
+  filter(((stream_order >= 4) | ((stream_order >= 3) & (da_area_sq_km >= 100))) | 
+           (comid %in% habistat::cv_mainstems$comid)) |>
+  select(comid, geometry)
+
 ggplot() +
-  geom_sf(data=cvpia_extents, color="gray") +
-  geom_sf(data=lyr, color="red") +
-  geom_sf(data=cvpia_extents_spawning |> st_line_sample(sample=c(0, 1)), color="black", size=0.5) 
+  geom_sf(data=cvpia_extents, aes(color="(0) CVPIA Mainstems")) + 
+  geom_sf(data = flowlines_filtered |> 
+            filter(comid %in% spawning_trib_comid) |> 
+            filter(comid %in% elevation_max_comid),
+          aes(color="(2) Spawning Tributary Filter")) +
+  geom_sf(data = flowlines_filtered |> 
+            filter(comid %in% elevation_range_comid),
+          aes(color="(3) Elevation Range Filter")) +
+  geom_sf(data = flowlines_filtered |> 
+            filter(comid %in% spawning_trib_comid) |> 
+            filter(comid %in% elevation_max_comid),
+          aes(color="(2) and (3)")) +
+  geom_sf(data = flowlines_filtered |> 
+            filter(comid %in% gradient_range_comid),
+          aes(color="(4) Gradient Range Filter")) +
+  geom_sf(data = flowlines_filtered |> 
+            filter(comid %in% geomorph_filter_comid),
+          aes(color="(5) Geomorph/Gradient Filter")) +
+  geom_sf(data= flowlines_filtered |> 
+            filter(comid %in% spawning_trib_comid) |>
+            filter(comid %in% geomorph_filter_comid) |>
+            filter(comid %in% gradient_range_comid) |>
+            filter(comid %in% elevation_range_comid),
+          aes(color="(6) All Tributary Filters")) +
+  geom_sf(data=cvpia_extents_nhd_spawning, 
+          aes(color="(1) CVPIA Spawning Mainstems")) +
+  scale_color_manual(name = "", values = c(
+    "(0) CVPIA Mainstems" = "#a6cee3",
+    "(1) CVPIA Spawning Mainstems" = "black",
+    "(2) Spawning Tributary Filter" = "#cab2d6",
+    "(3) Elevation Range Filter" = "#fdbf6f",
+    "(2) and (3)" = "#fb9a99",
+    "(4) Gradient Range Filter" = "#b2df8a",
+    "(5) Geomorph/Gradient Filter" = "#33a02c",
+    "(6) All Tributary Filters" = "#e31a1c"))
 ```
-
-
-
-

@@ -50,6 +50,22 @@ linterp <- function(x, x1, x2, y1, y2){
   y1 + ((x-x1)/(x2-x1)) * (y2-y1)
 }
 
+#' Simple Power Series Interpolation
+#'
+#' @param x The index at which to predict `y`
+#' @param x1 An index `x1 <= x` with known value `y1`
+#' @param x2 An index `x1 >= x` with known value `y2`
+#' @param y1 The value at index `x1`
+#' @param y2 The value at index `x2`
+#'
+#' @returns The predicted value `y` at index `x`
+#' @md
+#'
+#' @export
+pinterp <- function(x, x1, x2, y1, y2){
+  exp(log(y1) + ((log(x)-log(x1))/(log(x2)-log(x1))) * (log(y2)-log(y1)))
+}
+
 #' Perpendicular Transect (helper function for perpendicular_transects)
 #'
 #' @param pair An `sf` multipoint containing two points along a stream or profile line
@@ -199,4 +215,74 @@ hex_color_blend <- function(x, y){
   hex_g <- as.character.hexmode((strtoi(substr(x,4,5), base=16L) + strtoi(substr(y,4,5), base=16L)) / 2)
   hex_b <- as.character.hexmode((strtoi(substr(x,6,7), base=16L) + strtoi(substr(y,6,7), base=16L)) / 2)
   return(paste0("#", hex_r, hex_g, hex_b))
+}
+
+#' Morphological opening for vector polygon geometry (eliminate holes)
+#'
+#' @param x object of class `sf`, `sfc` or `sfg`
+#' @param radius numeric or object of class `units`; radius for the morphological opening operation (dilation followed by erosion). In case `x` has geodetic coordinates (lon/lat) and `sf_use_s2()` is `TRUE`, a numeric `radius` is taken as distance in meters and a `units` object in `radius` is converted to meters. In case `x` has geodetic coordinates (lon/lat) and `sf_use_s2()` is `FALSE`, a numeric `radius` is taken as degrees, and a `units` object in `radius` is converted to `arc_degree` (and warnings are issued). In case `x` does not have geodetic coordinates (projected) then numeric `radius` is assumed to have the units of the coordinates, and a `units` `radius` is converted to those if `st_crs(x)` is not `NA`.
+#'
+#' @returns object of class `sf`, `sfc` or `sfg`
+#' @md
+#'
+#' @export
+st_morph_open <- function(x, radius = 0.01) {
+  # eliminates holes following a union
+  x |>
+    st_buffer(radius) |> # dilation
+    st_buffer(-radius) # erosion
+}
+
+#' Morphological closing for vector polygon geometry (eliminate scraps)
+#'
+#' @param x object of class `sf`, `sfc` or `sfg`
+#' @param radius numeric or object of class `units`; radius for the morphological closing operation (erosion followed by dilation). In case `x` has geodetic coordinates (lon/lat) and `sf_use_s2()` is `TRUE`, a numeric `radius` is taken as distance in meters and a `units` object in `radius` is converted to meters. In case `x` has geodetic coordinates (lon/lat) and `sf_use_s2()` is `FALSE`, a numeric `radius` is taken as degrees, and a `units` object in `radius` is converted to `arc_degree` (and warnings are issued). In case `x` does not have geodetic coordinates (projected) then numeric `radius` is assumed to have the units of the coordinates, and a `units` `radius` is converted to those if `st_crs(x)` is not `NA`.
+#'
+#' @returns object of class `sf`, `sfc` or `sfg`
+#' @md
+#'
+#' @export
+st_morph_close <- function(x, radius = 0.01) {
+  # eliminates slivers/scraps following a difference
+  x |>
+    st_buffer(-radius) |> # erosion
+    st_buffer(radius) # dilation
+}
+
+#' Spatial identity
+#'
+#' @param x object of class `sf`, `sfc` or `sfg`
+#' @param y object of class `sf`, `sfc` or `sfg`
+#' @param radius (optional) numeric or object of class `units`; radius for the morphological opening and closing operations that are applied if `radius != 0`. In case `x` has geodetic coordinates (lon/lat) and `sf_use_s2()` is `TRUE`, a numeric `radius` is taken as distance in meters and a `units` object in `radius` is converted to meters. In case `x` has geodetic coordinates (lon/lat) and `sf_use_s2()` is `FALSE`, a numeric `radius` is taken as degrees, and a `units` object in `radius` is converted to `arc_degree` (and warnings are issued). In case `x` does not have geodetic coordinates (projected) then numeric `radius` is assumed to have the units of the coordinates, and a `units` `radius` is converted to those if `st_crs(x)` is not `NA`.
+#'
+#' @returns object of class `sf`, `sfc` or `sfg`, a "left join" style union operation that includes the full footprint of `x` and those portions of `y` that overlap `x`
+#' @md
+#'
+#' @export
+st_identity <- function(x, y, radius = 0) {
+  if (radius == 0) {
+    st_intersection(x, y) |>
+      bind_rows(st_difference(x, st_union(y)))
+  } else {
+    st_intersection(x, y) |>
+      bind_rows(st_difference(x, st_union(y) |> st_morph_open(radius)) |> st_morph_close(radius))
+  }
+}
+
+#' Spatial coalesce
+#'
+#' @param x object of class `sf`, `sfc` or `sfg`
+#' @param y object of class `sf`, `sfc` or `sfg`
+#' @param radius (optional) numeric or object of class `units`; radius for the morphological opening and closing operations that are applied if `radius != 0`. In case `x` has geodetic coordinates (lon/lat) and `sf_use_s2()` is `TRUE`, a numeric `radius` is taken as distance in meters and a `units` object in `radius` is converted to meters. In case `x` has geodetic coordinates (lon/lat) and `sf_use_s2()` is `FALSE`, a numeric `radius` is taken as degrees, and a `units` object in `radius` is converted to `arc_degree` (and warnings are issued). In case `x` does not have geodetic coordinates (projected) then numeric `radius` is assumed to have the units of the coordinates, and a `units` `radius` is converted to those if `st_crs(x)` is not `NA`.
+#'
+#' @returns object of class `sf`, `sfc` or `sfg`, a topological mosaic that includes `x` geometries within the footprint of `x` and `y` geometries outside of the footprint of `x`. Can be applied to mosaic a list of more than two layers by using `purrr::reduce(list(x, y, z, ...), st_coalesce)`.
+#' @md
+#'
+#' @export
+st_coalesce <- function(x, y, radius = 0) {
+  if (radius == 0) {
+    bind_rows(x, st_difference(y, st_union(x)))
+  } else {
+    bind_rows(x, st_difference(y, st_union(x) |> st_morph_open(radius)) |> st_morph_close(radius))
+  }
 }

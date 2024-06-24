@@ -2,19 +2,30 @@ library(tidyverse)
 library(sf)
 library(shiny)
 library(leaflet)
+library(leafgl)
+
+library(habistat)
 
 # DATA IMPORT ------------------------------------------------------------------
 
-flowline_attributes <- readRDS(here::here("data-raw", "results", "flowline_attributes.Rds"))
+# flowline_attributes <- readRDS(here::here("data-raw", "results", "flowline_attributes.Rds"))
+flowline_attributes <- habistat::flowline_attr
 
-flowlines_gcs <- readRDS(here::here("data-raw", "results", "flowline_geometries.Rds")) |>
-  mutate(object_id = paste0("comid_", comid))
+# flowlines_gcs <- readRDS(here::here("data-raw", "results", "flowline_geometries.Rds")) |>
+#   mutate(object_id = paste0("comid_", comid))
+flowlines_gcs <- habistat::flowline_geom
 
 st_crs(flowlines_gcs) <- "+proj=longlat +datum=WGS84"
 
-predictions_table <- readRDS(here::here("data-raw", "results", "predictions_table.Rds")) |>
+# predictions_table <- readRDS(here::here("data-raw", "results", "predictions_table.Rds")) |>
+#   left_join(flowline_attributes |> transmute(comid, gnis_name, chan_width_ft = chan_width_m/0.3048),
+#             by=join_by(comid), relationship="many-to-one")
+
+predictions_table <- habistat::wua_predicted |>
   left_join(flowline_attributes |> transmute(comid, gnis_name, chan_width_ft = chan_width_m/0.3048),
-            by=join_by(comid), relationship="many-to-one")
+            by=join_by(comid), relationship="many-to-one") #|>
+  #filter(model_type == "RF")
+  # TODO Filter for just RF
 
 all_flows <- unique(predictions_table$flow_cfs)
 

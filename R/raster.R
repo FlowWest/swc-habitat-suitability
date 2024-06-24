@@ -57,6 +57,8 @@ raster_dvhsi_lyr <- function(d, v) (d>0.5 & d<=5.2) & (v>0 & v<=4.0)
 #'
 #' @param rasters A named list or `SpatRasterDataset` of `depth` and `velocity` raster stacks (in `terra` format) containing model results for each flow, as output by `raster_prep_grid()`
 #' @param group_polygons An `sf` polygon feature collection with one polygon for each analysis reach. These may have been delineated previously by splitting the hydraulic model domain into subsections.
+#' @param mask_polygons Optional: An `sf` polygon feature or feature collection containing a mask to be eliminated from the study area; for example, a baseflow channel. Only works if group polygons are also supplied.
+#' @param mask_raster Optional: A `terra` raster of 1 or 0 to be multipled for the purpose of masking out a baseflow channel.
 #' @param hsi_func A `terra::lapp`-compatible function that takes depth (ft) and velocity (ft/s) raster layers and returns habitat suitability index values between 0 and 1. Function arguments should be `d` and `v` in US units. Defaults to the `raster_dvhsi_hqt` function in this package.
 #' @param .group_var The unquoted name of the attribute used to identify groups in the `group_polygons` layer. Defaults to `comid`
 #' @param parallel Toggles parallel processing. Currently under development, keep `FALSE` for now.
@@ -68,6 +70,8 @@ raster_dvhsi_lyr <- function(d, v) (d>0.5 & d<=5.2) & (v>0 & v<=4.0)
 #' @examples
 raster_summarize_hsi <- function(rasters,
                                  group_polygons = NULL,
+                                 mask_polygons = NULL,
+                                 mask_raster = NULL,
                                  hsi_func = raster_dvhsi_hqt,
                                  .group_var = comid,
                                  parallel = FALSE){
@@ -77,6 +81,13 @@ raster_summarize_hsi <- function(rasters,
       group_by({{.group_var}}) |>
       summarize() |>
       st_union(by_feature=T)
+
+    if(!is.null(mask_polygons)) {
+      mask <- mask_polygons |>
+        st_transform(st_crs(group_polygons))
+      grp <- grp |>
+        st_difference(mask)
+    }
 
     grp_vect <- terra::vect(grp)
   }
@@ -89,6 +100,12 @@ raster_summarize_hsi <- function(rasters,
     dep <- terra::wrap(rasters$depth)
     vel <- terra::wrap(rasters$velocity)
 
+    if(!is.null(mask_raster)) {
+      msk <- terra::wrap(mask_raster)
+    } else {
+      msk <- NULL
+    }
+
     if (future::availableCores()>2) {
       future::plan(future::multisession, workers = future::availableCores() - 1)
     } else {
@@ -100,13 +117,18 @@ raster_summarize_hsi <- function(rasters,
     dep <- rasters$depth
     vel <- rasters$velocity
 
+    if(!is.null(mask_raster)) {
+      msk <- mask_raster
+    } else {
+      msk <- NULL
+    }
   }
 
   # TODO: Fix issue where parallelized version is not able to pass through the non-standard symbol for comid name. Need to quo/unquo to pass. Can't properly use parallel processing until this is fixed.
   # .group_var_str = rlang::as_string(.group_var)
   # message(.group_var_str)
 
-  run_for_flow <- function(flow, dep, vel) {
+  run_for_flow <- function(flow, dep, vel, msk = NULL) {
 
     if (parallel) {
       d <- terra::unwrap(dep)[[as.character(flow)]]
@@ -122,6 +144,11 @@ raster_summarize_hsi <- function(rasters,
     message(paste(flow, " - apply habitat suitability function"))
     #hsi <- hsi_func(d, v)
     hsi <- terra::lapp(c(d, v), hsi_func)
+
+    if(!is.null(msk)) {
+      message(paste(flow, " - apply mask"))
+      hsi <- hsi * msk
+    }
 
     if(!is.null(group_polygons)){
 
@@ -155,7 +182,7 @@ raster_summarize_hsi <- function(rasters,
 
     result <- names(rasters$depth) |>
       setNames(names(rasters$depth)) |>
-      future.apply::future_lapply(function(x) run_for_flow(x, dep, vel), future.seed = 47) |>
+      future.apply::future_lapply(function(x) run_for_flow(x, dep, vel, msk), future.seed = 47) |>
       bind_rows(.id = "flow_cfs") |>
       mutate(flow_cfs = as.numeric(flow_cfs))
 
@@ -163,7 +190,7 @@ raster_summarize_hsi <- function(rasters,
 
     result <- names(rasters$depth) |>
       setNames(names(rasters$depth)) |>
-      lapply(function(x) run_for_flow(x, dep, vel)) |>
+      lapply(function(x) run_for_flow(x, dep, vel, msk)) |>
       bind_rows(.id = "flow_cfs") |>
       mutate(flow_cfs = as.numeric(flow_cfs))
   }

@@ -100,6 +100,7 @@ vector_calculate_hsi <- function(data, hsi_func = vector_dvhsi_hqt) {
 #'
 #' @param mesh An `sf` polygon feature collection with one polygon for each vertex (computation point) identified by a `vid` attribute. These may be Voronoi (aka Thiessen) polygons generated based on vertex points in a tool such as sf (`st_voronoi`), QGIS (Voronoi Polygons), or ArcGIS (Create Thiessen Polygons).
 #' @param group_polygons An `sf` polygon feature collection with one polygon for each analysis reach. These may have been delineated previously by splitting the hydraulic model domain into subsections.
+#' @param mask_polygons Optional: An `sf` polygon feature collection defining areas to be masked out of the HSI calculation. These areas will still be included in the total inundated area.
 #' @param .group_var The unquoted name of the attribute used to identify groups in the `group_polygons` layer. Defaults to `comid`
 #' @param .id_var The unquoted name of the attribute used to identify vertices in the `mesh` layer. Defaults to `vid`
 #'
@@ -110,6 +111,7 @@ vector_calculate_hsi <- function(data, hsi_func = vector_dvhsi_hqt) {
 #' @export
 vector_prep_mesh <- function(mesh,
                              group_polygons = NULL,
+                             mask_polygons = NULL,
                              .group_var = comid,
                              .id_var = vid) {
 
@@ -121,11 +123,30 @@ vector_prep_mesh <- function(mesh,
   result <- mesh |>
     mutate(area_ft2 = st_area(geometry) |> units::set_units("ft2") |> units::drop_units()) |>
     st_centroid() |>
-    st_intersection(groups) |> # TODO Check performance difference between st_join and st_intersection
-    st_drop_geometry() |>
+    st_intersection(groups) |>
     transmute({{.id_var}},
               {{.group_var}},
               area_ft2)
+
+  if(!is.null(mask_polygons)) {
+
+    mask_polygons <-
+      mask_polygons |>
+      st_sf() |>
+      transmute(mask_val = 0)
+
+    result <- result |>
+      st_join(mask_polygons, largest = T, left = T) |>
+      mutate(mask_val = coalesce(mask_val, 1)) |>
+      st_drop_geometry()
+
+  } else {
+
+    result <- result |>
+      mutate(mask_val = 1) |>
+      st_drop_geometry()
+
+  }
 
   return(result)
 
@@ -148,6 +169,6 @@ vector_summarize_hsi <- function(mesh_tbl, hsi_tbl, .group_var = comid, .id_var=
     inner_join(hsi_tbl, by=join_by({{.id_var}}), relationship="one-to-many") |>
     group_by({{.group_var}}, flow_cfs) |>
     summarize(area_tot = sum(if_else(wdepth > 0, area_ft2, 0)),
-              area_wua = sum(area_ft2 * hsi)) |>
+              area_wua = sum(area_ft2 * hsi * mask_val)) |>
     mutate(area_pct = area_wua / area_tot)
 }

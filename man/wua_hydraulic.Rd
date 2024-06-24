@@ -5,12 +5,15 @@
 \alias{wua_hydraulic}
 \title{WUA/LF by ComID by Flow (training dataset)}
 \format{
-An object of class \code{tbl_df} (inherits from \code{tbl}, \code{data.frame}) with 3804 rows and 6 columns.
+An object of class \code{tbl_df} (inherits from \code{tbl}, \code{data.frame}) with 7644 rows and 10 columns.
 }
 \usage{
 wua_hydraulic
 }
 \description{
 WUA/LF by ComID by Flow (training dataset)
+}
+\examples{
+wua_hydraulic |> pillar::glimpse()
 }
 \keyword{datasets}

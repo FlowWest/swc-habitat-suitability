@@ -44,19 +44,18 @@ gc() # garbage collect after loading from habistat package
 
 all_flows <- unique(predictions$flow_cfs)
 
-geom <- get_data(flowline_geom, package = "habistat") |>
-  st_set_crs("+proj=longlat +datum=WGS84") |> # for display purposes only
-  mutate(object_id = paste0("comid_", comid)) |>
-  inner_join(get_data(flowline_attr, package = "habistat") |>
-               transmute(comid, gnis_name), # chan_width_ft = chan_width_m/0.3048),
-             by = join_by(comid))
+attr <- get_data(flowline_attr, package = "habistat") |>
+  filter(comid %in% predictions$comid)
 
 gc() # garbage collect after loading from habistat package
 
-# attr <- get_data(flowline_attr, package = "habistat") |>
-#   filter(comid %in% predictions$comid)
-#
-# gc() # garbage collect after loading from habistat package
+geom <- get_data(flowline_geom, package = "habistat") |>
+  st_set_crs("+proj=longlat +datum=WGS84") |> # for display purposes only
+  mutate(object_id = paste0("comid_", comid)) |>
+  inner_join(attr |> transmute(comid, gnis_name), # chan_width_ft = chan_width_m/0.3048),
+             by = join_by(comid))
+
+gc() # garbage collect after loading from habistat package
 
 # PLOT STYLES AND PALETTES -----------------------------------------------------
 

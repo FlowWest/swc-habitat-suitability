@@ -71,24 +71,24 @@ function(input, output, session){
     }
   })
 
-#  active_attr_table <- reactive({
-#   #if (!is.null(selected_point$object_id) & (length(selected_point$comid)>0)) {
-#     if (!is.null(selected_point$object_id)) {
-#     result <- attr |>
-#       filter(comid == selected_point$comid) |>
-#       select(where(is.numeric)) |>
-#       pivot_longer(everything())
-#       #gc()
-#     return(result)
-#   }
-#  })
-#
-#  output$attr_table <- DT::renderDT({
-#      if (!is.null(selected_point$object_id)) {
-#        DT::datatable(active_attr_table(),
-#                      options = list(paging = F, searching = F))
-#      }
-#    })
+  active_attr_table <- reactive({
+   #if (!is.null(selected_point$object_id) & (length(selected_point$comid)>0)) {
+     if (!is.null(selected_point$object_id)) {
+     result <- attr |>
+       filter(comid == selected_point$comid) |>
+       select(where(is.numeric)) |>
+       pivot_longer(everything())
+       #gc()
+     return(result)
+   }
+  })
+
+  output$attr_table <- DT::renderDT({
+      if (!is.null(selected_point$object_id)) {
+        DT::datatable(active_attr_table(),
+                      options = list(paging = F, searching = F))
+      }
+    })
 
   output$fsa_plot <- renderPlot({
     if (!is.null(selected_point$object_id)) { #& (length(selected_point$comid)>0)) {

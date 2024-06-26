@@ -183,6 +183,25 @@ function(input, output, session){
   output$main_map <- renderLeaflet({
     shinyjs::showElement(id = 'loading_action')
     make_leaflet() |>
+      leaflet::addPolygons(data = watersheds,
+                           stroke = T,
+                           weight = 0,
+                           color = "#FFFFFF",
+                           opacity = 0,
+                           fill = T,
+                           fillColor = "#FFFFFF",
+                           fillOpacity = 0,
+                           layerId = ~watershed_id,
+                           label = ~lapply(watershed_label, htmltools::HTML),
+                           highlightOptions = highlightOptions(stroke = T,
+                                                               weight = 1,
+                                                               color = "white",
+                                                               opacity = 1,
+                                                               fill = T,
+                                                               fillColor = "red",
+                                                               fillOpacity = 0.5,
+                                                               bringToFront = F)
+      ) |>
       layer_flowlines() #|>
     #leaflet::addLayersControl(baseGroups = c("watersheds", "none"),
     #                          overlayGroups = c("flowlines", "aoi"),

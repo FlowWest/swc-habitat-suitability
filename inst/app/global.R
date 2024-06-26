@@ -16,19 +16,12 @@ get_data <- function(...) {
 
 # DATA IMPORT ------------------------------------------------------------------
 
-#predictions_table <- habistat::wua_predicted |>
-#  inner_join(habistat::flowline_attr |> transmute(comid, gnis_name, chan_width_ft = chan_width_m/0.3048),
-#            by=join_by(comid), relationship="many-to-one") #|>
-#  #filter(model_type == "RF")
-#  # TODO Filter for just RF
-
 predictions <- get_data(wua_predicted, package = "habistat") |>
   mutate(model_bfc = if_else(model_bfc, "p", "a")) |> # baseflow channel removed pre (a) or post (p) prediction
   mutate(model_id = paste0(model_name, "_", model_bfc)) |>
-  select(comid, flow_cfs, model_id, wua_per_lf_pred, river_cvpia, watershed_level_3) |>
+  select(comid, flow_cfs, model_id, wua_per_lf_pred, river_cvpia, watershed_level_3, reach_length_ft) |>
   pivot_wider(names_from = model_id,
               values_from = wua_per_lf_pred,
-              #values_fn = first,
               names_glue = c("wua_per_lf_pred_{model_id}")) |>
   left_join(get_data(wua_hydraulic_interp, package = "habistat") |>
               filter(!bfc) |> # only showing the actuals with prior bfc removed for now
@@ -52,10 +45,31 @@ gc() # garbage collect after loading from habistat package
 geom <- get_data(flowline_geom, package = "habistat") |>
   st_set_crs("+proj=longlat +datum=WGS84") |> # for display purposes only
   mutate(object_id = paste0("comid_", comid)) |>
-  inner_join(attr |> transmute(comid, gnis_name), # chan_width_ft = chan_width_m/0.3048),
-             by = join_by(comid))
+  inner_join(attr |> transmute(comid, gnis_name), by = join_by(comid))
 
 gc() # garbage collect after loading from habistat package
+
+#predictions_summary <- predictions |>
+#  group_by(watershed_level_3, flow_cfs, reach_length_ft) |>
+#  summarize(across(starts_with("wua_per_lf_pred_"), function(x) sum(x * reach_length_ft) / sum(reach_length_ft)))
+
+watersheds <- get_data(cv_watersheds, package = "habistat") |>
+  group_by(watershed_level_1, watershed_level_2, watershed_level_3) |> #, range_pisces) |>
+  summarize() |>
+  ungroup() |>
+  st_union(by_feature=T) |>
+  st_transform("+proj=longlat +datum=NAD83") |>
+  st_set_crs("+proj=longlat +datum=WGS84") |> # for display purposes only
+  mutate(watershed_id = paste0("watershed_", row_number()),
+         watershed_label = paste0(watershed_level_1, " Basin",
+                                  if_else(watershed_level_2 != watershed_level_1,
+                                          paste0("<br />", watershed_level_2, " Watershed"),
+                                          " (Direct Drainage)"),
+                                  if_else(watershed_level_3 != watershed_level_2,
+                                          paste0("<br />", watershed_level_3, " Subwatershed"),
+                                          "")))
+
+gc()
 
 # PLOT STYLES AND PALETTES -----------------------------------------------------
 

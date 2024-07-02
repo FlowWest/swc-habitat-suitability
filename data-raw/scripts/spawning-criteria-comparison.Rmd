@@ -1,0 +1,103 @@
+---
+title: "Spawning Criteria (HSC) Comparison"
+author: "[Maddee Rubenson](mailto:mrubenson@flowwest.com)"
+date: "`r Sys.Date()`"
+output: 
+  github_document:
+    toc: true
+    toc_depth: 3
+    number_sections: false
+    math_method:
+      engine: webtex
+      url: https://latex.codecogs.com/svg.image?
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+
+theme_set(theme_minimal())
+
+```
+
+## HSC  
+
+### Read in data 
+
+Data is from various sources and was compiled by Mark Gard for use in CVPIA DSMHabitat. 
+
+
+```{r}
+hsc_raw <- readxl::read_excel(here::here('data-raw', 'source', 'hsc', 'HSC.xlsx'), sheet = "flat") |> 
+  janitor::clean_names() |> 
+  glimpse()
+
+spawning_hsc <- hsc_raw |> 
+  filter(life_stage == "Spawning") |> glimpse()
+
+unique(spawning_hsc$suitability_metric)
+```
+
+### Depth HSI
+
+```{r message=FALSE, warning=FALSE}
+spawning_hsc |> 
+  filter(suitability_metric == "Depth") |> 
+  filter(units_si < 3,
+         species == "Chinook",
+         race == "Fall") |>   
+  ggplot() + 
+  geom_point(aes(x = units_si, y = suitability_index, color = paste0(river, " (", citation, ")"))) + 
+  geom_line(aes(x = units_si, y = suitability_index, color = paste0(river, " (", citation, ")"))) + 
+  facet_wrap(~race, scales = "free_x") + 
+  xlab('depth (meters)') + 
+  theme(legend.title=element_blank())
+
+# Take an average across all reaches
+spawning_hsc |> 
+  filter(suitability_metric == "Depth") |> 
+  filter(units_si < 3,
+         species == "Chinook",
+         race == "Fall") |>   
+  mutate(units_si = round(units_si, 1)) |> 
+  group_by(units_si) |> 
+  summarise(mean_suit_index = mean(suitability_index)) |> 
+  ggplot() + 
+  geom_line(aes(x = units_si, y = mean_suit_index), size = 1) + 
+  xlab('depth (meters)') + 
+  ylab('mean suitability index') 
+
+
+```
+
+### Velocity HSI
+
+```{r message=FALSE, warning=FALSE}
+spawning_hsc |> 
+  filter(suitability_metric == "Velocity") |> 
+  filter(units_si < 30,
+         species == "Chinook",
+         race == "Fall") |>   
+  ggplot() + 
+  geom_point(aes(x = units_si, y = suitability_index, color = paste0(river, " (", citation, ")"))) + 
+  geom_line(aes(x = units_si, y = suitability_index, color = paste0(river, " (", citation, ")"))) + 
+  facet_wrap(~race, scales = "free_x") + 
+  xlab('velocity (meters/second)') + 
+  theme(legend.title=element_blank())
+
+# Take an average
+spawning_hsc |> 
+  filter(suitability_metric == "Velocity") |> 
+  filter(units_si < 30,
+         species == "Chinook",
+         race == "Fall") |>   
+  mutate(units_si = round(units_si, 1)) |> 
+  group_by(units_si) |> 
+  summarise(mean_suit_index = mean(suitability_index)) |> 
+  ggplot() + 
+  geom_line(aes(x = units_si, y = mean_suit_index), size = 1) + 
+  xlab('velocity (meters/second)')  + 
+  ylab('mean suitability index')
+
+```
+
+

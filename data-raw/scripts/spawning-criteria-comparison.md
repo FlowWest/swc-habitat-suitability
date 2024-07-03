@@ -1,7 +1,7 @@
 Spawning Criteria (HSC) Comparison
 ================
 [Maddee Rubenson](mailto:mrubenson@flowwest.com)
-2024-07-02
+2024-07-03
 
 - [HSC](#hsc)
   - [Read in data](#read-in-data)
@@ -62,14 +62,14 @@ unique(spawning_hsc$suitability_metric)
 spawning_hsc |> 
   filter(suitability_metric == "Depth") |> 
   filter(units_si < 3,
-         species == "Chinook",
-         race == "Fall") |>   
+         species == "Chinook") |>   
   ggplot() + 
   geom_point(aes(x = units_si, y = suitability_index, color = paste0(river, " (", citation, ")"))) + 
   geom_line(aes(x = units_si, y = suitability_index, color = paste0(river, " (", citation, ")"))) + 
   facet_wrap(~race, scales = "free_x") + 
   xlab('depth (meters)') + 
-  theme(legend.title=element_blank())
+  theme(legend.title=element_blank()) + 
+  facet_wrap(~ race)
 ```
 
 ![](spawning-criteria-comparison_files/figure-gfm/unnamed-chunk-2-1.png)<!-- -->
@@ -79,15 +79,14 @@ spawning_hsc |>
 spawning_hsc |> 
   filter(suitability_metric == "Depth") |> 
   filter(units_si < 3,
-         species == "Chinook",
-         race == "Fall") |>   
+         species == "Chinook") |>   
   mutate(units_si = round(units_si, 1)) |> 
-  group_by(units_si) |> 
-  summarise(mean_suit_index = mean(suitability_index)) |> 
+  group_by(units_si, race) |> 
+  summarise(max_suit_index = max(suitability_index)) |> 
   ggplot() + 
-  geom_line(aes(x = units_si, y = mean_suit_index), size = 1) + 
+  geom_line(aes(x = units_si, y = max_suit_index, color = race), size = 1) + 
   xlab('depth (meters)') + 
-  ylab('mean suitability index') 
+  ylab('suitability index') 
 ```
 
 ![](spawning-criteria-comparison_files/figure-gfm/unnamed-chunk-2-2.png)<!-- -->
@@ -98,8 +97,7 @@ spawning_hsc |>
 spawning_hsc |> 
   filter(suitability_metric == "Velocity") |> 
   filter(units_si < 30,
-         species == "Chinook",
-         race == "Fall") |>   
+         species == "Chinook") |>   
   ggplot() + 
   geom_point(aes(x = units_si, y = suitability_index, color = paste0(river, " (", citation, ")"))) + 
   geom_line(aes(x = units_si, y = suitability_index, color = paste0(river, " (", citation, ")"))) + 
@@ -115,15 +113,14 @@ spawning_hsc |>
 spawning_hsc |> 
   filter(suitability_metric == "Velocity") |> 
   filter(units_si < 30,
-         species == "Chinook",
-         race == "Fall") |>   
+         species == "Chinook") |>   
   mutate(units_si = round(units_si, 1)) |> 
-  group_by(units_si) |> 
-  summarise(mean_suit_index = mean(suitability_index)) |> 
+  group_by(units_si, race) |> 
+  summarise(max_suit_index = max(suitability_index)) |> 
   ggplot() + 
-  geom_line(aes(x = units_si, y = mean_suit_index), size = 1) + 
+  geom_line(aes(x = units_si, y = max_suit_index, color = race), size = 1) + 
   xlab('velocity (meters/second)')  + 
-  ylab('mean suitability index')
+  ylab('suitability index')
 ```
 
 ![](spawning-criteria-comparison_files/figure-gfm/unnamed-chunk-3-2.png)<!-- -->

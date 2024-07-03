@@ -2,13 +2,13 @@ library(tidyverse)
 library(sf)
 googledrive::drive_auth()
 
-st_identity <- function(x, y, ..) {
+st_identity <- function(x, y, ...) {
   st_intersection(x, y, ...) |>
   bind_rows(st_difference(x, st_union(y,...),...) |> st_collection_extract("POLYGON"))
 }
 
-st_coalesce <- function(x, y, ..) {
-  bind_rows(x, st_difference(y, st_union(x, ..),...))
+st_coalesce <- function(x, y, ...) {
+  bind_rows(x, st_difference(y, st_union(x, ...),...))
 }
 
 #st_identity <- function(x, y, model="open", dimensions="polygon",...) {
@@ -37,6 +37,7 @@ huc2poly <- function(filter_expr) {
 watersheds_nested <-
   tribble(~level, ~parent, ~river, ~geometry,
           1, NA,                  "Sacramento River",        huc2poly(HUC_4 == 1802 & HUC_8 != 18020001),
+          #2, "Sacramento River",  "North Delta",             huc2poly(HUC_10 %in% c(1802016305, 1802016306, 1802016307)),
           2, "Sacramento River",  "Upper Sacramento River",  huc2poly(HUC_8 %in% c(18020005)),
           2, "Sacramento River",  "McCloud River",           huc2poly(HUC_8 %in% c(18020004)),
           2, "Sacramento River",  "Pit River",               huc2poly(HUC_8 %in% c(18020003, 18020002)),
@@ -59,7 +60,8 @@ watersheds_nested <-
           3, "Feather River",     "Bear River",              huc2poly(HUC_8 %in% c(18020126)),
           2, "Sacramento River",  "American River",          huc2poly(HUC_8 %in% c(18020111, 18020128, 18020129)),
           1, NA,                  "San Joaquin River",       huc2poly(HUC_4 == 1804),
-          2, "San Joaquin River", "Mokelumne River",         huc2poly(HUC_8 %in% c(18040012)),
+          #2, "San Joaquin River", "South Delta",             huc2poly(HUC_10 %in% c(1804000307, 1804000308, 1804000309)),
+          2, "San Joaquin River", "Mokelumne River",         huc2poly(HUC_8 %in% c(18040012, 18040013)),
           3, "Mokelumne River",   "Cosumnes River",          huc2poly(HUC_8 %in% c(18040013)),
           2, "San Joaquin River", "Calaveras River",         huc2poly(HUC_8 %in% c(18040011)),
           2, "San Joaquin River", "Stanislaus River",        huc2poly(HUC_8 %in% c(18040010)),
@@ -156,11 +158,14 @@ ranges <- bind_rows(range_historical, range_extant)
 cv_bypasses <-
   read_sf(here::here("data-raw", "source", "rearing_spatial_data", "yolo_sutter_bypass_extents.shp.zip")) |>
   st_transform(habistat::const_proj_crs()) |>
-  group_by(bypass) |>
+  mutate(bypass = if_else(str_detect(area_name, "Butte Sink"), "Butte Sink", paste(bypass, "Bypass")),
+         bypass_parent = if_else(str_detect(area_name, "Butte Sink"), "Butte Creek", "Sacramento River"),
+         bypass_level_1 = "Sacramento River",
+         bypass_level_2 = if_else(str_detect(area_name, "Butte Sink"), "Butte Creek", bypass),
+         bypass_level_3 = bypass) |>
+  group_by(bypass, bypass_parent, bypass_level_1, bypass_level_2, bypass_level_3) |>
   summarize() |>
-  st_union(by_feature = T) |>
-  mutate(bypass = paste(bypass, "Bypass"),
-         bypass_parent = "Sacramento River")
+  st_union(by_feature = T)
 
 cv_bypasses |> saveRDS(here::here("data-raw", "results", "cv_bypasses.Rds"))
 
@@ -173,14 +178,20 @@ cv_delta <-
             "Sacramento River", "North Delta", huc2poly(HUC_4 == 1802),
             "San Joaquin River", "South Delta", huc2poly(HUC_4 == 1804)) |>
       st_as_sf(crs=st_crs(catchments)) |>
-      st_transform(habistat::const_proj_crs()))
+      st_transform(habistat::const_proj_crs())) |>
+  mutate(delta_level_1 = delta_parent,
+         delta_level_2 = delta,
+         delta_level_3 = delta)
 
 cv_delta |> saveRDS(here::here("data-raw", "results", "cv_delta.Rds"))
 
 cv_bypasses_delta <-
   st_coalesce(cv_bypasses, cv_delta) |>
   transmute(bypass_delta_name = coalesce(bypass, delta),
-            bypass_delta_parent = coalesce(bypass_parent, delta_parent))
+            bypass_delta_parent = coalesce(bypass_parent, delta_parent),
+            bypass_delta_level_1 = coalesce(bypass_level_1, delta_level_1),
+            bypass_delta_level_2 = coalesce(bypass_level_2, delta_level_2),
+            bypass_delta_level_3 = coalesce(bypass_level_3, delta_level_3))
 
 cv_bypasses_delta |> plot()
 
@@ -204,13 +215,14 @@ cv_watersheds <-
   rename(range_pisces = range,
          watershed_cvpia = river,
          watershed_cvpia_parent = parent) #|>
-  # merge in delta and bypasses, replacing overlapping areas at level 2
+  # merge in delta and bypasses, replacing overlapping areas
   st_identity(cv_bypasses_delta) |>
   mutate(watershed_cvpia = coalesce(bypass_delta_name, watershed_cvpia),
          watershed_cvpia_parent = coalesce(bypass_delta_parent, watershed_cvpia_parent),
-         watershed_level_2 = coalesce(bypass_delta_name, watershed_level_2),
-         watershed_level_3 = coalesce(bypass_delta_name, watershed_level_3),) |>
-  select(-bypass_delta_name, bypass_delta_parent) |>
+         watershed_level_1 = coalesce(bypass_delta_level_1, watershed_level_1),
+         watershed_level_2 = coalesce(bypass_delta_level_2, watershed_level_2),
+         watershed_level_3 = coalesce(bypass_delta_level_3, watershed_level_3)) |>
+  select(-starts_with("bypass_delta_")) |>
   # eliminate dangling linestrings
   mutate(geometry = st_sfc(lapply(geometry, polygon_filter), crs=habistat::const_proj_crs())) |>
   st_collection_extract(type = "POLYGON")

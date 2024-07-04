@@ -209,4 +209,61 @@ function(input, output, session){
     #                          options = leaflet::layersControlOptions(collapsed = FALSE))
   })
 
+
+# SELECTED WATERSHED OBSERVER ----------------------------------------------------
+
+selected_watershed <- reactiveValues(object_id = NA,
+                                     lng = NA,
+                                     lat = NA)
+
+  observeEvent(input$main_map_shape_click, {
+    cat(input$main_map_shape_click$id)
+    if (!is.null(input$main_map_shape_click$id)) {
+      if(substr(input$main_map_shape_click$id, 1, 10) == "watershed_") {
+        selected_watershed$object_id <- input$main_map_shape_click$id
+        selected_watershed$lng <- input$main_map_shape_click$lng
+        selected_watershed$lat <- input$main_map_shape_click$lat
+      }
+    }
+  })
+
+  active_watershed_geom <- reactive({
+    watersheds |>
+      filter(watershed_id == selected_watershed$object_id) |>
+      mutate(object_id = "active_watershed")
+  })
+
+  active_watershed_bbox <- reactive({
+    st_bbox(active_watershed_geom())
+  })
+
+  observe({
+
+    message(selected_watershed$object_id)
+
+    proxy <- leaflet::leafletProxy("main_map") |>
+      leaflet::removeShape("active_watershed")
+
+    if (nrow(active_watershed_geom()) > 0) {
+      proxy |>
+        leaflet::addPolygons(data = active_watershed_geom(),
+                             stroke = T,
+                             weight = 2,
+                             color = "red",
+                             opacity = 1,
+                             fill = T,
+                             fillColor = "red",
+                             fillOpacity = 0.25,
+                             layerId = "active_watershed",
+                             label = ~lapply(watershed_label, htmltools::HTML))
+
+      proxy |>
+        leaflet::flyToBounds(lng1 = active_watershed_bbox()$xmin,
+                             lat1 = active_watershed_bbox()$ymin,
+                             lng2 = active_watershed_bbox()$xmax,
+                             lat2 = active_watershed_bbox()$ymax)
+    }
+  })
+
+
 }

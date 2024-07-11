@@ -1,5 +1,5 @@
 ---
-title: "Spawning Criteria (HSC) Comparison"
+title: "Spawning Habitat Suitability Criteria"
 author: "[Maddee Rubenson](mailto:mrubenson@flowwest.com)"
 date: "`r Sys.Date()`"
 output: 
@@ -19,12 +19,17 @@ theme_set(theme_minimal())
 
 ```
 
-## HSC  
+## Habitat Suitability Criteria 
+
+## Objective 
+
+Develop a habitat suitability criteria that can be used across watersheds within the HabiStat model.
+
+## Methods 
 
 ### Read in data 
 
-Data is from various sources and was compiled by Mark Gard for use in CVPIA DSMHabitat. 
-
+Data is from various sources and was compiled by Mark Gard for use in CVPIA DSMHabitat. Within the dataset are spawning criteria for depth, velocity, and substrate for 11 watersheds and Fall, Late Fall, Winter, Spring for Chinook Salmon.
 
 ```{r}
 hsc_raw <- readxl::read_excel(here::here('data-raw', 'source', 'hsc', 'HSC.xlsx'), sheet = "flat") |> 
@@ -32,9 +37,18 @@ hsc_raw <- readxl::read_excel(here::here('data-raw', 'source', 'hsc', 'HSC.xlsx'
   glimpse()
 
 spawning_hsc <- hsc_raw |> 
-  filter(life_stage == "Spawning") |> glimpse()
+  filter(life_stage == "Spawning")
 
-unique(spawning_hsc$suitability_metric)
+
+spawning_table <- hsc_raw |> 
+  filter(life_stage == "Spawning",
+         species == "Chinook") |>
+  select(river, race, suitability_metric, citation) |> 
+  mutate(suitability_metric = paste0(unique(suitability_metric), collapse = "; ")) |> 
+  distinct() 
+
+knitr::kable(spawning_table, caption = "All habitat suitability criteria compiled by Mark Gard")
+
 ```
 
 ### Depth HSI

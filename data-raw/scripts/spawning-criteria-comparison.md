@@ -1,7 +1,7 @@
 Spawning Habitat Suitability Criteria
 ================
 [Maddee Rubenson](mailto:mrubenson@flowwest.com)
-2024-07-11
+2024-07-16
 
 - [Habitat Suitability Criteria](#habitat-suitability-criteria)
 - [Objective](#objective)
@@ -100,7 +100,7 @@ spawning_hsc |>
 ![](spawning-criteria-comparison_files/figure-gfm/unnamed-chunk-2-1.png)<!-- -->
 
 ``` r
-# Take an average across all reaches
+# Take max across all reaches
 spawning_hsc |> 
   filter(suitability_metric == "Depth") |> 
   filter(units_si < 3,
@@ -115,6 +115,22 @@ spawning_hsc |>
 ```
 
 ![](spawning-criteria-comparison_files/figure-gfm/unnamed-chunk-2-2.png)<!-- -->
+
+``` r
+spawning_hsc |> 
+  filter(suitability_metric == "Depth") |> 
+  filter(units_si < 3,
+         species == "Chinook") |>   
+  mutate(units_si = round(units_si, 1)) |> 
+  group_by(units_si) |> 
+  summarise(max_suit_index = max(suitability_index)) |> 
+  ggplot() + 
+  geom_line(aes(x = units_si, y = max_suit_index), size = 1) + 
+  xlab('depth (meters)') + 
+  ylab('suitability index') 
+```
+
+![](spawning-criteria-comparison_files/figure-gfm/unnamed-chunk-2-3.png)<!-- -->
 
 ### Velocity HSI
 
@@ -134,7 +150,7 @@ spawning_hsc |>
 ![](spawning-criteria-comparison_files/figure-gfm/unnamed-chunk-3-1.png)<!-- -->
 
 ``` r
-# Take an average
+# Take max
 spawning_hsc |> 
   filter(suitability_metric == "Velocity") |> 
   filter(units_si < 30,
@@ -149,3 +165,19 @@ spawning_hsc |>
 ```
 
 ![](spawning-criteria-comparison_files/figure-gfm/unnamed-chunk-3-2.png)<!-- -->
+
+``` r
+spawning_hsc |> 
+  filter(suitability_metric == "Velocity") |> 
+  filter(units_si < 30,
+         species == "Chinook") |>   
+  mutate(units_si = round(units_si, 1)) |> 
+  group_by(units_si) |> 
+  summarise(max_suit_index = max(suitability_index)) |> 
+  ggplot() + 
+  geom_line(aes(x = units_si, y = max_suit_index), size = 1) + 
+  xlab('velocity (meters/second)')  + 
+  ylab('suitability index')
+```
+
+![](spawning-criteria-comparison_files/figure-gfm/unnamed-chunk-3-3.png)<!-- -->

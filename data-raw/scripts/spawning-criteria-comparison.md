@@ -1,7 +1,7 @@
 Spawning Habitat Suitability Criteria
 ================
 [Maddee Rubenson](mailto:mrubenson@flowwest.com)
-2024-07-16
+2024-07-17
 
 - [Habitat Suitability Criteria](#habitat-suitability-criteria)
 - [Objective](#objective)
@@ -9,6 +9,7 @@ Spawning Habitat Suitability Criteria
   - [Read in data](#read-in-data)
   - [Depth HSI](#depth-hsi)
   - [Velocity HSI](#velocity-hsi)
+- [Create Suitability Data Files](#create-suitability-data-files)
 
 ## Habitat Suitability Criteria
 
@@ -26,12 +27,6 @@ CVPIA DSMHabitat. Within the dataset are spawning criteria for depth,
 velocity, and substrate for 11 watersheds and Fall, Late Fall, Winter,
 Spring for Chinook Salmon.
 
-``` r
-hsc_raw <- readxl::read_excel(here::here('data-raw', 'source', 'hsc', 'HSC.xlsx'), sheet = "flat") |> 
-  janitor::clean_names() |> 
-  glimpse()
-```
-
     ## Rows: 2,818
     ## Columns: 9
     ## $ citation           <chr> "USFWS.1997a", "USFWS.1997a", "USFWS.1997a", "USFWS…
@@ -43,21 +38,6 @@ hsc_raw <- readxl::read_excel(here::here('data-raw', 'source', 'hsc', 'HSC.xlsx'
     ## $ units              <chr> "Code", "Code", "Code", "Code", "Code", "Code", "Co…
     ## $ units_si           <dbl> 0.1000000, 1.0000000, 1.2000000, 1.3000000, 1.40000…
     ## $ suitability_index  <dbl> 0.00, 0.00, 0.36, 1.00, 0.97, 0.97, 0.53, 0.28, 0.0…
-
-``` r
-spawning_hsc <- hsc_raw |> 
-  filter(life_stage == "Spawning")
-
-
-spawning_table <- hsc_raw |> 
-  filter(life_stage == "Spawning",
-         species == "Chinook") |>
-  select(river, race, suitability_metric, citation) |> 
-  mutate(suitability_metric = paste0(unique(suitability_metric), collapse = "; ")) |> 
-  distinct() 
-
-knitr::kable(spawning_table, caption = "All habitat suitability criteria compiled by Mark Gard")
-```
 
 | river      | race      | suitability_metric         | citation      |
 |:-----------|:----------|:---------------------------|:--------------|
@@ -83,101 +63,94 @@ All habitat suitability criteria compiled by Mark Gard
 
 ### Depth HSI
 
-``` r
-spawning_hsc |> 
-  filter(suitability_metric == "Depth") |> 
-  filter(units_si < 3,
-         species == "Chinook") |>   
-  ggplot() + 
-  geom_point(aes(x = units_si, y = suitability_index, color = paste0(river, " (", citation, ")"))) + 
-  geom_line(aes(x = units_si, y = suitability_index, color = paste0(river, " (", citation, ")"))) + 
-  facet_wrap(~race, scales = "free_x") + 
-  xlab('depth (meters)') + 
-  theme(legend.title=element_blank()) + 
-  facet_wrap(~ race)
-```
-
-![](spawning-criteria-comparison_files/figure-gfm/unnamed-chunk-2-1.png)<!-- -->
-
-``` r
-# Take max across all reaches
-spawning_hsc |> 
-  filter(suitability_metric == "Depth") |> 
-  filter(units_si < 3,
-         species == "Chinook") |>   
-  mutate(units_si = round(units_si, 1)) |> 
-  group_by(units_si, race) |> 
-  summarise(max_suit_index = max(suitability_index)) |> 
-  ggplot() + 
-  geom_line(aes(x = units_si, y = max_suit_index, color = race), size = 1) + 
-  xlab('depth (meters)') + 
-  ylab('suitability index') 
-```
-
-![](spawning-criteria-comparison_files/figure-gfm/unnamed-chunk-2-2.png)<!-- -->
-
-``` r
-spawning_hsc |> 
-  filter(suitability_metric == "Depth") |> 
-  filter(units_si < 3,
-         species == "Chinook") |>   
-  mutate(units_si = round(units_si, 1)) |> 
-  group_by(units_si) |> 
-  summarise(max_suit_index = max(suitability_index)) |> 
-  ggplot() + 
-  geom_line(aes(x = units_si, y = max_suit_index), size = 1) + 
-  xlab('depth (meters)') + 
-  ylab('suitability index') 
-```
-
-![](spawning-criteria-comparison_files/figure-gfm/unnamed-chunk-2-3.png)<!-- -->
+![](spawning-criteria-comparison_files/figure-gfm/unnamed-chunk-2-1.png)<!-- -->![](spawning-criteria-comparison_files/figure-gfm/unnamed-chunk-2-2.png)<!-- -->
 
 ### Velocity HSI
 
-``` r
-spawning_hsc |> 
-  filter(suitability_metric == "Velocity") |> 
-  filter(units_si < 30,
-         species == "Chinook") |>   
-  ggplot() + 
-  geom_point(aes(x = units_si, y = suitability_index, color = paste0(river, " (", citation, ")"))) + 
-  geom_line(aes(x = units_si, y = suitability_index, color = paste0(river, " (", citation, ")"))) + 
-  facet_wrap(~race, scales = "free_x") + 
-  xlab('velocity (meters/second)') + 
-  theme(legend.title=element_blank())
-```
+![](spawning-criteria-comparison_files/figure-gfm/unnamed-chunk-3-1.png)<!-- -->![](spawning-criteria-comparison_files/figure-gfm/unnamed-chunk-3-2.png)<!-- -->
 
-![](spawning-criteria-comparison_files/figure-gfm/unnamed-chunk-3-1.png)<!-- -->
+## Create Suitability Data Files
 
-``` r
-# Take max
-spawning_hsc |> 
-  filter(suitability_metric == "Velocity") |> 
-  filter(units_si < 30,
-         species == "Chinook") |>   
-  mutate(units_si = round(units_si, 1)) |> 
-  group_by(units_si, race) |> 
-  summarise(max_suit_index = max(suitability_index)) |> 
-  ggplot() + 
-  geom_line(aes(x = units_si, y = max_suit_index, color = race), size = 1) + 
-  xlab('velocity (meters/second)')  + 
-  ylab('suitability index')
-```
+| run       | max_depth |
+|:----------|----------:|
+| fall      |       2.4 |
+| late_fall |       0.5 |
+| spring    |       2.2 |
+| winter    |       0.9 |
 
-![](spawning-criteria-comparison_files/figure-gfm/unnamed-chunk-3-2.png)<!-- -->
+Depth HSI - for each run, the maximum depth range suitable for spawning
 
-``` r
-spawning_hsc |> 
-  filter(suitability_metric == "Velocity") |> 
-  filter(units_si < 30,
-         species == "Chinook") |>   
-  mutate(units_si = round(units_si, 1)) |> 
-  group_by(units_si) |> 
-  summarise(max_suit_index = max(suitability_index)) |> 
-  ggplot() + 
-  geom_line(aes(x = units_si, y = max_suit_index), size = 1) + 
-  xlab('velocity (meters/second)')  + 
-  ylab('suitability index')
-```
+    ## ✔ Setting active project to '/Users/maddeerubenson/Documents/git/HabiStat/swc-habitat-suitability'
+    ## ✔ Saving 'spawning_depth_hsi' to 'data/spawning_depth_hsi.rda'
+    ## • Document your data (see 'https://r-pkgs.org/data.html')
 
-![](spawning-criteria-comparison_files/figure-gfm/unnamed-chunk-3-3.png)<!-- -->
+    ## `summarise()` has grouped output by 'units_si'. You can override using the
+    ## `.groups` argument.
+
+| velocity | run       | hsi |
+|---------:|:----------|----:|
+|      0.0 | fall      | 0.1 |
+|      0.1 | fall      | 0.2 |
+|      0.2 | fall      | 0.6 |
+|      0.3 | fall      | 0.9 |
+|      0.4 | fall      | 1.0 |
+|      0.5 | fall      | 1.0 |
+|      0.6 | fall      | 1.0 |
+|      0.7 | fall      | 1.0 |
+|      0.8 | fall      | 1.0 |
+|      0.9 | fall      | 1.0 |
+|      1.0 | fall      | 0.9 |
+|      1.1 | fall      | 0.8 |
+|      1.2 | fall      | 0.7 |
+|      1.3 | fall      | 0.6 |
+|      1.4 | fall      | 0.5 |
+|      1.5 | fall      | 0.3 |
+|      1.6 | fall      | 0.1 |
+|      1.8 | fall      | 0.0 |
+|      1.9 | fall      | 0.0 |
+|      2.1 | fall      | 0.0 |
+|      0.0 | late_fall | 0.0 |
+|      0.1 | late_fall | 0.1 |
+|      0.2 | late_fall | 0.3 |
+|      0.4 | late_fall | 0.9 |
+|      0.5 | late_fall | 1.0 |
+|      0.6 | late_fall | 1.0 |
+|      0.8 | late_fall | 0.6 |
+|      0.9 | late_fall | 0.4 |
+|      1.0 | late_fall | 0.3 |
+|      1.2 | late_fall | 0.2 |
+|      1.8 | late_fall | 0.1 |
+|      0.0 | spring    | 0.0 |
+|      0.1 | spring    | 0.2 |
+|      0.2 | spring    | 0.5 |
+|      0.3 | spring    | 0.8 |
+|      0.4 | spring    | 0.9 |
+|      0.5 | spring    | 1.0 |
+|      0.6 | spring    | 1.0 |
+|      0.7 | spring    | 1.0 |
+|      0.8 | spring    | 1.0 |
+|      0.9 | spring    | 1.0 |
+|      1.0 | spring    | 1.0 |
+|      1.1 | spring    | 0.9 |
+|      1.2 | spring    | 0.8 |
+|      1.3 | spring    | 0.6 |
+|      2.1 | spring    | 0.0 |
+|      0.0 | winter    | 0.0 |
+|      0.3 | winter    | 0.2 |
+|      0.4 | winter    | 0.3 |
+|      0.6 | winter    | 0.8 |
+|      0.7 | winter    | 1.0 |
+|      0.8 | winter    | 1.0 |
+|      0.9 | winter    | 0.9 |
+|      1.0 | winter    | 0.8 |
+|      1.3 | winter    | 0.4 |
+|      1.5 | winter    | 0.2 |
+|      1.6 | winter    | 0.2 |
+|      1.8 | winter    | 0.1 |
+|      2.1 | winter    | 0.0 |
+|      2.6 | winter    | 0.0 |
+
+Velocity HSI - for each run, the velocity HSI range
+
+    ## ✔ Saving 'spawning_vel_hsi' to 'data/spawning_vel_hsi.rda'
+    ## • Document your data (see 'https://r-pkgs.org/data.html')

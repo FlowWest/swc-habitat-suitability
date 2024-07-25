@@ -1,27 +1,25 @@
----
-title: "Spawning Data Exploration"
-author: "[Skyler Lewis](mailto:slewis@flowwest.com)"
-date: "`r Sys.Date()`"
-output: 
-  github_document:
-    toc: true
-    toc_depth: 3
-    number_sections: false
-    math_method:
-      engine: webtex
-      url: https://latex.codecogs.com/svg.image?
----
+Spawning Data Exploration
+================
+[Skyler Lewis](mailto:slewis@flowwest.com)
+2024-07-24
 
-```{r setup, message=FALSE, warning=FALSE}
+- [HQT gradient class and known spawning
+  reaches](#hqt-gradient-class-and-known-spawning-reaches)
+- [UCD eFlows Geomorph Classes](#ucd-eflows-geomorph-classes)
+- [Filter by Gradient and Elevation](#filter-by-gradient-and-elevation)
+- [Apply CVPIA watershed spawning ranges to adjacent
+  tributaries](#apply-cvpia-watershed-spawning-ranges-to-adjacent-tributaries)
+- [Final version](#final-version)
+
+``` r
 library(tidyverse)
 library(sf)
 library(terra)
 
 theme_set(theme_minimal())
-
 ```
 
-```{r import, message=FALSE, warning=FALSE}
+``` r
 flowlines <- readRDS(here::here("data-raw", "results", "flowline_geometries_proj.Rds"))
 
 flowline_attributes <- readRDS(here::here("data-raw", "results", "flowline_attributes.Rds"))
@@ -29,20 +27,22 @@ flowline_attributes <- readRDS(here::here("data-raw", "results", "flowline_attri
 source(here::here("data-raw", "scripts", "data-functions.R"))
 ```
 
-Potential spawning area = intersection of 
+Potential spawning area = intersection of
 
-* UCD PISCES habitat areas polygons - current and historic - cross checked against CVPIA spawning ranges
-* UCD eFlows geomorph classes that include gravel or step pool systems
+- UCD PISCES habitat areas polygons - current and historic - cross
+  checked against CVPIA spawning ranges
+- UCD eFlows geomorph classes that include gravel or step pool systems
 
-Examine existing redd surveys and define ranges of river gradients and other characteristics that predict spawning
+Examine existing redd surveys and define ranges of river gradients and
+other characteristics that predict spawning
 
-* https://catalog.data.gov/dataset/salmon-spawning-locations-redds-mapped-in-the-field-along-the-american-river-california-no
+- <https://catalog.data.gov/dataset/salmon-spawning-locations-redds-mapped-in-the-field-along-the-american-river-california-no>
 
 Map the known redd locations like sailor bar
 
 ### HQT gradient class and known spawning reaches
 
-```{r reach-import}
+``` r
 valley_lowland <- 
   readRDS(here::here("data-raw", "source", "hqt", "hqt_valley_lowland.Rds")) |> 
   st_transform(project_crs) |> 
@@ -55,7 +55,12 @@ cvpia_extents <-
   janitor::clean_names() |>
   st_cast("LINESTRING") |>
   st_transform(project_crs)
+```
 
+    ## Warning in st_cast.sf(janitor::clean_names(read_sf(file.path("/vsizip", :
+    ## repeating attributes for all sub-geometries for which they may not be constant
+
+``` r
 cvpia_extents_spawning <-
   cvpia_extents |> 
   filter(habitat == "spawning")
@@ -71,7 +76,8 @@ cvpia_extents_nhd_spawning <-
   cvpia_extents_nhd |> 
   filter(str_detect(habitat, "spawning"))
 ```
-```{r spawning-mainstems-import}
+
+``` r
 spawning_mainstems <-
   read_sf(here::here("data-raw", "source", "rearing_spatial_data", "nhdplusv2_comid_habitat_xw.shp.zip")) |>
   janitor::clean_names() |>
@@ -91,7 +97,7 @@ historical_mainstems <-
   rename(river_cvpia = river)
 ```
 
-```{r hqt-classes, fig.width=6, fig.height=6, dpi=300}
+``` r
 ggplot() +
   geom_sf(data = valley_lowland, color=NA, fill="lightgoldenrod") +
   geom_sf(data = cvpia_extents, color="gray") +
@@ -99,9 +105,11 @@ ggplot() +
   geom_sf(data = cvpia_extents_spawning |> filter(species=="Spring Run Chinook"), color="red") 
 ```
 
+![](spawning-expl_files/figure-gfm/hqt-classes-1.png)<!-- -->
+
 ### UCD eFlows Geomorph Classes
 
-```{r geomorph-classes-overlay, fig.width=12, fig.height=12, dpi=300}
+``` r
 #geomorph_class <- readRDS(here::here("data-raw", "results", "attr_geomorph_class.Rds"))
 geomorph_classes <- readRDS(here::here("data-raw", "results", "attr_geomorph_class.Rds"))
 geomorph_site_data <- readRDS(here::here("data-raw", "results", "geomorph_sites_ucd.Rds"))
@@ -125,7 +133,9 @@ ggplot() +
   geom_sf(data = cvpia_extents_spawning |> st_line_sample(sample=c(0, 1)), color="black", size=1, shape=15)
 ```
 
-```{r geomorph-classes-filter, fig.width=12, fig.height=12, dpi=300}
+![](spawning-expl_files/figure-gfm/geomorph-classes-overlay-1.png)<!-- -->
+
+``` r
 # breakdown of geomorph classes of geomorph sites that are within spawning reaches
 spawning_reach_geomorph_sites <- 
   geomorph_site_data |> 
@@ -136,18 +146,51 @@ spawning_reach_geomorph_sites |>
   group_by(geomorph_class) |>
   summarize(count = n()) |>
   arrange(-count)
+```
 
+    ## # A tibble: 8 × 2
+    ##   geomorph_class                                                         count
+    ##   <fct>                                                                  <int>
+    ## 1 Partly-confined, cobble-boulder, uniform                                   6
+    ## 2 Unconfined, low width-to-depth ratio, gravel                               5
+    ## 3 Confined, boulder, high gradient, step-pool/cascade                        3
+    ## 4 Confined, boulder-bedrock, uniform                                         3
+    ## 5 Confined, boulder-bedrock, low-gradient step-pool                          3
+    ## 6 Unconfined, gravel-cobble, riffle-pool                                     3
+    ## 7 Partly-confined, high width-to-depth ratio, gravel-cobble, riffle-pool     2
+    ## 8 Confined, gravel-cobble, uniform                                           1
+
+``` r
 # breakdown of spawning reaches by predicted geomorph class
 spawning_reach_geomorph_classes <- 
   cvpia_extents_nhd_spawning |>
   left_join(geomorph_classes) 
+```
 
+    ## Joining with `by = join_by(comid)`
+
+``` r
 spawning_reach_geomorph_classes |>
   st_drop_geometry() |>
   group_by(geomorph_class) |>
   summarize(total_mi = sum(lengthkm) * 1000 / 0.3048 / 5280) |>
   arrange(-total_mi)
+```
 
+    ## # A tibble: 9 × 2
+    ##   geomorph_class                                                        total_mi
+    ##   <fct>                                                                    <dbl>
+    ## 1 Unconfined, low width-to-depth ratio, gravel                           353.   
+    ## 2 Confined, boulder-bedrock, uniform                                     138.   
+    ## 3 Partly-confined, cobble-boulder, uniform                               111.   
+    ## 4 Unconfined, gravel-cobble, riffle-pool                                  94.2  
+    ## 5 Confined, boulder-bedrock, low-gradient step-pool                       49.3  
+    ## 6 Confined, boulder, high gradient, step-pool/cascade                     32.2  
+    ## 7 Partly-confined, low width-to-depth ratio, gravel-cobble, riffle-pool   28.9  
+    ## 8 Confined, gravel-cobble, uniform                                        21.3  
+    ## 9 <NA>                                                                     0.496
+
+``` r
 # plot
 ggplot() + 
   geom_sf(data = spawning_reach_geomorph_classes, aes(color = geomorph_class)) + 
@@ -155,9 +198,14 @@ ggplot() +
   scale_fill_brewer(type="qual", palette="Paired", aesthetics = c("fill", "color"))
 ```
 
+    ## Warning: Removed 8 rows containing missing values or values outside the scale range
+    ## (`geom_sf()`).
+
+![](spawning-expl_files/figure-gfm/geomorph-classes-filter-1.png)<!-- -->
+
 ### Filter by Gradient and Elevation
 
-```{r gradient-elevation-hist}
+``` r
 cvpia_extents_nhd_spawning |>
   left_join(flowline_attributes) |>
   ggplot() + 
@@ -167,7 +215,23 @@ cvpia_extents_nhd_spawning |>
   annotation_logticks(sides="b") + 
   geom_vline(aes(xintercept = 1E-02), linetype="dashed") +
   theme(panel.grid.minor = element_blank())
+```
 
+    ## Joining with `by = join_by(comid, gnis_id, gnis_name, lengthkm, reachcode,
+    ## ftype, fcode)`
+    ## `stat_bin()` using `bins = 30`. Pick better value with `binwidth`.
+
+    ## Warning: Removed 38837 rows containing non-finite outside the scale range
+    ## (`stat_bin()`).
+
+    ## `stat_bin()` using `bins = 30`. Pick better value with `binwidth`.
+
+    ## Warning: Removed 5 rows containing non-finite outside the scale range
+    ## (`stat_bin()`).
+
+![](spawning-expl_files/figure-gfm/gradient-elevation-hist-1.png)<!-- -->
+
+``` r
 cvpia_extents_nhd_spawning |>
   left_join(flowline_attributes) |>
   ggplot() + 
@@ -177,7 +241,25 @@ cvpia_extents_nhd_spawning |>
   annotation_logticks(sides="b") + 
   geom_vline(aes(xintercept = 300), linetype="dashed") +
   theme(panel.grid.minor = element_blank())
+```
 
+    ## Joining with `by = join_by(comid, gnis_id, gnis_name, lengthkm, reachcode,
+    ## ftype, fcode)`
+
+    ## Warning in transformation$transform(x): NaNs produced
+
+    ## Warning in scale_x_log10(): log-10 transformation introduced infinite values.
+
+    ## `stat_bin()` using `bins = 30`. Pick better value with `binwidth`.
+
+    ## Warning: Removed 39949 rows containing non-finite outside the scale range
+    ## (`stat_bin()`).
+
+    ## `stat_bin()` using `bins = 30`. Pick better value with `binwidth`.
+
+![](spawning-expl_files/figure-gfm/gradient-elevation-hist-2.png)<!-- -->
+
+``` r
 cvpia_extents_nhd_spawning |>
   left_join(flowline_attributes) |>
   ggplot() + 
@@ -187,9 +269,23 @@ cvpia_extents_nhd_spawning |>
   annotation_logticks(sides="b") + 
   geom_vline(aes(xintercept = 1E02), linetype="dashed") +
   theme(panel.grid.minor = element_blank())
-
 ```
-```{r}
+
+    ## Joining with `by = join_by(comid, gnis_id, gnis_name, lengthkm, reachcode,
+    ## ftype, fcode)`
+
+    ## Warning in scale_x_log10(): log-10 transformation introduced infinite values.
+
+    ## `stat_bin()` using `bins = 30`. Pick better value with `binwidth`.
+
+    ## Warning: Removed 37556 rows containing non-finite outside the scale range
+    ## (`stat_bin()`).
+
+    ## `stat_bin()` using `bins = 30`. Pick better value with `binwidth`.
+
+![](spawning-expl_files/figure-gfm/gradient-elevation-hist-3.png)<!-- -->
+
+``` r
 # filtered flowlines dataset
 flowlines_filtered <- habistat::flowline_geom_proj |>
   # filter(comid %in% within_network_comids) |>
@@ -197,12 +293,18 @@ flowlines_filtered <- habistat::flowline_geom_proj |>
   filter((((stream_order >= 4) & (da_area_sq_km > 1)) | ((stream_order >= 3) & (da_area_sq_km >= 50))) | 
            (comid %in% habistat::cv_mainstems$comid)) |>
   select(comid, geometry)
+```
 
+    ## Joining with `by = join_by(comid)`
+
+``` r
 flowlines_filtered |>
   ggplot() + geom_sf() + ggtitle("Flowlines Filtered by Stream Order and Drainage Area")
 ```
 
-```{r pisces-range-output}
+![](spawning-expl_files/figure-gfm/unnamed-chunk-1-1.png)<!-- -->
+
+``` r
 pisces_range_comid <- habistat::flowline_attr |>
   filter(range_cvchinook_historical) |> 
   pull(comid)
@@ -220,8 +322,11 @@ flowlines_filtered |>
   ggtitle("PISCES Ranges")
 ```
 
+    ## Joining with `by = join_by(comid)`
 
-```{r geomorph-filter-output}
+![](spawning-expl_files/figure-gfm/pisces-range-output-1.png)<!-- -->
+
+``` r
 geomorph_filter_comid <- habistat::flowline_attr |>
   # # FILTER MAPPED CV CHINOOK RANGE (PISCES)
   # filter(range_cvchinook_extant) |> 
@@ -242,7 +347,11 @@ flowlines_filtered |>
   ggtitle("Geomorphic Filter")
 ```
 
-```{r gradient-class-output}
+    ## Joining with `by = join_by(comid)`
+
+![](spawning-expl_files/figure-gfm/geomorph-filter-output-1.png)<!-- -->
+
+``` r
 gradient_class_comid <- habistat::flowline_attr |>
   filter(hqt_gradient_class != "Valley Lowland")  |>
   pull(comid)
@@ -255,7 +364,11 @@ flowlines_filtered |>
   ggtitle("Gradient Class Filter")
 ```
 
-```{r gradient-filter-output}
+    ## Joining with `by = join_by(comid)`
+
+![](spawning-expl_files/figure-gfm/gradient-class-output-1.png)<!-- -->
+
+``` r
 gradient_range_comid <- habistat::flowline_attr |>
   #filter(hqt_gradient_class != "Valley Lowland")  |>
   #filter(slope <= 1E-2) |>
@@ -270,13 +383,16 @@ flowlines_filtered |>
   ggtitle("Gradient Range Filter")
 ```
 
+    ## Joining with `by = join_by(comid)`
 
+![](spawning-expl_files/figure-gfm/gradient-filter-output-1.png)<!-- -->
 
 ### Apply CVPIA watershed spawning ranges to adjacent tributaries
 
-within each CVPIA watershed, get min and max of spawning flowline and apply it to all streams within that watershed
+within each CVPIA watershed, get min and max of spawning flowline and
+apply it to all streams within that watershed
 
-```{r elevation-filter-output}
+``` r
 # GET ELEVATION RANGES FOR EACH SPAWNING MAINSTEM
 spawning_elevation_ranges <- 
   spawning_mainstems |> 
@@ -286,7 +402,11 @@ spawning_elevation_ranges <-
   summarize(spawning_elev_min = min(elev_min), 
             spawning_elev_max = max(elev_max)) |>
   st_drop_geometry()
+```
 
+    ## Joining with `by = join_by(comid)`
+
+``` r
 historical_elevation_ranges <- 
   historical_mainstems |> 
   left_join(habistat::flowline_attr |>
@@ -295,7 +415,11 @@ historical_elevation_ranges <-
   summarize(historical_elev_min = min(elev_min), 
             historical_elev_max = max(elev_max)) |>
   st_drop_geometry()
+```
 
+    ## Joining with `by = join_by(comid)`
+
+``` r
 elevation_ranges <- 
   full_join(spawning_elevation_ranges, historical_elevation_ranges) |>
   mutate(query_elev_min = if_else(watershed_level_3 %in% c("Upper Sacramento River", "Upper San Joaquin River", "McCloud River", "Pit River"), 
@@ -304,11 +428,52 @@ elevation_ranges <-
          query_elev_max = if_else(watershed_level_3 %in% c("Upper Sacramento River", "Upper San Joaquin River", "McCloud River", "Pit River"), 
                                   coalesce(historical_elev_max, spawning_elev_max), 
                                   historical_elev_max))
+```
 
+    ## Joining with `by = join_by(watershed_level_3)`
+
+``` r
 elevation_ranges |>
   #select(watershed_level_3, query_elev_min, query_elev_max) |>
   knitr::kable()
+```
 
+| watershed_level_3       | spawning_elev_min | spawning_elev_max | historical_elev_min | historical_elev_max | query_elev_min | query_elev_max |
+|:------------------------|------------------:|------------------:|--------------------:|--------------------:|---------------:|---------------:|
+| American River          |              6.88 |             33.68 |                6.29 |             1395.78 |           6.88 |        1395.78 |
+| Antelope Creek          |             81.91 |            400.40 |               64.74 |              400.40 |          81.91 |         400.40 |
+| Battle Creek            |            102.86 |            467.03 |              102.86 |              467.03 |         102.86 |         467.03 |
+| Bear Creek              |            111.00 |            403.83 |              111.00 |              403.83 |         111.00 |         403.83 |
+| Bear River              |              9.89 |             60.16 |                9.89 |               60.16 |           9.89 |          60.16 |
+| Big Chico Creek         |             35.91 |            360.39 |               35.91 |              360.39 |          35.91 |         360.39 |
+| Butte Creek             |             29.68 |            320.47 |               27.81 |              320.47 |          29.68 |         320.47 |
+| Calaveras River         |             38.58 |            164.74 |               38.58 |              164.74 |          38.58 |         164.74 |
+| Clear Creek             |            128.46 |            294.58 |              128.46 |              409.98 |         128.46 |         409.98 |
+| Cottonwood Creek        |            105.79 |            779.62 |              105.79 |              796.53 |         105.79 |         796.53 |
+| Cow Creek               |            113.55 |           1434.78 |              113.55 |             1434.78 |         113.55 |        1434.78 |
+| Deer Creek              |             51.80 |           1092.27 |               51.29 |             1092.27 |          51.80 |        1092.27 |
+| Elder Creek             |             61.46 |             89.40 |               61.46 |               89.40 |          61.46 |          89.40 |
+| Feather River           |             24.18 |             44.65 |                7.68 |             1499.90 |          24.18 |        1499.90 |
+| Merced River            |             30.39 |             91.45 |               17.44 |              623.74 |          30.39 |         623.74 |
+| Mill Creek              |             60.95 |           1669.79 |               60.95 |             1669.79 |          60.95 |        1669.79 |
+| Mokelumne River         |             15.97 |             30.64 |                5.36 |              364.36 |          15.97 |         364.36 |
+| Paynes Creek            |             79.80 |            974.41 |               79.80 |              974.41 |          79.80 |         974.41 |
+| Sacramento River        |             34.25 |            153.34 |                5.67 |              311.23 |          34.25 |         311.23 |
+| San Joaquin River       |             29.44 |            109.50 |                3.80 |              109.50 |          29.44 |         109.50 |
+| Stanislaus River        |             23.23 |            102.71 |                6.50 |             1063.44 |          23.23 |        1063.44 |
+| Stony Creek             |             44.73 |            113.73 |               44.73 |              310.07 |          44.73 |         310.07 |
+| Thomes Creek            |             56.62 |            486.66 |               56.62 |              516.93 |          56.62 |         516.93 |
+| Tuolumne River          |             22.57 |             80.73 |                7.33 |              854.89 |          22.57 |         854.89 |
+| Yuba River              |             18.37 |             81.69 |               14.53 |             1569.78 |          18.37 |        1569.78 |
+| McCloud River           |                NA |                NA |              325.42 |              924.43 |         325.42 |         924.43 |
+| North Delta             |                NA |                NA |               -0.24 |                5.67 |             NA |           5.67 |
+| Pit River               |                NA |                NA |              325.42 |             1012.90 |         325.42 |        1012.90 |
+| South Delta             |                NA |                NA |                0.00 |                6.50 |             NA |           6.50 |
+| Sutter Bypass           |                NA |                NA |                7.68 |                8.34 |             NA |           8.34 |
+| Upper Sacramento River  |                NA |                NA |              311.23 |             1648.93 |         311.23 |        1648.93 |
+| Upper San Joaquin River |                NA |                NA |               49.72 |             1016.16 |          49.72 |        1016.16 |
+
+``` r
 # PULL LIST OF COMIDS WITHIN SPAWNING ELEVATION RANGE
 elevation_range_comid <- 
   habistat::flowline_attr |>
@@ -317,7 +482,11 @@ elevation_range_comid <-
   #filter(((elev_min >= spawning_elev_min) & (elev_max <= historical_elev_max))) |>
   filter(((elev_min >= query_elev_min) & (elev_max <= query_elev_max))) |>
   pull(comid)
+```
 
+    ## Joining with `by = join_by(watershed_level_3)`
+
+``` r
 flowlines_filtered |>
   left_join(pisces_ranges) |>
   filter(comid %in% elevation_range_comid) |>
@@ -326,11 +495,16 @@ flowlines_filtered |>
   ggtitle("Elevation Range Filter")
 ```
 
+    ## Joining with `by = join_by(comid)`
+
+![](spawning-expl_files/figure-gfm/elevation-filter-output-1.png)<!-- -->
+
 eliminate those that are not physically connected to the mainstems
 
-use USGS COMID network search API to filter for tribs that flow into mainstem spawning reaches
+use USGS COMID network search API to filter for tribs that flow into
+mainstem spawning reaches
 
-```{r tributary-network-search}
+``` r
 # FUNCTION TO PULL 
 list_upstream_comids <- function(comid) {
   # USGS upstream trib search service
@@ -357,7 +531,11 @@ spawning_trib_comid <-
   # apply the elevation range filter
   #filter(trib_comids %in% potential_spawning_comid) |>
   pull(trib_comids)
+```
 
+    ## Joining with `by = join_by(comid)`
+
+``` r
 flowlines_filtered |>
   left_join(pisces_ranges) |>
   filter(comid %in% spawning_trib_comid) |>
@@ -365,10 +543,13 @@ flowlines_filtered |>
   ggplot() + geom_sf(aes(color = range)) + 
   geom_sf(data=spawning_mainstems, aes(color = "Spawning Mainstems")) +
   ggtitle("Elevation Range Filter - Tributaries of Spawning Streams Only")
-
 ```
 
-```{r tributary-network-search-v2}
+    ## Joining with `by = join_by(comid)`
+
+![](spawning-expl_files/figure-gfm/tributary-network-search-1.png)<!-- -->
+
+``` r
 # LIST COMIDS MATCHING NETWORK SEARCH AND ELEVATION RANGE FILTER
 rearing_trib_comid <- 
   historical_mainstems |>
@@ -383,7 +564,11 @@ rearing_trib_comid <-
   # apply the elevation range filter
   #filter(trib_comids %in% potential_spawning_comid) |>
   pull(trib_comids)
+```
 
+    ## Joining with `by = join_by(comid)`
+
+``` r
 flowlines_filtered |>
   left_join(pisces_ranges) |>
   filter(comid %in% rearing_trib_comid) |>
@@ -393,9 +578,13 @@ flowlines_filtered |>
   ggtitle("Elevation Range Filter - Tributaries of Rearing Streams Only")
 ```
 
-Test combining with additioanl filters -- may be too strict
+    ## Joining with `by = join_by(comid)`
 
-```{r combined-filters-test}
+![](spawning-expl_files/figure-gfm/tributary-network-search-v2-1.png)<!-- -->
+
+Test combining with additioanl filters – may be too strict
+
+``` r
 flowlines_filtered |>
   left_join(pisces_ranges) |>
   filter(comid %in% rearing_trib_comid) |>
@@ -404,7 +593,13 @@ flowlines_filtered |>
   ggplot() + geom_sf(aes(color = range)) + 
   geom_sf(data=spawning_mainstems, aes(color = "Spawning Mainstems")) +
   ggtitle("Elevation, Gradient, and Tributary Filters")
+```
 
+    ## Joining with `by = join_by(comid)`
+
+![](spawning-expl_files/figure-gfm/combined-filters-test-1.png)<!-- -->
+
+``` r
 flowlines_filtered |>
   left_join(pisces_ranges) |>
   filter(comid %in% rearing_trib_comid) |>
@@ -415,18 +610,24 @@ flowlines_filtered |>
   ggtitle("Elevation, Geomorph, and Tributary Filters")
 ```
 
+    ## Joining with `by = join_by(comid)`
+
+![](spawning-expl_files/figure-gfm/combined-filters-test-2.png)<!-- -->
+
 ## Final version
 
 Flowlines matching all of the following criteria:
 
-* elevation > minimum known spawning elevation for the watershed
-* elevation < maximum historical habitat elevation for the watershed
-* tributary of a known rearing stream
-* within a subcatchment identified as historical habitat in the PISCES dataset
-* outside of the valley lowland area (i.e. in valley foothill or bedrock)
-* (stream order > 3 & drainage area > 50 km2) OR (stream order > 4)
+- elevation \> minimum known spawning elevation for the watershed
+- elevation \< maximum historical habitat elevation for the watershed
+- tributary of a known rearing stream
+- within a subcatchment identified as historical habitat in the PISCES
+  dataset
+- outside of the valley lowland area (i.e. in valley foothill or
+  bedrock)
+- (stream order \> 3 & drainage area \> 50 km2) OR (stream order \> 4)
 
-```{r combined-filters-final}
+``` r
 spawning_flowlines_final <- flowlines_filtered |>
   filter((comid %in% spawning_mainstems$comid) | 
          ((comid %in% elevation_range_comid) &
@@ -441,46 +642,4 @@ spawning_flowlines_final |>
   ggtitle("Final Spawning Reach Dataset")
 ```
 
-```{r combined-filters, eval=FALSE, fig.height=6, fig.width=6, dpi=300, include=FALSE}
-# list of comids within the Sacramento-San Joaquin flow network
-# within_network_comids <- c(list_upstream_comids(15048261), list_upstream_comids(1889636))
-
-ggplot() +
-  #geom_sf(data=cvpia_extents, aes(color="(0) CVPIA Mainstems")) + 
-  geom_sf(data=historical_mainstems, 
-          aes(color="(0) CVPIA Mainstems")) +
-  geom_sf(data = flowlines_filtered |> 
-            filter(comid %in% spawning_trib_comid) |> 
-            filter(comid %in% elevation_range_comid),
-          aes(color="(2) Spawning Tributary Filter")) +
-  geom_sf(data = flowlines_filtered |> 
-            filter(comid %in% elevation_range_comid),
-          aes(color="(3) Elevation Range Filter")) +
-  geom_sf(data = flowlines_filtered |> 
-            filter(comid %in% spawning_trib_comid) |> 
-            filter(comid %in% elevation_max_comid),
-          aes(color="(2) and (3)")) +
-  geom_sf(data = flowlines_filtered |> 
-            filter(comid %in% gradient_range_comid),
-          aes(color="(4) Gradient Range Filter")) +
-  geom_sf(data = flowlines_filtered |> 
-            filter(comid %in% geomorph_filter_comid),
-          aes(color="(5) Geomorph/Gradient Filter")) +
-  geom_sf(data= flowlines_filtered |> 
-            filter(comid %in% spawning_trib_comid) |>
-            filter(comid %in% geomorph_filter_comid) |>
-            filter(comid %in% gradient_range_comid) |>
-            filter(comid %in% elevation_range_comid),
-          aes(color="(6) All Tributary Filters")) +
-  geom_sf(data=spawning_mainstems, 
-          aes(color="(1) CVPIA Spawning Mainstems")) +
-  scale_color_manual(name = "", values = c(
-    "(0) CVPIA Mainstems" = "#a6cee3",
-    "(1) CVPIA Spawning Mainstems" = "black",
-    "(2) Spawning Tributary Filter" = "#cab2d6",
-    "(3) Elevation Range Filter" = "#fdbf6f",
-    "(2) and (3)" = "#fb9a99",
-    "(4) Gradient Range Filter" = "#b2df8a",
-    "(5) Geomorph/Gradient Filter" = "#33a02c",
-    "(6) All Tributary Filters" = "#e31a1c"))
-```
+![](spawning-expl_files/figure-gfm/combined-filters-final-1.png)<!-- -->

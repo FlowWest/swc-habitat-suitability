@@ -589,15 +589,25 @@ model_predicted_final |>
 wua_predicted <- model_predicted_final
 usethis::use_data(wua_predicted, overwrite = TRUE)
 ```
+```{r}
+wua_predicted_cv_watersheds <- 
+  wua_predicted |>
+  filter(!is.na(watershed_level_3)) |>
+  group_by(model_bfc, model_name, watershed_level_3, flow_cfs) |>
+  summarize(wua_per_lf_pred = sum(wua_per_lf_pred * reach_length_ft) / sum(reach_length_ft)) 
+usethis::use_data(wua_predicted_cv_watersheds, overwrite = TRUE)
+
+wua_predicted_cv_mainstems <- 
+  wua_predicted |>
+  filter(!is.na(river_cvpia)) |>
+  group_by(model_bfc, model_name, river_cvpia, flow_cfs) |>
+  summarize(wua_per_lf_pred = sum(wua_per_lf_pred * reach_length_ft) / sum(reach_length_ft))
+usethis::use_data(wua_predicted_cv_mainstems, overwrite = TRUE)
+```
 
 ```{r fig.width=6.5, fig.height=6.5, dpi=300}
-model_predicted_final |>
-  filter(!is.na(river_cvpia)) |>
+wua_predicted_cv_mainstems |>
   filter(flow_cfs <= 15000) |>
-  #filter(model_type == "RF") |>
-  #group_by(model_bfc, model_variant, river_cvpia, flow_cfs) |>
-  group_by(model_bfc, model_name, river_cvpia, flow_cfs) |>
-  summarize(wua_per_lf_pred = sum(wua_per_lf_pred * reach_length_ft) / sum(reach_length_ft)) |>
   ggplot(aes(x = flow_cfs)) + 
   geom_line(aes(y = wua_per_lf_pred, 
                 color = case_when(model_name=="SD" ~ "Scale-Dependent", 
@@ -615,3 +625,4 @@ model_predicted_final |>
 
 # ggsave(here::here("vignettes", "figures", "model_comparison.png"))
 ```
+

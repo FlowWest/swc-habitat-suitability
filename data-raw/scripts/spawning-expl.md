@@ -1,15 +1,20 @@
 Spawning Data Exploration
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-07-24
+2024-07-25
 
-- [HQT gradient class and known spawning
-  reaches](#hqt-gradient-class-and-known-spawning-reaches)
-- [UCD eFlows Geomorph Classes](#ucd-eflows-geomorph-classes)
-- [Filter by Gradient and Elevation](#filter-by-gradient-and-elevation)
-- [Apply CVPIA watershed spawning ranges to adjacent
-  tributaries](#apply-cvpia-watershed-spawning-ranges-to-adjacent-tributaries)
-- [Final version](#final-version)
+- [Determining the Geographic Scope](#determining-the-geographic-scope)
+  - [HQT gradient class and known spawning
+    reaches](#hqt-gradient-class-and-known-spawning-reaches)
+  - [UCD eFlows Geomorph Classes](#ucd-eflows-geomorph-classes)
+  - [Filter by Gradient and
+    Elevation](#filter-by-gradient-and-elevation)
+  - [Apply CVPIA watershed spawning ranges to adjacent
+    tributaries](#apply-cvpia-watershed-spawning-ranges-to-adjacent-tributaries)
+  - [Final version](#final-version)
+- [Reach by Reach Analysis](#reach-by-reach-analysis)
+  - [Sediment Transport Approach](#sediment-transport-approach)
+  - [Alternative Approach](#alternative-approach)
 
 ``` r
 library(tidyverse)
@@ -39,6 +44,8 @@ other characteristics that predict spawning
 - <https://catalog.data.gov/dataset/salmon-spawning-locations-redds-mapped-in-the-field-along-the-american-river-california-no>
 
 Map the known redd locations like sailor bar
+
+## Determining the Geographic Scope
 
 ### HQT gradient class and known spawning reaches
 
@@ -614,7 +621,7 @@ flowlines_filtered |>
 
 ![](spawning-expl_files/figure-gfm/combined-filters-test-2.png)<!-- -->
 
-## Final version
+### Final version
 
 Flowlines matching all of the following criteria:
 
@@ -643,3 +650,284 @@ spawning_flowlines_final |>
 ```
 
 ![](spawning-expl_files/figure-gfm/combined-filters-final-1.png)<!-- -->
+
+## Reach by Reach Analysis
+
+### Sediment Transport Approach
+
+Next, let’s locate particular reaches within this geographic scope that
+are likely to have spawning gravels.
+
+**During typical flows:**
+
+Silts need to be in suspension so that they do not settle out and
+bury/clog gravels. i.e. max grain size in suspension must be at least
+0.0625 mm (phi = 4)
+
+Mobilization threshold should not be so high as to scour gravels
+
+**During high flows:**
+
+Silts still need to be in suspension – see above.
+
+Mobilization threshold *should* be high enough to mobilize gravels:
+
+> Several uncertainties exist as to the suitability for successful
+> spawning in the existing stream bed within Reach 1A, which include
+> adequate (1) hyporheic and surface water exchange, (2) flow depth and
+> velocity, (3) sediment attributes, and (4) hyporheic water quality.
+> The channel area that currently contain and is expected to maintain
+> each of these attributes in high quality should be used to quantify
+> the amount of suitable spawning habitat. Most of these attributes and
+> their contribution to spawning and incubation habitat quality are
+> dependent on the maintenance of the spawning bed’s surface texture.
+> **This maintenance is performed by occasional flows that are capable
+> of dislodging the coarse grains (i.e., gravel and cobble), flushing
+> the finer particles (e.g., sand and silt), and recruiting additional
+> gravel.**
+
+> After the completion of Friant Dam in the 1940s the reduced instream
+> flow that ensued downstream resulted in a coarsened bed texture as
+> finer grains were typically the only grains capable of being eroded.
+> Several studies have concluded that mobilizing this coarsened bed
+> surface as required to maintain salmon spawning habitat in Reach 1A
+> generally requires flows in the range of 12,000 to 16,000 cfs (MEI,
+> 2002; JSA and MEI, 2002; McBain and Trush, 2002; Stillwater Sciences,
+> 2003), well above the maximum Restoration releases called for in the
+> Settlement
+
+- <https://www.restoresjr.net/?wpfb_dl=796>
+
+``` r
+# DEFINE WENTWORTH SIZE CLASSES
+phi_levels <- seq(-12, 14, 1)
+phi_labels <- c("very large boulder", "large boulder", "medium boulder", "small boulder", # -12:-9
+                "large cobble", "small cobble", "very coarse gravel", "coarse gravel", # -8:-5
+                "medium gravel", "fine gravel", "very fine gravel", "very coarse sand", # -4:-1
+                "coarse sand", "medium sand", "fine sand", "very fine sand", # 0:3
+                "coarse silt", "medium silt", "fine silt", "very fine silt", # 4:7
+                "clay", "clay", "clay", "clay", "clay", "clay", "clay") # 8:14
+
+tibble(phi = phi_levels, label = phi_labels) |> 
+  mutate(max_diam_mm = 2^-phi) |> knitr::kable()
+```
+
+| phi | label              | max_diam_mm |
+|----:|:-------------------|------------:|
+| -12 | very large boulder |  4.0960e+03 |
+| -11 | large boulder      |  2.0480e+03 |
+| -10 | medium boulder     |  1.0240e+03 |
+|  -9 | small boulder      |  5.1200e+02 |
+|  -8 | large cobble       |  2.5600e+02 |
+|  -7 | small cobble       |  1.2800e+02 |
+|  -6 | very coarse gravel |  6.4000e+01 |
+|  -5 | coarse gravel      |  3.2000e+01 |
+|  -4 | medium gravel      |  1.6000e+01 |
+|  -3 | fine gravel        |  8.0000e+00 |
+|  -2 | very fine gravel   |  4.0000e+00 |
+|  -1 | very coarse sand   |  2.0000e+00 |
+|   0 | coarse sand        |  1.0000e+00 |
+|   1 | medium sand        |  5.0000e-01 |
+|   2 | fine sand          |  2.5000e-01 |
+|   3 | very fine sand     |  1.2500e-01 |
+|   4 | coarse silt        |  6.2500e-02 |
+|   5 | medium silt        |  3.1250e-02 |
+|   6 | fine silt          |  1.5625e-02 |
+|   7 | very fine silt     |  7.8125e-03 |
+|   8 | clay               |  3.9063e-03 |
+|   9 | clay               |  1.9531e-03 |
+|  10 | clay               |  9.7660e-04 |
+|  11 | clay               |  4.8830e-04 |
+|  12 | clay               |  2.4410e-04 |
+|  13 | clay               |  1.2210e-04 |
+|  14 | clay               |  6.1000e-05 |
+
+<https://www.fs.usda.gov/Internet/FSE_DOCUMENTS/fsm91_054559.pdf>
+
+``` r
+# DEFINE CONSTANTS
+# gravitational constant, cm/s2
+g_cgs <- 981
+# sedimetn grain density, g/cm3
+rho_s_cgs <- 2.65
+# water density, g/cm3
+rho_cgs <- 1.00
+# sediment specific_gravity
+sed_sg <- rho_s_cgs / rho_cgs
+# kinematic viscosity of water, cm2/s
+nu_cgs <- 0.01
+
+# CALCULATE BANKFULL BED MOBILIZATION AND SUSPENDED TRANSPORT
+sediment_data <- flowline_attributes |>
+  transmute(comid, slope, bf_depth_m, bf_width_m,
+            # assume rectangular channel for the cross sectional area and wetted perimeter
+            bf_xarea_m = bf_width_m * bf_depth_m,
+            wetted_perimeter_m = (2 * bf_depth_m) + bf_width_m,
+            hydraulic_radius_m = bf_xarea_m / wetted_perimeter_m,
+            # Lamb et al. 2008 estiamte of critical Shield's parameter (tau*) based on slope
+            critical_shields_number = 0.15 * slope^(1/4), 
+            # Shields 1936 for uniform grains on flat bed: tau* = rho * hydraulic_radius * slope / ((sediment specific gravity - 1) * particle size)
+            # This is a major simplificaiton assuming uniformity-- ideally we should account for particle of interest relative to D50 of reach-- but D50 is not known
+            # Also, note that the depth-slope product for shear stress assumes hydraulic radius interchangeable for mean depth
+            grain_size_mobilized_mm = 10 * rho_cgs * (hydraulic_radius_m * 100) * slope /  # hydraulic radius converted m to cm, result converted cm to mm
+                                      (critical_shields_number * (sed_sg - 1)),
+            grain_size_mobilized_phi = floor(-log(grain_size_mobilized_mm, 2)),
+            largest_grain_class_mobilized = factor(grain_size_mobilized_phi, levels=phi_levels, labels=phi_labels),
+            shear_velocity_cm_s = sqrt(g_cgs * (hydraulic_radius_m * 100) * slope),
+            settling_velocity_ndim = rho_cgs * shear_velocity_cm_s^3 / 
+                                     ((rho_s_cgs - rho_cgs) * g_cgs * nu_cgs),
+            # dimensionless settling velocity = 1.71 * 10^-4 (dimensionless particle size)^2  (Dietrich, 1982, eq. 8)
+            # dimensionless particle size = (rho_s - rho) * g * (particle size)^3 / (rho * nu^2)
+            grain_size_suspended_ndim = sqrt(5832 * settling_velocity_ndim), # this is Dietrich, 1982, eq. 8, rearranged
+            grain_size_suspended_mm = 10 * grain_size_suspended_ndim * rho_cgs * nu_cgs^2 /
+                                      ((rho_s_cgs - rho_cgs) * g_cgs)^(1/3),
+            grain_size_suspended_phi = floor(-log(grain_size_suspended_mm, 2)),
+            largest_grain_class_suspended = factor(grain_size_suspended_phi, levels=phi_levels, labels=phi_labels))
+
+spawning_flowlines_final |>
+  left_join(sediment_data, by=join_by(comid)) |>
+  pivot_longer(cols = c(largest_grain_class_mobilized, largest_grain_class_suspended)) |>
+  mutate(name = str_replace(name, "largest_grain_class_", "")) |>
+  filter(!is.na(value)) |>
+  ggplot() + geom_sf(aes(color = value)) + facet_wrap(~name) +
+  scale_color_discrete(name = "largest grain class") + 
+  ggtitle("Bankfull bed mobilization and suspended transport")
+```
+
+![](spawning-expl_files/figure-gfm/step-2-sed-transport-setup-1.png)<!-- -->
+
+``` r
+spawning_flowlines_final |>
+  left_join(sediment_data, by=join_by(comid)) |>
+  ggplot() + 
+  geom_histogram(data=sediment_data, aes(x = -log(grain_size_mobilized_mm, 2), y = (after_stat(count / sum(count)))), alpha=0.5) + 
+  geom_histogram(aes(x = -log(grain_size_mobilized_mm, 2), y = (after_stat(count / sum(count)))), fill="red", alpha=0.5) + 
+  # scale_x_log10() + 
+  # annotation_logticks(sides="b") + 
+  # geom_vline(aes(xintercept = 0.0039, linetype="0.0039 mm Clay-Silt")) +
+  # geom_vline(aes(xintercept = 0.0625, linetype="0.0625 mm Silt-Sand")) +
+  # geom_vline(aes(xintercept = 2.0000, linetype="2.0000 mm Sand-Gravel")) +
+  geom_vline(aes(xintercept = 8, linetype="Silt-Clay")) +
+  geom_vline(aes(xintercept = 4, linetype="Sand-Silt")) +
+  geom_vline(aes(xintercept = -1, linetype="Gravel-Sand")) +
+  theme(panel.grid.minor = element_blank())
+```
+
+    ## `stat_bin()` using `bins = 30`. Pick better value with `binwidth`.
+
+    ## Warning: Removed 39726 rows containing non-finite outside the scale range
+    ## (`stat_bin()`).
+
+    ## `stat_bin()` using `bins = 30`. Pick better value with `binwidth`.
+
+    ## Warning: Removed 17 rows containing non-finite outside the scale range
+    ## (`stat_bin()`).
+
+![](spawning-expl_files/figure-gfm/step-2-sed-transport-setup-2.png)<!-- -->
+
+``` r
+spawning_flowlines_final |>
+  left_join(sediment_data, by=join_by(comid)) |>
+  ggplot() + 
+  geom_histogram(data=sediment_data, aes(x = -log(grain_size_suspended_mm, 2), y = (after_stat(count / sum(count)))), alpha=0.5) + 
+  geom_histogram(aes(x = -log(grain_size_suspended_mm, 2), y = (after_stat(count / sum(count)))), fill="red", alpha=0.5) + 
+  # scale_x_log10() + 
+  # annotation_logticks(sides="b") + 
+  # geom_vline(aes(xintercept = 0.0039, linetype="0.0039 mm Clay-Silt")) +
+  # geom_vline(aes(xintercept = 0.0625, linetype="0.0625 mm Silt-Sand")) +
+  # geom_vline(aes(xintercept = 2.0000, linetype="2.0000 mm Sand-Gravel")) +
+  geom_vline(aes(xintercept = 8, linetype="Silt-Clay")) +
+  geom_vline(aes(xintercept = 4, linetype="Sand-Silt")) +
+  geom_vline(aes(xintercept = -1, linetype="Gravel-Sand")) +
+  theme(panel.grid.minor = element_blank())
+```
+
+    ## `stat_bin()` using `bins = 30`. Pick better value with `binwidth`.
+
+    ## Warning: Removed 39726 rows containing non-finite outside the scale range
+    ## (`stat_bin()`).
+
+    ## `stat_bin()` using `bins = 30`. Pick better value with `binwidth`.
+
+    ## Warning: Removed 17 rows containing non-finite outside the scale range
+    ## (`stat_bin()`).
+
+![](spawning-expl_files/figure-gfm/step-2-sed-transport-setup-3.png)<!-- -->
+
+``` r
+spawning_flowlines_final |>
+  left_join(sediment_data, by=join_by(comid)) |>
+  ggplot() + 
+  geom_point(data=sediment_data, aes(x = -log(grain_size_mobilized_mm, 2), y = -log(grain_size_suspended_mm, 2)), alpha=0.5) + 
+  geom_point(aes(x = -log(grain_size_mobilized_mm, 2), y = -log(grain_size_suspended_mm, 2)), color="red") + 
+  geom_vline(aes(xintercept = 8, linetype="Silt-Clay")) +
+  geom_vline(aes(xintercept = 4, linetype="Sand-Silt")) +
+  geom_vline(aes(xintercept = -1, linetype="Gravel-Sand")) +
+  geom_hline(aes(yintercept = 8, linetype="Silt-Clay")) +
+  geom_hline(aes(yintercept = 4, linetype="Sand-Silt")) +
+  geom_hline(aes(yintercept = -1, linetype="Gravel-Sand")) +
+  theme(panel.grid.minor = element_blank())
+```
+
+    ## Warning: Removed 39726 rows containing missing values or values outside the scale range
+    ## (`geom_point()`).
+
+    ## Warning: Removed 17 rows containing missing values or values outside the scale range
+    ## (`geom_point()`).
+
+![](spawning-expl_files/figure-gfm/step-2-sed-transport-setup-4.png)<!-- -->
+
+``` r
+spawning_flowlines_final |>
+  left_join(sediment_data, by=join_by(comid)) |>
+  
+  # eliminate reaches where largest grain size mobilized is within the silt or clay range
+  filter(!(str_detect(largest_grain_class_suspended, "silt|clay"))) |> 
+  
+  # ensure that flows are sufficient to mobilize gravels/cobbles, but not so powerful as to be mobilizing boulders
+  filter(str_detect(largest_grain_class_mobilized, "gravel|cobble")) |> 
+  
+  ggplot() +
+  geom_sf(data=spawning_flowlines_final, aes(color="Spawning Geographic Scope")) + 
+  geom_sf(aes(color="Most Likely Spawning Gravel Reaches")) + 
+  scale_color_discrete(name = "") + 
+  ggtitle("Spawning Gravel Likelihood based on Bankfull Sediment Transport")
+```
+
+![](spawning-expl_files/figure-gfm/step-2-sed-transport-filter-1.png)<!-- -->
+
+Validate this by looking at known redd locations
+
+### Alternative Approach
+
+Using the *predicted* UCD geomorph classifications
+
+``` r
+spawning_flowlines_final |>
+  filter(comid %in% geomorph_filter_comid) |>
+  ggplot() + 
+  geom_sf(data=spawning_flowlines_final, aes(color="Spawning Geographic Scope")) + 
+  geom_sf(aes(color="Most Likely Spawning Gravel Reaches")) + 
+  scale_color_discrete(name = "") + 
+  ggtitle("Spawning Gravel Likelihood based on Geomorphic Reach Classes")
+```
+
+![](spawning-expl_files/figure-gfm/step-2-geomorph-filter-1.png)<!-- -->
+
+For a conservative (more inclusive) estimate, include reaches matching
+either set of criteria
+
+``` r
+spawning_flowlines_final |>
+  left_join(sediment_data, by=join_by(comid)) |>
+  filter((!(str_detect(largest_grain_class_suspended, "silt|clay")) & 
+            str_detect(largest_grain_class_mobilized, "gravel|cobble")) | 
+           comid %in% geomorph_filter_comid) |>
+  ggplot() +
+  geom_sf(data=spawning_flowlines_final, aes(color="Spawning Geographic Scope")) + 
+  geom_sf(aes(color="Most Likely Spawning Gravel Reaches")) + 
+  scale_color_discrete(name = "") + 
+  ggtitle("Spawning Gravel Likelihood")
+```
+
+![](spawning-expl_files/figure-gfm/step-2-combined-filter-1.png)<!-- -->

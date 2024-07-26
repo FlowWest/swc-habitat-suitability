@@ -1,0 +1,173 @@
+---
+title: "Spawning Habitat Suitability Criteria"
+author: "[Maddee Rubenson](mailto:mrubenson@flowwest.com)"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: false
+    math_method:
+      engine: webtex
+      url: https://latex.codecogs.com/svg.image?
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+
+theme_set(theme_minimal())
+
+```
+
+## Habitat Suitability Criteria
+
+## Objective
+
+Develop a habitat suitability criteria that can be used across watersheds within the HabiStat model.
+
+## Methods
+
+### Read in data
+
+Data is from various sources and was compiled by Mark Gard for use in CVPIA DSMHabitat. Within the dataset are spawning criteria for depth, velocity, and substrate for 11 watersheds and Fall, Late Fall, Winter, Spring for Chinook Salmon.
+
+```{r echo=FALSE}
+hsc_raw <- readxl::read_excel(here::here('data-raw', 'source', 'hsc', 'HSC.xlsx'), sheet = "flat") |> 
+  janitor::clean_names() |> 
+  glimpse()
+
+spawning_hsc <- hsc_raw |> 
+  filter(life_stage == "Spawning") |>
+  mutate(river_citation = paste0(river, " (", citation, ")"))
+
+spawning_table <- hsc_raw |> 
+  filter(life_stage == "Spawning",
+         species == "Chinook") |>
+  select(river, race, suitability_metric, citation) |> 
+  mutate(suitability_metric = paste0(unique(suitability_metric), collapse = "; ")) |> 
+  distinct() 
+
+knitr::kable(spawning_table, caption = "All habitat suitability criteria compiled by Mark Gard")
+
+```
+
+### Depth HSI
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+spawning_hsc |> 
+  filter(suitability_metric == "Depth") |> 
+  filter(units_si < 3,
+         species == "Chinook") |> 
+  ggplot() + 
+  geom_point(aes(x = units_si, y = suitability_index, color = river_citation)) + 
+  geom_line(aes(x = units_si, y = suitability_index, color = river_citation)) + 
+  facet_wrap(~race, scales = "free_x") + 
+  xlab('depth (meters)') + 
+  theme(legend.title=element_blank()) + 
+  facet_wrap(~ race)
+
+# Take max across all reaches
+spawning_hsc_dep <- spawning_hsc |> 
+  filter(suitability_metric == "Depth") |> 
+  filter(units_si < 3,
+         species == "Chinook") |>
+  group_by(race) |>
+  complete(river_citation, units_si) |>
+  group_by(race, river_citation) |>
+  mutate(suitability_index = zoo::na.approx(suitability_index, x = units_si, na.rm=F)) |>
+  mutate(units_si = round(units_si, 1)) |>
+  group_by(race, units_si) |>
+  summarise(max_suit_index = max(suitability_index, na.rm=T)) 
+
+spawning_hsc_dep |> 
+  ggplot() + 
+  geom_line(aes(x = units_si, y = max_suit_index, color = race), size = 1) + 
+  xlab('depth (meters)') + 
+  ylab('suitability index') 
+```
+
+### Velocity HSI
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+spawning_hsc |> 
+  filter(suitability_metric == "Velocity") |> 
+  filter(units_si < 30,
+         species == "Chinook") |>   
+  ggplot() + 
+  geom_point(aes(x = units_si, y = suitability_index, color = river_citation)) + 
+  geom_line(aes(x = units_si, y = suitability_index, color = river_citation)) + 
+  facet_wrap(~race, scales = "free_x") + 
+  xlab('velocity (meters/second)') + 
+  theme(legend.title=element_blank())
+
+# Take max
+spawning_hsc_vel <- spawning_hsc |> 
+  filter(suitability_metric == "Velocity") |> 
+  filter(units_si < 30,
+         species == "Chinook") |>   
+  group_by(race) |>
+  complete(river_citation, units_si) |>
+  group_by(race, river_citation) |>
+  mutate(suitability_index = zoo::na.approx(suitability_index, x = units_si, na.rm=F)) |>
+  mutate(units_si = round(units_si, 1)) |>
+  group_by(race, units_si) |>
+  summarise(max_suit_index = max(suitability_index, na.rm=T)) 
+
+spawning_hsc_vel |> 
+  ggplot() + 
+  geom_line(aes(x = units_si, y = max_suit_index, color = race), size = 1) + 
+  xlab('velocity (meters/second)')  + 
+  ylab('suitability index')
+
+```
+
+## Create Suitability Data Files
+
+```{r, echo=FALSE}
+# depth (max only)
+spawning_depth_hsi <- spawning_hsc |> 
+  filter(suitability_metric == "Depth") |> 
+  filter(units_si < 3,
+         species == "Chinook") |>   
+  mutate(units_si = round(units_si, 1)) |> 
+  group_by(race) |> 
+  filter(suitability_index > 0) |>
+  summarise(max_depth = max(units_si)) |> 
+  rename(run = race) |> 
+  mutate(run = janitor::make_clean_names(run))
+
+knitr::kable(spawning_depth_hsi, caption = "Depth HSI - for each run, the maximum depth range suitable for spawning", format = "pipe")
+
+usethis::use_data(spawning_depth_hsi, overwrite = T)
+```
+
+```{r, echo=FALSE}
+# depth (ranges)
+spawning_dep_hsi <- spawning_hsc_dep |> 
+  rename(run = race,
+         depth = units_si, 
+         hsi = max_suit_index) |> 
+  mutate(run = janitor::make_clean_names(run, allow_dupes=T),
+         hsi = round(hsi, 1)) 
+
+knitr::kable(spawning_dep_hsi, caption = "Depth HSI - for each run, the depth HSI range") |> 
+  kableExtra::kable_styling(position = "left")
+
+usethis::use_data(spawning_dep_hsi, overwrite = T)
+```
+
+```{r, echo = FALSE}
+# velocity (ranges)
+spawning_vel_hsi <- spawning_hsc_vel |> 
+  rename(run = race,
+         velocity = units_si, # m/s
+         hsi = max_suit_index) |> 
+  mutate(run = janitor::make_clean_names(run, allow_dupes=T),
+         hsi = round(hsi, 1)) |> 
+  arrange(run)
+
+knitr::kable(spawning_vel_hsi, caption = "Velocity HSI - for each run, the velocity HSI range") |> 
+  kableExtra::kable_styling(position = "left")
+
+usethis::use_data(spawning_vel_hsi, overwrite = T)
+```

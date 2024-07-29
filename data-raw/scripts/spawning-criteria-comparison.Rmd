@@ -141,21 +141,6 @@ knitr::kable(spawning_depth_hsi, caption = "Depth HSI - for each run, the maximu
 usethis::use_data(spawning_depth_hsi, overwrite = T)
 ```
 
-```{r, echo=FALSE}
-# depth (ranges)
-spawning_dep_hsi <- spawning_hsc_dep |> 
-  rename(run = race,
-         depth = units_si, 
-         hsi = max_suit_index) |> 
-  mutate(run = janitor::make_clean_names(run, allow_dupes=T),
-         hsi = round(hsi, 1)) 
-
-knitr::kable(spawning_dep_hsi, caption = "Depth HSI - for each run, the depth HSI range") |> 
-  kableExtra::kable_styling(position = "left")
-
-usethis::use_data(spawning_dep_hsi, overwrite = T)
-```
-
 ```{r, echo = FALSE}
 # velocity (ranges)
 spawning_vel_hsi <- spawning_hsc_vel |> 

@@ -5,7 +5,7 @@
 \alias{wua_predicted}
 \title{WUA/LF by ComID by Flow (predicted by statistical model)}
 \format{
-An object of class \code{tbl_df} (inherits from \code{tbl}, \code{data.frame}) with 186300 rows and 30 columns.
+An object of class \code{tbl_df} (inherits from \code{tbl}, \code{data.frame}) with 4994112 rows and 9 columns.
 }
 \usage{
 wua_predicted

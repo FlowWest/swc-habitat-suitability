@@ -37,7 +37,7 @@ palette_hqt_gradient_class <-
 ## Import Training Data
 
 ```{r import-training-data, message=FALSE, warning=FALSE}
-wua_hydraulic_bfc <- 
+wua_hydraulic_rearing_raw <- 
   bind_rows(.id = "dataset",
     # VECTOR SRH-2D MODELS
     "Lower Yuba River" = 
@@ -51,9 +51,9 @@ wua_hydraulic_bfc <-
       readRDS(here::here("data-raw", "results", "fsa_basso.Rds")),
     ) 
 
-wua_hydraulic_bfc |> saveRDS(here::here("data-raw", "results", "fsa_combined.Rds"))
+wua_hydraulic_rearing_raw |> saveRDS(here::here("data-raw", "results", "fsa_combined.Rds"))
 
-wua_hydraulic_nbfc <- 
+wua_hydraulic_rearing_bfc_removed <- 
   bind_rows(.id = "dataset",
     # VECTOR SRH-2D MODELS
     "Lower Yuba River" = 
@@ -67,11 +67,37 @@ wua_hydraulic_nbfc <-
       readRDS(here::here("data-raw", "results", "fsa_basso_nbfc.Rds")),
     )
 
-wua_hydraulic_nbfc |> saveRDS(here::here("data-raw", "results", "fsa_combined_nbfc.Rds"))
+wua_hydraulic_rearing_bfc_removed |> saveRDS(here::here("data-raw", "results", "fsa_combined_nbfc.Rds"))
 
+wua_hydraulic_spawning <- 
+  bind_rows(.id = "dataset",
+    # VECTOR SRH-2D MODELS
+    "Lower Yuba River" = 
+      readRDS(here::here("data-raw", "results", "fsa_yuba_spawning.Rds")) |> select(-reach),
+    "Stanislaus River" = 
+      readRDS(here::here("data-raw", "results", "fsa_stan_spawning.Rds")),
+    # RASTER HEC-RAS 2D MODELS
+    "Deer Creek" = 
+      readRDS(here::here("data-raw", "results", "fsa_deer_spawning.Rds")),
+    "Tuolumne River (Basso-La Grange)" = 
+      readRDS(here::here("data-raw", "results", "fsa_basso_spawning.Rds")),
+    )
+
+wua_hydraulic_spawning |> saveRDS(here::here("data-raw", "results", "fsa_combined_spawning.Rds"))
+
+# bfc attribute indicates whether the data *has* the baseflow channel
 wua_hydraulic <- 
-  bind_rows(wua_hydraulic_bfc |> mutate(bfc = TRUE), 
-            wua_hydraulic_nbfc |> mutate(bfc = FALSE))
+  bind_rows(wua_hydraulic_rearing_raw |> mutate(bfc = TRUE, habitat = "rearing"), 
+            wua_hydraulic_rearing_bfc_removed |> mutate(bfc = FALSE, habitat = "rearing"),
+            wua_hydraulic_spawning |> mutate(bfc = TRUE, habitat = "spawning")) |>
+  mutate(habitat = as_factor(habitat))
+
+# ensure no duplicates
+wua_hydraulic <- 
+  wua_hydraulic |> 
+  group_by(comid, flow_cfs, bfc, habitat) |> 
+    filter(row_number() == 1) |>
+    ungroup()
 
 wua_hydraulic |> usethis::use_data(overwrite = TRUE)
 ```
@@ -86,9 +112,9 @@ interp_flows <- seq(300,15000,100)
 
 flow_to_suitable_area <- 
   wua_hydraulic |>
-  group_by(bfc, dataset, comid, length_ft) |>
+  group_by(habitat, bfc, dataset, comid, length_ft) |>
   complete(flow_cfs = interp_flows) |>
-  arrange(bfc, dataset, comid, flow_cfs, length_ft) |>
+  arrange(habitat, bfc, dataset, comid, flow_cfs, length_ft) |>
   mutate(across(c(area_tot, area_wua, area_pct, wua_per_lf, ind_per_lf), 
                 function(var) zoo::na.approx(var, x = flow_cfs, na.rm=F))) |>
   filter(flow_cfs %in% interp_flows) |>
@@ -134,11 +160,11 @@ model_data <- habistat::flowline_attr |>
             # fixed effects
             hqt_gradient_class=droplevels(hqt_gradient_class), hyd_cls=droplevels(hyd_cls),
             # auxiliary
-            da_scalar_maf, model_bfc = bfc) |> 
+            da_scalar_maf, model_bfc = bfc, model_hab = habitat) |> 
   filter_variable_ranges() |> 
   drop_na() |>
   # CREATE NESTED TRAINING DATASET DATA FRAMES ---------------------------------
-  nest(.by = c(model_bfc), .key = "td") |>
+  nest(.by = c(model_bfc, model_hab), .key = "td") |> # NOW NEED TO ADD HABITAT EVERY TIME WE GROUP BY BFC
   # SPLIT TRAINING AND TESTING DATA --------------------------------------------
   mutate(tts = map(td, function(x) {
          set.seed(47)
@@ -150,7 +176,8 @@ model_data <- habistat::flowline_attr |>
   # EXPAND TO COVER EACH COMBINATION OF SPECS AND MODEL TYPES ------------------
   expand_grid("model_variant" = c("SD0", "SD1", "SD2", "SN0", "SN1", "SN2"),
               "model_type" = c("LM", "RF")) |>
-  mutate(model_name = substr(model_variant, 1, 2)) # SD or SN
+  mutate(model_name = substr(model_variant, 1, 2)) |> # SD or SN
+  mutate(across(c(model_variant, model_type, model_name), as_factor)) # for storage efficiency
 ```
 
 ## Define and Run Models
@@ -281,31 +308,31 @@ model_result
 ```{r}
 model_val <- 
   model_result |>
-  select(model_bfc, model_name, model_variant, model_type, model_res) |>
+  select(model_hab, model_bfc, model_name, model_variant, model_type, model_res) |>
   unnest(model_res) |>
-  select(model_bfc, model_name, model_variant, model_type, training_sample, comid, flow_cfs, wua_per_lf, wua_per_lf_pred) |>
+  select(model_hab, model_bfc, model_name, model_variant, model_type, training_sample, comid, flow_cfs, wua_per_lf, wua_per_lf_pred) |>
   mutate(delta = wua_per_lf_pred - wua_per_lf,
          train_test = if_else(training_sample, "train", "test"))
 
 model_val |>
-  filter(model_type=="RF" & model_bfc) |>
-  group_by(train_test, model_bfc, model_name, model_variant, model_type, flow_cfs) |>
+  filter(model_type=="RF" & model_bfc & model_hab=="rearing") |>
+  group_by(train_test, model_hab, model_bfc, model_name, model_variant, model_type, flow_cfs) |>
   summarize(rmse = sqrt(mean((wua_per_lf_pred - wua_per_lf)^2))) |>
   ggplot(aes(x = flow_cfs, y = rmse)) + geom_line(aes(linetype = train_test, color = model_variant)) +
   scale_y_continuous(limits = c(0,100)) + scale_x_log10()
 
 model_val |>
   filter(model_variant=="SD2") |>
-  group_by(train_test, model_bfc, model_name, model_variant, model_type, flow_cfs) |>
+  group_by(train_test, model_hab, model_bfc, model_name, model_variant, model_type, flow_cfs) |>
   summarize(rmse = sqrt(mean((wua_per_lf_pred - wua_per_lf)^2))) |>
-  ggplot(aes(x = flow_cfs, y = rmse)) + geom_line(aes(linetype = train_test, color = paste(model_type, model_bfc))) +
+  ggplot(aes(x = flow_cfs, y = rmse)) + geom_line(aes(linetype = train_test, color = paste(model_type, model_bfc, model_hab))) +
   scale_y_continuous(limits = c(0,100)) + scale_x_log10()
 ```
 
 ```{r}
 model_val_rmse <- 
   model_val |>
-  group_by(train_test, model_bfc, model_name, model_variant, model_type) |>
+  group_by(train_test, model_hab, model_bfc, model_name, model_variant, model_type) |>
   summarize(rmse = sqrt(mean((wua_per_lf_pred - wua_per_lf)^2))) |>
   pivot_wider(names_from = train_test, values_from = rmse, names_glue = "{.value}_{train_test}") |>
   mutate(rmse_infl = (rmse_test / rmse_train))
@@ -369,11 +396,13 @@ model_predicted <-
                   wua_per_lf_pred = wua_per_lf_norm_pred * da_scalar_maf)
       }
     })) |>
-  select(model_bfc, model_variant, model_type, model_name, predicted) |>
+  select(model_hab, model_bfc, model_variant, model_type, model_name, predicted) |>
   unnest(predicted)
 
 model_predicted |> saveRDS(here::here("data-raw", "results", "model_predicted.Rds"))
 ```
+
+### Rearing
 
 ```{r fig.height=8}
 flowlines_pred <-
@@ -384,7 +413,9 @@ flowlines_pred <-
   # filter for just known extant spawning habitat
   #filter((range_pisces == "extant") | (comid %in% ms$comid)) |>
   # filter based on size of the stream
-  filter((stream_order >= 4) | (da_area_sq_km >= 100) | (comid %in% habistat::cv_mainstems$comid)) #|>
+  # filter((stream_order >= 4) | (da_area_sq_km >= 100) | (comid %in% habistat::cv_mainstems$comid)) #|>
+  filter((((stream_order >= 4) & (da_area_sq_km > 1)) | ((stream_order >= 3) & (da_area_sq_km >= 50))) | 
+           (comid %in% habistat::cv_mainstems$comid))
   #filter((stream_order >= 4) | (comid %in% ms$comid)) |>
   #filter((da_area_sq_km >= 100) | (comid %in% ms$comid)) |>
 
@@ -394,9 +425,7 @@ flowlines_pred |>
           aes(fill=watershed_level_3), color=NA) + 
   geom_sf() +
   geom_sf(data=habistat::cv_mainstems, color="red")
-```
 
-```{r}
 model_predicted_filtered <- 
   model_predicted |> 
   filter(comid %in% flowlines_pred$comid) |>
@@ -404,7 +433,7 @@ model_predicted_filtered <-
               select(comid, river_cvpia, starts_with("watershed_"), reach_length_ft), by=join_by(comid)) |>
   # select just the desired rows and columns for saving and reporting
   # pick the best variant of SD and SN models
-  filter((model_type == "RF") & (model_variant %in% c("SD2", "SN2"))) |>
+  filter((model_type == "RF") & (model_variant %in% c("SD2", "SN2")) & (model_hab == "rearing")) |>
   transmute(comid, model_bfc, model_name, flow_cfs, wua_per_lf_pred, 
          river_cvpia = as.factor(river_cvpia),
          watershed_level_3 = as.factor(watershed_level_3),
@@ -412,6 +441,40 @@ model_predicted_filtered <-
   glimpse()
 
 model_predicted_filtered |> saveRDS(here::here("data-raw", "results", "model_predicted_filtered.Rds"))
+#model_predicted_filtered <- readRDS(here::here("data-raw", "results", "model_predicted_filtered.Rds"))
+```
+
+### Spawning
+
+```{r}
+spawning_context <- readRDS(here::here("data-raw", "results", "spawning_context.Rds"))
+
+flowlines_pred_spawning <- 
+  habistat::flowline_geom_proj |>
+  left_join(spawning_context, by=join_by(comid)) |>
+  filter(spawning_geographic_context)
+  
+flowlines_pred_spawning |> 
+  ggplot() + 
+  geom_sf(data=habistat::cv_watersheds,#  |> filter(range_pisces == "extant"), 
+          aes(fill=watershed_level_3), color=NA) + 
+  geom_sf()
+
+model_predicted_spawning <- 
+  model_predicted |> 
+  filter(comid %in% flowlines_pred_spawning$comid) |>
+  left_join(habistat::flowline_attr |>
+              select(comid, river_cvpia, starts_with("watershed_"), reach_length_ft), by=join_by(comid)) |>
+  # select just the desired rows and columns for saving and reporting
+  # pick the best variant of SD and SN models
+  filter((model_type == "RF") & (model_variant %in% c("SD2", "SN2")) & (model_hab == "spawning")) |>
+  transmute(comid, model_bfc, model_name, flow_cfs, wua_per_lf_pred, 
+         river_cvpia = as.factor(river_cvpia),
+         watershed_level_3 = as.factor(watershed_level_3),
+         reach_length_ft) |>
+  glimpse()
+
+model_predicted_spawning |> saveRDS(here::here("data-raw", "results", "model_predicted_spawning.Rds"))
 ```
 
 ## DSMHabitat comparison
@@ -527,9 +590,9 @@ model_predicted_filtered |>
                 color = case_when(model_name=="SD" ~ "Scale-Dependent", 
                                   model_name=="SN" ~ "Scale-Normalized"), 
                 linetype = if_else(model_bfc, "Post-Model BFC Removal", "Prior BFC Removal"))) +
-  #geom_line(data=dsm_habitat_suitable_ac |> 
-  #            rename(river_cvpia = river), 
-  #          aes(x = flow_cfs, y = value, color = name)) +
+  geom_line(data=dsm_habitat_wua_per_lf |> 
+              rename(river_cvpia = river), 
+            aes(x = flow_cfs, y = value, color = name)) +
   facet_wrap(~river_cvpia, scales = "free_y") +
   scale_x_continuous(limits = c(0,15000)) +
   #scale_y_log10() + scale_x_log10()  +
@@ -569,19 +632,28 @@ Combine the outputs
 
 ```{r}
 model_predicted_final <- bind_rows(
+  # bring in the main rearing results where the baseflow was removed before
   model_predicted_filtered |> 
-    filter((!model_bfc) & (comid %in% baseflows_by_comid$comid)),
+    filter((!model_bfc) & (comid %in% baseflows_by_comid$comid)) |>
+    mutate(habitat = "rearing"),
+  # now bring in the rearing model that included post-hoc baseflow channel removal
   model_predicted_bfc_rm |>
     select(-wua_per_lf_pred) |>
     rename(wua_per_lf_pred = wua_per_lf_pred_nbfc) |>
-    select(-flow_cfs_nbfc)) |>
-  left_join(habistat::wua_hydraulic |>
-              transmute(comid, flow_cfs, wua_per_lf_actual = wua_per_lf) |>
-              # remove dups
-              group_by(comid, flow_cfs) |> 
-              filter(row_number() == 1) |>
-              ungroup(), 
-            by = join_by(comid, flow_cfs))
+    select(-flow_cfs_nbfc, -baseflow_cfs) |>
+    mutate(habitat = "rearing"),
+  # bring in the main spawning results
+  model_predicted_spawning |> 
+    filter((comid %in% baseflows_by_comid$comid)) |>
+    mutate(habitat = "spawning")
+  ) #|>
+ # # join hydraulic modelled results for comparison
+ # # left_join(wua_hydraulic |>
+ # #             filter(habitat == "rearing"), 
+ # #           by = join_by(comid, flow_cfs, model_bfc == bfc))
+ # left_join(wua_hydraulic |>
+ #             filter((habitat == "rearing") & !bfc), # always compare against the training data with BFC removed 
+ #           by = join_by(comid, flow_cfs)) 
 
 model_predicted_final |>
   saveRDS(here::here("data-raw", "results", "model_predicted_final.Rds"))
@@ -589,24 +661,26 @@ model_predicted_final |>
 wua_predicted <- model_predicted_final
 usethis::use_data(wua_predicted, overwrite = TRUE)
 ```
+
 ```{r}
 wua_predicted_cv_watersheds <- 
   wua_predicted |>
   filter(!is.na(watershed_level_3)) |>
-  group_by(model_bfc, model_name, watershed_level_3, flow_cfs) |>
+  group_by(habitat, model_bfc, model_name, watershed_level_3, flow_cfs) |>
   summarize(wua_per_lf_pred = sum(wua_per_lf_pred * reach_length_ft) / sum(reach_length_ft)) 
 usethis::use_data(wua_predicted_cv_watersheds, overwrite = TRUE)
 
 wua_predicted_cv_mainstems <- 
   wua_predicted |>
   filter(!is.na(river_cvpia)) |>
-  group_by(model_bfc, model_name, river_cvpia, flow_cfs) |>
+  group_by(habitat, model_bfc, model_name, river_cvpia, flow_cfs) |>
   summarize(wua_per_lf_pred = sum(wua_per_lf_pred * reach_length_ft) / sum(reach_length_ft))
 usethis::use_data(wua_predicted_cv_mainstems, overwrite = TRUE)
 ```
 
 ```{r fig.width=6.5, fig.height=6.5, dpi=300}
 wua_predicted_cv_mainstems |>
+  filter(habitat == "rearing") |>
   filter(flow_cfs <= 15000) |>
   ggplot(aes(x = flow_cfs)) + 
   geom_line(aes(y = wua_per_lf_pred, 
@@ -626,3 +700,21 @@ wua_predicted_cv_mainstems |>
 # ggsave(here::here("vignettes", "figures", "model_comparison.png"))
 ```
 
+```{r fig.width=6.5, fig.height=6.5, dpi=300}
+wua_predicted_cv_mainstems |>
+  filter(habitat == "spawning") |>
+  filter(flow_cfs <= 15000) |>
+  ggplot(aes(x = flow_cfs)) + 
+  geom_line(aes(y = wua_per_lf_pred, 
+                color = case_when(model_name=="SD" ~ "Scale-Dependent", 
+                                  model_name=="SN" ~ "Scale-Normalized"), 
+                linetype = "BFC Not Removed")) +
+  facet_wrap(~river_cvpia, scales = "free_y") +
+  scale_x_continuous(limits = c(0,15000)) +
+  #scale_y_log10() + scale_x_log10()  +
+  scale_color_discrete(name = "Model Type") + 
+  scale_linetype_discrete(name = "Baseflow Method") + 
+  theme(panel.grid.minor = element_blank(), legend.position = "top", legend.box="vertical", axis.text.x = element_text(angle=90)) 
+
+# ggsave(here::here("vignettes", "figures", "model_comparison.png"))
+```

@@ -17,9 +17,11 @@ get_data <- function(...) {
 # DATA IMPORT ------------------------------------------------------------------
 
 predictions <- get_data(wua_predicted, package = "habistat") |>
-  mutate(model_bfc = if_else(model_bfc, "p", "a")) |> # baseflow channel removed pre (a) or post (p) prediction
-  mutate(model_id = paste0(model_name, "_", model_bfc)) |>
-  select(comid, flow_cfs, model_id, wua_per_lf_pred, river_cvpia, watershed_level_3, reach_length_ft) |>
+  #filter(habitat == "rearing") |>
+  mutate(model_id = if_else((habitat=="rearing" & model_bfc),
+                            paste0(model_name, "_ph_bfc_rm"), # post-hoc baseflow channel removal
+                            model_name)) |>
+  select(comid, flow_cfs, habitat, model_id, wua_per_lf_pred, river_cvpia, watershed_level_3, reach_length_ft) |>
   pivot_wider(names_from = model_id,
               values_from = wua_per_lf_pred,
               names_glue = c("wua_per_lf_pred_{model_id}")) |>
@@ -38,14 +40,16 @@ gc() # garbage collect after loading from habistat package
 all_flows <- unique(predictions$flow_cfs)
 
 attr <- get_data(flowline_attr, package = "habistat") |>
-  filter(comid %in% predictions$comid)
+  filter(comid %in% predictions$comid) |>
+  # stream size filter -- make sure this matches model_cleaned.Rmd
+  filter(((stream_order >= 4) & (da_area_sq_km > 1)) | ((stream_order >= 3) & (da_area_sq_km >= 50)))
 
 gc() # garbage collect after loading from habistat package
 
 geom <- get_data(flowline_geom, package = "habistat") |>
   st_set_crs("+proj=longlat +datum=WGS84") |> # for display purposes only
-  mutate(object_id = paste0("comid_", comid)) |>
-  inner_join(attr |> transmute(comid, gnis_name), by = join_by(comid))
+  inner_join(attr |> transmute(comid, gnis_name), by = join_by(comid)) |>
+  mutate(object_id = paste0("comid_", comid))
 
 gc() # garbage collect after loading from habistat package
 

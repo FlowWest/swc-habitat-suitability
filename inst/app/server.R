@@ -10,6 +10,7 @@ function(input, output, session){
     #   mutate(wua_per_lf = !!sym(input$wua_var))
     predictions |>
       filter(flow_cfs == input$active_flow) |>
+      filter(habitat == input$habitat_type) |>
       glimpse() #|>
     # TODO could also filter for selected model and bfc removed/not removed
     #message(nrow(result), " result rows")
@@ -23,15 +24,16 @@ function(input, output, session){
       mutate(wua_per_lf = !!sym(input$wua_var)) |>
       filter(!is.na(wua_per_lf)) |>
       mutate(object_label = paste0("<strong>", comid, " ", gnis_name, "</strong>", "<br />",
-                                   "Scale-Dependent Model (prior baseflow removal): ",
-                                   round(wua_per_lf_pred_SD_a,2), " ft2/ft", "<br />",
+                                   "Scale-Dependent Model: ",
+                                   round(wua_per_lf_pred_SD,2), " ft2/ft", "<br />",
                                    "Scale-Dependent Model (post-model baseflow removal): ",
-                                   round(wua_per_lf_pred_SD_p,2), " ft2/ft", "<br />",
-                                   "Scale-Normalized Model (prior baseflow removal): ",
-                                   round(wua_per_lf_pred_SN_a,2), " ft2/ft", "<br />",
+                                   round(wua_per_lf_pred_SD_ph_bfc_rm,2), " ft2/ft", "<br />",
+                                   "Scale-Normalized Model: ",
+                                   round(wua_per_lf_pred_SN,2), " ft2/ft", "<br />",
                                    "Scale-Normalized Model (post-model baseflow removal): ",
-                                   round(wua_per_lf_pred_SN_p,2), " ft2/ft", "<br />",
+                                   round(wua_per_lf_pred_SN_ph_bfc_rm,2), " ft2/ft", "<br />",
                                    "Actual: ", round(wua_per_lf_actual,2), " ft2/ft")) |>
+      #filter(watershed_name == active_watershed_name()) |>
       glimpse()
   })
 
@@ -94,20 +96,26 @@ function(input, output, session){
     if (!is.null(selected_point$object_id)) { #& (length(selected_point$comid)>0)) {
     predictions |>
       filter(comid == selected_point$comid) |>
+      filter(habitat == input$habitat_type) |>
       ggplot(aes(x = flow_cfs)) +
-      geom_line(aes(y = wua_per_lf_pred_SD_a, color="Scale-Dependent", linetype="Prior BFC Removal")) +
-      geom_line(aes(y = wua_per_lf_pred_SD_p, color="Scale-Dependent", linetype="Post-Model BFC Removal")) +
-      geom_line(aes(y = wua_per_lf_pred_SN_a, color="Scale-Normalized", linetype="Prior BFC Removal")) +
-      geom_line(aes(y = wua_per_lf_pred_SN_p, color="Scale-Normalized", linetype="Post-Model BFC Removal")) +
-      geom_line(aes(y = wua_per_lf_actual, color="Actual", linetype="Prior BFC Removal")) +
+      geom_line(aes(y = wua_per_lf_actual, color="Actual", linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal")), linewidth=2) +
+      geom_line(aes(y = wua_per_lf_pred_SD, color="Scale-Dependent", linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
+      geom_line(aes(y = wua_per_lf_pred_SD_ph_bfc_rm, color="Scale-Dependent", linetype="Post-Model BFC Removal")) +
+      geom_line(aes(y = wua_per_lf_pred_SN, color="Scale-Normalized", linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
+      geom_line(aes(y = wua_per_lf_pred_SN_ph_bfc_rm, color="Scale-Normalized", linetype="Post-Model BFC Removal")) +
       #geom_hline(aes(yintercept = chan_width_ft)) + #, linetype="Channel Width (ft)")) +
       #geom_vline(aes(xintercept = baseflow_cfs)) +
       #geom_text(aes(x = 1, y = chan_width_ft, label = chan_width_ft)) +
-      scale_x_log10(labels = scales::label_comma()) +
+      scale_x_log10(labels = scales::label_comma()) + annotation_logticks(sides = "b") +
+      scale_y_continuous(limits = c(0, NA)) +
       #scale_y_continuous(trans = ihs, labels = scales::label_comma(), limits = c(0, NA)) +
       theme_minimal() + theme(panel.grid.minor = element_blank(), legend.position = "top", legend.box="vertical") +
       xlab("Flow (cfs)") + ylab("WUA (ft2) per linear ft") +
-      scale_color_discrete(name = "Model Type") + scale_linetype_discrete(name = "Baseflow Method")
+      scale_color_discrete(name = "Model Type") +
+      scale_linetype_manual(name = "Baseflow Method",
+                            values = c("Prior BFC Removal" = "solid",
+                                       "No BFC Removal" = "solid",
+                                       "Post-Model BFC Removal" = "dotted"))
   } else {
       ggplot()
     }})
@@ -235,6 +243,14 @@ selected_watershed <- reactiveValues(object_id = NA,
 
   active_watershed_bbox <- reactive({
     st_bbox(active_watershed_geom())
+  })
+
+  active_watershed_name <- reactive({
+    if(!is.na(selected_watershed$object_id)) {
+      watersheds$watershed_level_3[[which(watersheds$watershed_id==selected_watershed$object_id)]]
+    } else {
+      NA
+    }
   })
 
   observe({

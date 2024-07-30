@@ -77,6 +77,20 @@ vector_dvhsi_lyr <- function(d, v) {
   if_else(d>0.5 & d<=5.2 & v>0 & v<=4.0, 1, 0)
 }
 
+#' Vector Habitat Suitability Index (HSI) function: Fall-Run Chinook Spawning
+#'
+#' @param d a vector of depths in feet
+#' @param v a vector of velocities in feet per second
+#'
+#' @return A vector of habitat suitability index values between 0 and 1.
+#' @md
+#' @examples
+#'
+#' @export
+vector_dvhsi_spawning <- function(d, v) {
+  if_else(d>0 & d<=7.9 & v>0 & v<=5.9, 1, 0)
+}
+
 #' Calculate HSI for each row of SRH-2D results
 #'
 #' @param data A `tbl_df` of the format returned by `vector_import_srh2d()`

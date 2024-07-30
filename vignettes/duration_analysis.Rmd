@@ -6,7 +6,7 @@ output:
   rmarkdown::html_vignette:
     default
 vignette: >
-  %\VignetteIndexEntry{Duration Analysis}
+  %\VignetteIndexEntry{Duration Analysis and Baseflow}
   %\VignetteEncoding{UTF-8}
   %\VignetteEngine{knitr::rmarkdown}
 editor_options: 

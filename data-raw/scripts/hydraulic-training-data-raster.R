@@ -44,14 +44,14 @@ basso_groups <-
 basso_rast <- basso_filenames |>
   raster_prep_grid()
 
-###
+### ORIGINAL VERSION
 
 outpath <- here::here("data-raw", "results", "fsa_basso.Rds")
 
 if(!file.exists(outpath)) {
 
   basso_result <- basso_rast |>
-    raster_summarize_hsi(basso_groups, .group_var = comid) |>
+    raster_summarize_hsi(basso_groups, .group_var = comid, hsi_func = raster_dvhsi_hqt) |>
     suitability_postprocess(basso_groups, .group_var = comid)
 
   basso_result |> saveRDS(outpath)
@@ -62,7 +62,7 @@ if(!file.exists(outpath)) {
 
 }
 
-###
+### VARIATION FOR REARING - BASEFLOW REMOVAL
 
 # define baseflow mask as 150 cfs (COMID 2823750 observed dry season baseflow is 166 cfs)
 basso_baseflow_mask <- terra::ifel(is.na(basso_rast$depth[["150"]]), 1, 0)
@@ -72,7 +72,7 @@ outpath <- here::here("data-raw", "results", "fsa_basso_nbfc.Rds")
 if(!file.exists(outpath)) {
 
   basso_result_nbfc <- basso_rast |>
-    raster_summarize_hsi(basso_groups, .group_var = comid, mask_raster = basso_baseflow_mask) |>
+    raster_summarize_hsi(basso_groups, .group_var = comid, mask_raster = basso_baseflow_mask, hsi_func = raster_dvhsi_hqt) |>
     suitability_postprocess(basso_groups, .group_var = comid)
 
   basso_result_nbfc |> saveRDS(outpath)
@@ -80,6 +80,24 @@ if(!file.exists(outpath)) {
 } else {
 
   basso_result_nbfc <- readRDS(outpath)
+
+}
+
+### VARIATION FOR SPAWNING - ALTERNATIVE HSI
+
+outpath <- here::here("data-raw", "results", "fsa_basso_spawning.Rds")
+
+if(!file.exists(outpath)) {
+
+  basso_result_spawning <- basso_rast |>
+    raster_summarize_hsi(basso_groups, .group_var = comid, hsi_func = raster_dvhsi_spawning) |>
+    suitability_postprocess(basso_groups, .group_var = comid)
+
+  basso_result_spawning |> saveRDS(outpath)
+
+} else {
+
+  basso_result_spawning <- readRDS(outpath)
 
 }
 
@@ -122,14 +140,14 @@ deer_groups <-
 deer_rast <- deer_filenames |>
   raster_prep_grid()
 
-###
+### ORIGINAL VERSION
 
 outpath <- here::here("data-raw", "results", "fsa_deer.Rds")
 
 if(!file.exists(outpath)) {
 
   deer_result <- deer_rast |>
-    raster_summarize_hsi(deer_groups, .group_var = comid) |>
+    raster_summarize_hsi(deer_groups, .group_var = comid, hsi_func = raster_dvhsi_hqt) |>
     suitability_postprocess(deer_groups, .group_var = comid)
 
   deer_result |> saveRDS(outpath)
@@ -140,7 +158,7 @@ if(!file.exists(outpath)) {
 
 }
 
-###
+### VARIATION FOR REARING - BASEFLOW REMOVAL
 
 # define baseflow mask as 150 cfs (COMID 8020924 observed dry season baseflow is 95 cfs)
 deer_baseflow_mask <- terra::ifel(is.na(deer_rast$depth[["100"]]), 1, 0)
@@ -150,7 +168,7 @@ outpath <- here::here("data-raw", "results", "fsa_deer_nbfc.Rds")
 if(!file.exists(outpath)) {
 
   deer_result_nbfc <- deer_rast |>
-    raster_summarize_hsi(deer_groups, .group_var = comid, mask_raster = deer_baseflow_mask) |>
+    raster_summarize_hsi(deer_groups, .group_var = comid, mask_raster = deer_baseflow_mask, hsi_func = raster_dvhsi_hqt) |>
     suitability_postprocess(deer_groups, .group_var = comid)
 
   deer_result_nbfc |> saveRDS(outpath)
@@ -158,5 +176,23 @@ if(!file.exists(outpath)) {
 } else {
 
   deer_result_nbfc <- readRDS(outpath)
+
+}
+
+### VARIATION FOR SPAWNING - ALTERNATIVE HSI
+
+outpath <- here::here("data-raw", "results", "fsa_deer_spawning.Rds")
+
+if(!file.exists(outpath)) {
+
+  deer_result_spawning <- deer_rast |>
+    raster_summarize_hsi(deer_groups, .group_var = comid, hsi_func = raster_dvhsi_spawning) |>
+    suitability_postprocess(deer_groups, .group_var = comid)
+
+  deer_result_spawning |> saveRDS(outpath)
+
+} else {
+
+  deer_result_spawning <- readRDS(outpath)
 
 }

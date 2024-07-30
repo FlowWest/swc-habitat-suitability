@@ -1,7 +1,7 @@
 Spawning Data Exploration
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-07-25
+2024-07-29
 
 - [Determining the Geographic Scope](#determining-the-geographic-scope)
   - [HQT gradient class and known spawning
@@ -15,6 +15,7 @@ Spawning Data Exploration
 - [Reach by Reach Analysis](#reach-by-reach-analysis)
   - [Sediment Transport Approach](#sediment-transport-approach)
   - [Alternative Approach](#alternative-approach)
+- [Export result](#export-result)
 
 ``` r
 library(tidyverse)
@@ -89,6 +90,15 @@ spawning_mainstems <-
   read_sf(here::here("data-raw", "source", "rearing_spatial_data", "nhdplusv2_comid_habitat_xw.shp.zip")) |>
   janitor::clean_names() |>
   filter(str_detect(habitat, "spawning")) |>
+  st_zm() |>
+  st_transform(habistat::const_proj_crs()) |>
+  select(river, comid) |>
+  rename(river_cvpia = river)
+
+rearing_mainstems <-
+  read_sf(here::here("data-raw", "source", "rearing_spatial_data", "nhdplusv2_comid_habitat_xw.shp.zip")) |>
+  janitor::clean_names() |>
+  filter(str_detect(habitat, "rearing")) |>
   st_zm() |>
   st_transform(habistat::const_proj_crs()) |>
   select(river, comid) |>
@@ -297,6 +307,9 @@ cvpia_extents_nhd_spawning |>
 flowlines_filtered <- habistat::flowline_geom_proj |>
   # filter(comid %in% within_network_comids) |>
   left_join(habistat::flowline_attr) |>
+  # filter for just the Sacramento and San Joaquin Basins
+  filter(watershed_level_1 %in% c("Sacramento River", "San Joaquin River")) |>
+  # filter based on size of the stream
   filter((((stream_order >= 4) & (da_area_sq_km > 1)) | ((stream_order >= 3) & (da_area_sq_km >= 50))) | 
            (comid %in% habistat::cv_mainstems$comid)) |>
   select(comid, geometry)
@@ -642,11 +655,18 @@ spawning_flowlines_final <- flowlines_filtered |>
           (comid %in% pisces_range_comid) &
           (comid %in% gradient_class_comid) &
           (comid %in% flowlines_filtered$comid)))
-  
+
 spawning_flowlines_final |>
-  ggplot() + geom_sf(aes(color = "Other Potential Spawning Habitat")) +
-  geom_sf(data=spawning_mainstems, aes(color = "Spawning Mainstems")) +
-  ggtitle("Final Spawning Reach Dataset")
+  ggplot() + 
+  ggspatial::annotation_spatial(data=flowlines_filtered, color="#dddddd") +
+  geom_sf(data=rearing_mainstems, aes(color = "Rearing Mainstems")) +
+  geom_sf(aes(color = "Potential Spawning Habitat - All")) +
+  geom_sf(data=spawning_mainstems, aes(color = "Potential Spawning Habitat - Mainstems")) +
+  ggtitle("Final Spawning Reach Dataset") +
+  scale_color_manual(name = "",
+                     values = c("Potential Spawning Habitat - Mainstems" = "darkblue",
+                                "Potential Spawning Habitat - All"= "cornflowerblue",
+                                "Rearing Mainstems" = "darkgoldenrod"))
 ```
 
 ![](spawning-expl_files/figure-gfm/combined-filters-final-1.png)<!-- -->
@@ -888,10 +908,12 @@ spawning_flowlines_final |>
   filter(str_detect(largest_grain_class_mobilized, "gravel|cobble")) |> 
   
   ggplot() +
-  geom_sf(data=spawning_flowlines_final, aes(color="Spawning Geographic Scope")) + 
+  geom_sf(data=spawning_flowlines_final, aes(color="All Potential Spawning Habitat")) + 
   geom_sf(aes(color="Most Likely Spawning Gravel Reaches")) + 
-  scale_color_discrete(name = "") + 
-  ggtitle("Spawning Gravel Likelihood based on Bankfull Sediment Transport")
+  ggtitle("Spawning Gravel Likelihood based on Bankfull Sediment Transport") + 
+  scale_color_manual(name = "", 
+                     values = c("All Potential Spawning Habitat" = "cornflowerblue",
+                                "Most Likely Spawning Gravel Reaches" = "mediumvioletred"))
 ```
 
 ![](spawning-expl_files/figure-gfm/step-2-sed-transport-filter-1.png)<!-- -->
@@ -906,10 +928,12 @@ Using the *predicted* UCD geomorph classifications
 spawning_flowlines_final |>
   filter(comid %in% geomorph_filter_comid) |>
   ggplot() + 
-  geom_sf(data=spawning_flowlines_final, aes(color="Spawning Geographic Scope")) + 
+  geom_sf(data=spawning_flowlines_final, aes(color="All Potential Spawning Habitat")) + 
   geom_sf(aes(color="Most Likely Spawning Gravel Reaches")) + 
-  scale_color_discrete(name = "") + 
-  ggtitle("Spawning Gravel Likelihood based on Geomorphic Reach Classes")
+  ggtitle("Spawning Gravel Likelihood based on Geomorphic Reach Classes") + 
+  scale_color_manual(name = "", 
+                     values = c("All Potential Spawning Habitat" = "cornflowerblue",
+                                "Most Likely Spawning Gravel Reaches" = "mediumvioletred"))
 ```
 
 ![](spawning-expl_files/figure-gfm/step-2-geomorph-filter-1.png)<!-- -->
@@ -924,10 +948,32 @@ spawning_flowlines_final |>
             str_detect(largest_grain_class_mobilized, "gravel|cobble")) | 
            comid %in% geomorph_filter_comid) |>
   ggplot() +
-  geom_sf(data=spawning_flowlines_final, aes(color="Spawning Geographic Scope")) + 
-  geom_sf(aes(color="Most Likely Spawning Gravel Reaches")) + 
-  scale_color_discrete(name = "") + 
-  ggtitle("Spawning Gravel Likelihood")
+  #ggspatial::annotation_spatial(data=flowlines_filtered, color="#dddddd") +
+  geom_sf(data=spawning_flowlines_final, aes(color="Potential Spawning Habitat - All")) + 
+  geom_sf(aes(color="Potential Spawning Habitat - Most Likely Spawning Gravels")) + 
+  #scale_color_discrete(name = "") + 
+  ggtitle("Spawning Gravel Likelihood") + 
+  scale_color_manual(name = "", 
+                     values = c("Potential Spawning Habitat - All" = "cornflowerblue",
+                                "Potential Spawning Habitat - Most Likely Spawning Gravels" = "mediumvioletred"))
 ```
 
 ![](spawning-expl_files/figure-gfm/step-2-combined-filter-1.png)<!-- -->
+
+## Export result
+
+``` r
+spawning_context <- habistat::flowline_attr |>
+  select(comid) |>
+  left_join(sediment_data, by=join_by(comid)) |>
+  transmute(comid,
+            spawning_geographic_context = comid %in% spawning_flowlines_final$comid,
+            spawning_gravel_via_sediment = 
+              (!(str_detect(largest_grain_class_suspended, "silt|clay")) & 
+                 str_detect(largest_grain_class_mobilized, "gravel|cobble")),
+            spawning_gravel_via_geomorph = comid %in% geomorph_filter_comid,
+            spawning_filter_all = spawning_geographic_context & 
+              (spawning_gravel_via_sediment | spawning_gravel_via_geomorph))
+
+spawning_context |> saveRDS(here::here("data-raw", "results", "spawning_context.Rds"))
+```

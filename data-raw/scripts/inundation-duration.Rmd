@@ -27,6 +27,11 @@ Duration suitability criteria from the CBEC LYR analysis and HQT are:
 * 1 to 9 days: 1.00
 * 10+ days: 0.66
 
+Duration suitability for spawning (based on average incubation time of 12 weeks):
+
+* 0 days to 83 days: 0
+* 84+ days: 1.00
+
 Additionally, we modify such that >=100 days is suitability 0, to effectively exclude the baseflow channel. 
 
 ```{r setup, message=FALSE, warning=FALSE}
@@ -143,15 +148,8 @@ calculate_exceedence_summary <- function(q_gauge, q_crit, baseflow_threshold_day
     filter(exceeds_q) |>
     summarize(duration_days = max(cumulative_exceedence)) |>
     mutate(#duration_days = pmin(duration_days, 365), 
-           durhsi_vl = case_when(duration_days == 0  ~ 0,
-                                 duration_days < 18  ~ 0.66,
-                                 duration_days < 25 ~ 1.00,
-                                 duration_days < baseflow_threshold_days ~ 0.66,
-                                 duration_days >= baseflow_threshold_days ~ 0),
-           durhsi_vf = case_when(duration_days <= 0  ~ 0,
-                                 duration_days < 10 ~ 1.00,
-                                 duration_days < baseflow_threshold_days ~ 0.66,
-                                 duration_days >= baseflow_threshold_days ~ 0)) 
+           durhsi_vl = habistat::duration_hsi_rearing_vl(duration_days, baseflow_threshold_days),
+           durhsi_vf = habistat::duration_hsi_rearing_vf(duration_days, baseflow_threshold_days)) 
     
   exceedence_intervals |>
     summarize(n_inundations = n(),
@@ -262,15 +260,8 @@ durhsi_by_model_q_wy <-
          river=="Lower Yuba River" ~ "Sacramento Valley",
          river=="Stanislaus River" ~ "San Joaquin Valley")) |>
   inner_join(water_year_types, by=join_by(location, water_year), relationship="many-to-one") |>
-    mutate(durhsi_vl = case_when(max_days_inundated == 0  ~ 0,
-                                 max_days_inundated < 18  ~ 0.66,
-                                 max_days_inundated < 25 ~ 1.00,
-                                 max_days_inundated < baseflow_threshold_days ~ 0.66,
-                                 max_days_inundated >= baseflow_threshold_days ~ 0),
-           durhsi_vf = case_when(max_days_inundated <= 0  ~ 0,
-                                 max_days_inundated < 10 ~ 1.00,
-                                 max_days_inundated < baseflow_threshold_days ~ 0.66,
-                                 max_days_inundated >= baseflow_threshold_days ~ 0)) |>
+    mutate(durhsi_vl = habistat::duration_hsi_rearing_vl(max_days_inundated, baseflow_threshold_days),
+           durhsi_vf = habistat::duration_hsi_rearing_vf(max_days_inundated, baseflow_threshold_days)) |>
   glimpse()
 
 durhsi_by_model_q_wy |>
@@ -446,15 +437,8 @@ baseflow_threshold_days <- 100
 # need a public facing function that takes an input daily hydrograph and outputs this rating curve
 duration_rating_curves <- durhsi_by_model_q |> 
   select(river, model_q, avg_days_inundated) |>
-  mutate(durhsi_vl = case_when(avg_days_inundated == 0  ~ 0,
-                               avg_days_inundated < 18  ~ 0.66,
-                               avg_days_inundated < 25 ~ 1.00,
-                               avg_days_inundated < baseflow_threshold_days ~ 0.66,
-                               avg_days_inundated >= baseflow_threshold_days ~ 0),
-         durhsi_vf = case_when(avg_days_inundated <= 0  ~ 0,
-                               avg_days_inundated < 10 ~ 1.00,
-                               avg_days_inundated < baseflow_threshold_days ~ 0.66,
-                               avg_days_inundated >= baseflow_threshold_days ~ 0)) 
+  mutate(durhsi_vl = habistat::duration_hsi_rearing_vl(avg_days_inundated, baseflow_threshold_days),
+         durhsi_vf = habistat::duration_hsi_rearing_vf(avg_days_inundated, baseflow_threshold_days)) 
 
 duration_rating_curves |>
   filter(river=="Deer Creek") |>
@@ -558,16 +542,9 @@ calculate_daily_inundation_duration <- function(q_gauge, q_crit) {
 
 dhsi <- function(duration_days, type) {
   if (type=="vl") {
-    case_when(duration_days == 0  ~ 0,
-              duration_days < 18  ~ 0.66,
-              duration_days < 25 ~ 1.00,
-              duration_days < baseflow_threshold_days ~ 0.66,
-              duration_days >= baseflow_threshold_days ~ 0)
+    habistat::duration_hsi_rearing_vl(duration_days, baseflow_threshold_days)
   } else if (type=="vf") {
-    case_when(duration_days <= 0  ~ 0,
-              duration_days < 10 ~ 1,
-              duration_days < baseflow_threshold_days ~ 0.66,
-              duration_days >= baseflow_threshold_days ~ 0)
+    habistat::duration_hsi_rearing_vf(duration_days, baseflow_threshold_days)
   }
 }
 

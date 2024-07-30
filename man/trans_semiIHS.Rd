@@ -5,7 +5,7 @@
 \alias{trans_semiIHS}
 \title{Semi Inverse Hyperbolic Sine Transform (scales transformation for ggplot)}
 \format{
-An object of class \code{trans} of length 7.
+An object of class \code{transform} of length 9.
 }
 \usage{
 trans_semiIHS

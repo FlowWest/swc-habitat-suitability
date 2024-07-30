@@ -305,3 +305,50 @@ flow_threshold_split_apply <- function(data,
                   {{.habitat_var}} := suitable_area)
 
 }
+
+#' Rearing Duration HSI for Valley Lowland
+#'
+#' @param x A vector of values of number of days
+#' @param baseflow_threshold_days An optional threshold number of days defining baseflow
+#'
+#' @returns A vector of values of duration HSI
+#' @md
+#'
+#' @export
+duration_hsi_rearing_vl <- function(x, baseflow_threshold_days = Inf) {
+  case_when(x == 0  ~ 0,
+            x < 18  ~ 0.66,
+            x < 25 ~ 1.00,
+            x < baseflow_threshold_days ~ 0.66,
+            x >= baseflow_threshold_days ~ 0)
+}
+
+#' Rearing Duration HSI for Valley Foothill
+#'
+#' @param x A vector of values of number of days
+#' @param baseflow_threshold_days An optional threshold number of days defining baseflow
+#'
+#' @returns A vector of values of duration HSI
+#' @md
+#'
+#' @export
+duration_hsi_rearing_vf <- function(x, baseflow_threshold_days = Inf) {
+  case_when(x <= 0  ~ 0,
+            x < 10 ~ 1.00,
+            x < baseflow_threshold_days ~ 0.66,
+            x >= baseflow_threshold_days ~ 0)
+}
+
+#' Spawning Duration HSI
+#'
+#' @param x A vector of values of number of days
+#'
+#' @returns A vector of values of duration HSI
+#' @md
+#'
+#' @export
+duration_hsi_spawning <- function(x) {
+  case_when(x <= 0  ~ 0,
+            x < 84 ~ 0,
+            x >= 84 ~ 1.00)
+}

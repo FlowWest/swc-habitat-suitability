@@ -53,6 +53,22 @@ raster_dvhsi_hqt <- function(d, v) (d>1.0 & d<=3.28) & (v>0 & v<=1.5)
 #' @examples
 raster_dvhsi_lyr <- function(d, v) (d>0.5 & d<=5.2) & (v>0 & v<=4.0)
 
+#' Raster Habitat Suitability Index (HSI) function: Fall-Run Chinook Spawning
+#'
+#' @description
+#' The function can be applied simply as raster_dvhsi_lyr(d, v)
+#' But performance is improved using terra::lapp(c(d, v), raster_dvhsi_lyr)
+#'
+#' @param d a `terra` raster layer for depth in feet
+#' @param v a `terra` raster layer for velocity in feet per second
+#'
+#' @return A `terra` raster layer of habitat suitability index values between 0 and 1.
+#' @md
+#' @export
+#'
+#' @examples
+raster_dvhsi_spawning <- function(d, v) (d>0 & d<=7.9) & (v>0 & v<=5.9)
+
 #' Calculate HSI based on HEC-RAS 2D rasters
 #'
 #' @param rasters A named list or `SpatRasterDataset` of `depth` and `velocity` raster stacks (in `terra` format) containing model results for each flow, as output by `raster_prep_grid()`

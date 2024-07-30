@@ -5,7 +5,7 @@
 <!-- badges: start -->
 <!-- badges: end -->
 
-<img src="reference/figures/logo-480.png" align="right" alt="habistat" style="height: 240px; margin: 0px 24px">
+<img src="man/figures/logo-480.png" align="right" alt="habistat" style="height: 240px; margin: 0px 24px">
 The goal of habistat is to ... 
 
 ## Installation

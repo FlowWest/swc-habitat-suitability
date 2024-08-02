@@ -1,0 +1,426 @@
+---
+title: "Predicted Duration"
+author: "[Skyler Lewis](mailto:slewis@flowwest.com)"
+date: "`r Sys.Date()`"
+output: 
+  github_document:
+    toc: true
+    toc_depth: 3
+    number_sections: false
+    math_method:
+      engine: webtex
+      url: https://latex.codecogs.com/svg.image?
+---
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, fig.width=15, fig.height=10, dpi=300)
+library(tidyverse)
+library(lubridate)
+library(googleCloudStorageR)
+library(ggplot2)
+library(scales)
+library(sf)
+
+library(future)
+library(future.apply)
+library(furrr)
+```
+
+## Locate gaged streams
+
+```{r}
+river_basins <- read_csv(here::here("data-raw", "source", "gages_cdec", "cdec_river_basins.csv"))
+river_basins |> 
+  filter(selected) |> 
+  pull(river_basin) |> 
+  paste(collapse=", ") |> 
+  cat()
+```
+
+## Spatial & Temporal Coverage
+
+The following section assesses spatial and temporal coverage of the stations. 
+
+```{r import-sensors, eval=TRUE, echo=TRUE, include=FALSE, message=FALSE, warning=FALSE}
+# Import manually listed stations of interest and query CDEC sensors
+
+cdec_station_sensor_list_filename <- here::here("data-raw", "source", "gages_cdec", "cdec_station_sensor_list.Rds")
+
+if(!file.exists(cdec_station_sensor_list_filename)){
+  
+  cdec_station_sensor_list <- 
+    river_basins |>
+      filter(selected) |>
+      mutate(stations = map(river_basin, possibly(function(x) {
+        CDECRetrieve::cdec_stations(river_basin = x) |> 
+          select(-river_basin, -elevation) # dropping elev, CDECRetrieve issue
+        }, otherwise = NA))) |> 
+      unnest(stations) |>
+      mutate(datasets = map(station_id, possibly(function(x) {
+        CDECRetrieve::cdec_datasets(station = x)
+        }, otherwise = NA))) |>
+      unnest(datasets)
+  
+  cdec_station_sensor_list |> saveRDS(cdec_station_sensor_list_filename)
+  
+} else {
+  
+  cdec_station_sensor_list <- readRDS(cdec_station_sensor_list_filename)
+  
+}
+
+# Create station and station*sensor data frames
+
+selected_sensors <- c(20, 41, 110, 23)
+
+cdec_station_sensors <- 
+  cdec_station_sensor_list |> 
+  mutate(min_wy = year(start %m+% months(3)),
+         max_wy = year(end %m+% months(3))) |>
+  filter(sensor_number %in% selected_sensors) |>
+  st_as_sf(coords = c("longitude", "latitude"), crs="EPSG:4269") |>
+  st_transform("EPSG:3310")
+
+cdec_stations <- cdec_station_sensors |>
+  group_by(station_id, name, county, operator) |> # also summarize list of sensors included
+  summarize(sensors = list(unique(sensor_number))) |>
+  st_union(by_feature = TRUE) 
+
+cdec_stations |> 
+  mutate(sensors = map_chr(sensors, function(x) paste(x, collapse=", "))) |>
+  st_write(here::here("data-raw", "temp", "cdec_stations.shp"), append=FALSE)
+
+# Add manually delineated mainstem identifiers from CSV
+
+all_sections <- read_csv(here::here("data-raw", "source", "gages_cdec", "cdec_mainstem_stations.csv")) |>
+  janitor::clean_names() |>
+  arrange(section) |> pull(section) |> unique()
+
+manual_station_list <- 
+  read_csv(here::here("data-raw", "source", "gages_cdec", "cdec_mainstem_stations.csv")) |>
+  janitor::clean_names() |>
+  filter(!is.na(channel) & channel != "???") |>
+  #full_join(tibble(section = all_sections)) |> # add back sections with no stations
+  mutate(station_id = str_to_lower(station_id),
+         mainstem = TRUE,
+         section = factor(section, levels=unique(section))) # force order from CSV
+
+cdec_stations <- cdec_stations |>
+  left_join(manual_station_list, join_by(station_id == station_id)) |>
+  mutate(mainstem = coalesce(mainstem, FALSE))
+
+cdec_station_sensors <- cdec_station_sensors |>
+  left_join(manual_station_list, join_by(station_id == station_id)) |>
+  mutate(mainstem = coalesce(mainstem, FALSE))
+```
+
+### Temporal Coverage
+
+#### Sensor date ranges
+
+The following chart summarizes the ranges of data availability. This is based on the published start and end dates and does not account for NA values within these ranges. Bear Creek and Paynes Creek are not listed in this figure because no stations are present. Calaveras River is included but data is only available from reservoir outflow.
+
+```{r plot-wy-avail-v2, message=FALSE, warning=FALSE}
+check_for_overlap <- function(wy, chan, sec) {
+  cdec_station_sensors |>
+    filter(channel == chan & section == sec) |>
+    mutate(in_range = (wy >= min_wy) & (wy <= max_wy)) |>
+    pull(in_range) |>
+    any()
+}
+
+data_avail_by_water_year <- 
+  expand_grid(water_year = seq(1949,2024,1), 
+              manual_station_list |> select(channel, section) |> unique()) |>
+  mutate(has_data = pmap_lgl(list(water_year, channel, section), check_for_overlap))
+
+first_year_available <- 
+  data_avail_by_water_year |>
+  filter(has_data) |>
+  group_by(channel, water_year) |>
+  summarize(has_data = any(has_data)) |>
+  group_by(channel) |>
+  summarize(first_year = min(water_year),
+            n_years = n())
+
+data_avail_by_water_year |>
+  filter(!is.na(channel)) |>
+  ggplot() + 
+  facet_grid(rows = vars(channel), scales="free_y", space="free_y") +
+  geom_tile(aes(x = factor(water_year), y = factor(section), fill = has_data)) +
+  xlab("Water Year") + 
+  ylab("") + 
+  theme_minimal() + 
+  theme(legend.position = "top", 
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), 
+        strip.text = element_blank(),
+        panel.margin=unit(0,"lines")) + 
+  scale_y_discrete(limits=rev, position="right") +
+  scale_fill_manual(values = c("FALSE" = "white", "TRUE" = "darkgray"))
+
+```
+
+
+```{r}
+# select daily where available, otherwise hourly/event
+cdec_station_sensors_selected <- cdec_station_sensors |>
+  st_drop_geometry() |>
+  group_by(station_id) |> #, sensor_number) |>
+  summarize(durations = list(duration)) |>
+  mutate(has_daily = map_lgl(durations, function(L) "daily" %in% L),
+         has_hourly = map_lgl(durations, function(L) "hourly" %in% L),
+         has_event = map_lgl(durations, function(L) "event" %in% L)) |>
+  transmute(station_id,# sensor_number, 
+            duration = case_when(has_daily ~ "daily",
+                                 has_hourly ~ "hourly", 
+                                 has_event ~ "event")) |>
+  inner_join(st_drop_geometry(cdec_station_sensors))
+
+cdec_filenames <-
+  cdec_station_sensors_selected |>
+    st_drop_geometry() |>
+    filter(!is.na(section)) |>
+    #head(5) |>
+    mutate(filename = pmap(list(station_id, 
+                              sensor_number, 
+                              case_when(duration=="event"~"E",
+                                        duration=="hourly"~"H",
+                                        duration=="daily"~"D",
+                                        duration=="monthly"~"M"),
+                              start, end),
+      #function(sta,sen,dur,start,end) count_obs_by_wy(retrieve_cdec_csv(sta,sen,dur,start,end)))) |>
+      function(sta,sen,dur,start,end) habistat::cdec_csv_retrieve(sta,sen,dur,start,end,dir=here::here("data-raw", "temp"))))
+
+# process_daily <- function(filename) {
+#   read_csv(filename) |>
+#     janitor::clean_names() |>
+#     filter(value >= 0) |>
+#     transmute(obs_date = date(obs_date),
+#               flow_cfs = mean(value))
+# }
+
+```
+
+```{r eval=FALSE, include=FALSE}
+process_subdaily <- function(filename) {
+  message("processing ", filename)
+  read_csv(filename, col_types = cols()) |>
+    janitor::clean_names() |>
+    mutate(value = as.numeric(value)) |>
+    filter((value >= 0) & !is.nan(value)) |>
+    mutate(obs_date = date(obs_date)) |>
+    group_by(obs_date) |>
+    summarize(flow_cfs = mean(value, na.rm=T)) |>
+    #complete(obs_date) |>
+    #arrange(obs_date) |>
+    mutate(water_year = if_else(month(obs_date)>=10, year(obs_date)+1, year(obs_date)))
+}
+
+cdec_results <- cdec_filenames |>
+  select(station_id, sensor_number, filename) |>
+  # create a nested gauge data frame for each
+  mutate(gauge_ts = map(filename, process_subdaily))# |>
+  # unnest water year from the nested data frames
+  #unnest(gauge_ts) |>
+  #nest(gauge_ts = c(obs_date, flow_cfs))
+
+duration_rating_curves <- cdec_results |>
+  expand_grid(model_q = interp_flows) |>
+  mutate(max_days_inundated = map2_dbl(gauge_ts, model_q, 
+                                       function(df, q) duration_calc_days_inundated(df$q_gauge, q, stat="max"))) |>
+  mutate(durhsi_rearing_vl = habistat::duration_hsi_rearing_vl(max_days_inundated),
+         durhsi_rearing_vf = habistat::duration_hsi_rearing_vf(max_days_inundated),
+         durhsi_spawning = habistat::duration_hsi_spawning(max_days_inundated))
+
+# for(s in cdec_filenames$station_id) {
+#   filename = cdec_filenames$filename[[which(cdec_filenames$station_id == s)]]
+#   gauge_ts = process_subdaily(filename)
+#   out <- tibble(model_q = interp_flows) |>
+#     mutate(result = map(model_q, function(q) duration_calc_days_inundated(gauge_ts$q_gauge, q, stat="max")))
+#   
+#   for(model_q in interp_flows) {
+#     max_days_inundated <- duration_calc_days_inundated(gauge_ts$q_gauge, model_q, stat="max"))
+#   }
+
+  # dhsi_from_gauge_ts_csv <- function(filename) {
+#   
+#   message("processing ", filename)
+#   
+#   stem <- filename |> fs::path_file() |> fs::path_ext_remove()
+#   
+#   result <- read_csv(filename, col_types = cols()) |>
+#     janitor::clean_names() |>
+#     mutate(value = as.numeric(value)) |>
+#     filter((value >= 0) & !is.nan(value)) |>
+#     mutate(obs_date = date(obs_date)) |>
+#     group_by(obs_date) |>
+#     summarize(flow_cfs = mean(value, na.rm=T)) |>
+#     mutate(water_year = if_else(month(obs_date)>=10, year(obs_date)+1, year(obs_date))) |>
+#     filter(water_year >= wy_start) |>
+#     nest(gauge_ts = c(obs_date, flow_cfs)) |>
+#     expand_grid(model_q = interp_flows) |>
+#     mutate(max_days_inundated = pmap_dbl(list(gauge_ts, model_q, water_year), 
+#                                          function(df, q, wy) {
+#                                            message(wy, " - ", q)
+#                                            habistat::duration_calc_days_inundated(df$flow_cfs, q, stat="max")
+#                                            })) |>
+#     select(-gauge_ts) |>
+#     mutate(durhsi_rearing_vl = habistat::duration_hsi_rearing_vl(max_days_inundated),
+#            durhsi_rearing_vf = habistat::duration_hsi_rearing_vf(max_days_inundated),
+#            durhsi_spawning = habistat::duration_hsi_spawning(max_days_inundated))
+#   
+#   return(result)
+#   
+# }
+
+```
+
+## Duration Prediction
+
+```{r}
+# Water type indices from  https://cdec.water.ca.gov/reportapp/javareports?name=WSIHIST
+water_year_types <- read_csv(here::here("data-raw", "source", "water_year_type", "water_year_type.csv")) |>
+  mutate(wy_type = factor(wy_type, 
+                          levels=c("C", "D", "BN", "N", "AN", "W"), 
+                          labels=c("Critical", "Dry", "Below Normal", "Normal", "Above Normal", "Wet"))) |>
+  mutate(wy_group = factor(case_when(wy_type %in% c("Critical","Dry") ~ "Dry", 
+                                     wy_type %in% c("Below Normal", "Normal", "Above Normal") ~ "Normal", 
+                                     wy_type %in% c("Wet") ~ "Wet")))
+
+wy_lookup <- water_year_types |>
+  group_by(water_year) |>
+  summarize(combined_index = sum(wy_index)) |>
+  mutate(combined_class = 
+           case_when(combined_index >= ((9.2 + 3.8)) ~ "Wet",
+                     combined_index >= ((7.8 + 3.1)) ~ "Above Normal",
+                     combined_index >= ((6.5 + 2.5)) ~ "Below Normal",
+                     combined_index >= ((5.4 + 2.1)) ~ "Dry",
+                     TRUE ~ "Critical") |> factor(levels = c("Wet", "Above Normal", "Below Normal", "Dry", "Critical"))) |>
+  mutate(wy_group = factor(case_when(combined_class %in% c("Critical","Dry") ~ "Dry", 
+                                     combined_class %in% c("Below Normal", "Above Normal") ~ "Normal", 
+                                     combined_class %in% c("Wet") ~ "Wet"), levels = c("Dry", "Normal", "Wet"))) |>
+  select(-combined_index)
+  # mutate(wy_group = factor(case_when(combined_class %in% c("Critical","Dry","Below Normal") ~ "Dry", 
+  #                                    combined_class %in% c("Above Normal", "Wet") ~ "Wet"))) |>
+  #filter(water_year>=1984) #|>
+  #group_by(wy_group) |> summarize(n())
+
+wy_lookup |>
+  group_by(wy_group) |> 
+  summarize(n())
+
+interp_flows <- seq(100, 15000, 100)
+
+wy_start <- 1997
+
+# Run with a subset of months to get spawning and rearing by run
+# https://www.researchgate.net/figure/Central-Valley-salmon-with-multiple-life-stages-of-all-four-runs-of-salmon-and-steelhead_fig2_327275373
+month_selector <- 
+  tribble(~run,        ~spawning,         ~rearing,
+        "fall",        c(8, 9, 10),      c(1, 2, 3, 4, 5, 6),
+        "late fall",   c(1, 2, 3, 4),    c(4, 5, 6, 7, 8, 9, 10, 11, 12),
+        "winter",      c(5, 6, 7, 8),    c(7, 8, 9, 10, 11, 12, 1, 2, 3),
+        "spring",      c(8, 9, 10),      c(11, 12, 1, 2, 3, 4, 5),
+        "steelhead",   c(1, 2, 3),       c(6, 7, 8, 9, 10, 11, 12, 1, 2, 3, 4, 5)) %>%
+  split(.$run) |> 
+  lapply(function(df) df |> select(-run) |> pivot_longer(cols = c(spawning, rearing)) |> deframe())
+
+```
+
+```{r message=FALSE}
+
+dhsi_from_gauge_ts_csv <- function(filename) {
+  
+  stem <- filename |> fs::path_file() |> fs::path_ext_remove() |> fs::path_ext_remove()
+  message(stem)
+  
+  dfs <- read_csv(filename, col_types = cols()) |>
+    janitor::clean_names() |>
+    mutate(value = as.numeric(value)) |>
+    filter((value >= 0) & !is.nan(value)) |>
+    mutate(obs_date = date(obs_date)) |>
+    group_by(obs_date) |>
+    summarize(flow_cfs = mean(value, na.rm=T)) |>
+    mutate(water_year = if_else(month(obs_date)>=10, year(obs_date)+1, year(obs_date))) |>
+    filter(water_year >= wy_start) |>
+    nest(gauge_ts = c(obs_date, flow_cfs)) |>
+    deframe()
+  
+  outputs <- list()
+  for(run in names(month_selector)) {
+    for(habitat in c("spawning", "rearing")) {
+      for(wy in names(dfs)) {
+          df <- dfs[[as.character(wy)]] |>
+            filter(month(obs_date) %in% month_selector[[run]][[habitat]])
+        for(q in interp_flows) {
+            message(stem, " - ", run, " ", habitat, " - ", wy, " - ", q)
+            max_days_inundated <- habistat::duration_calc_days_inundated(df$flow_cfs, q, stat="max")
+            message(stem, " - ", run, " ", habitat, " - ", wy, " - ", q, " - ", max_days_inundated)
+            outputs[[run]][[habitat]][[as.character(wy)]][[as.character(q)]] <- max_days_inundated
+            if(max_days_inundated <= 0) {
+              break
+            }
+          }
+        }
+      }
+    }
+  
+  return(outputs |>
+  enframe() |>
+  transmute(value, 
+            run = name |> factor(levels = names(month_selector))) |>
+  unnest(value) |>
+  mutate(habitat = names(value) |> factor(levels = c("spawning", "rearing"))) |>
+  unnest(value) |>
+  mutate(water_year = names(value) |> as.numeric()) |>
+  unnest(value) |>
+  mutate(model_q = names(value) |> as.numeric()) |>
+  unnest(value) |>
+  rename(max_days_inundated = value))
+  
+}
+
+# test <- dhsi_from_gauge_ts_csv(cdec_filenames$filename[[6]])
+
+# process_subdaily(cdec_filenames$filename[[6]]) |> 
+#   filter(water_year==2019) |>
+#   pull(flow_cfs) |> 
+#   habistat::duration_calc_days_inundated(100, stat="max")
+
+# test
+test <- dhsi_from_gauge_ts_csv(cdec_filenames$filename[[6]])
+# #habistat::duration_calc_days_inundated(gauge_ts$flow_cfs, 100, stat="max")
+test 
+##
+
+future::plan(future::multisession, workers = 8)
+
+outputs <- cdec_filenames |> # head(2) |>
+  mutate(dhsi_tbl = future_map(filename, dhsi_from_gauge_ts_csv))
+  #mutate(dhsi_tbl = map(filename, dhsi_from_gauge_ts_csv))
+
+outputs |> saveRDS(here::here("data-raw", "results", "dhsi_by_streamgage_wy_raw.Rds"))
+
+outputs_processed <- outputs |> 
+  select(station_id, dhsi_tbl) |>
+  unnest(dhsi_tbl) |> 
+  #group_by(station_id, run, habitat, water_year) |>
+  #complete(model_q, fill = as.list(interp_flows)) |>
+  #mutate(max_days_inundated = coalesce(max_days_inundated, 0)) |>
+  arrange(station_id, run, habitat, water_year, model_q) |>
+  inner_join(wy_lookup, by=join_by(water_year)) 
+
+outputs |> saveRDS(here::here("data-raw", "results", "dhsi_by_streamgage_wy.Rds"))
+
+outputs_processed_wy_type <- outputs_processed |>
+  group_by(station_id, run, habitat, wy_group) |>
+  complete(model_q = interp_flows) |>
+  mutate(max_days_inundated = coalesce(max_days_inundated, 0)) |>
+  group_by(station_id, run, habitat, wy_group, model_q) |>
+  summarize(avg_max_days_inundated = mean(max_days_inundated))
+
+outputs |> saveRDS(here::here("data-raw", "results", "dhsi_by_streamgage_wyt.Rds"))
+
+```
+
+

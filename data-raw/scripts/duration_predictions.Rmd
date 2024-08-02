@@ -199,6 +199,14 @@ cdec_filenames <-
 #               flow_cfs = mean(value))
 # }
 
+streamgage_attr <- cdec_filenames |>
+  select(-filename, -notes, -selected) |>
+  # make sure these watershed definitions match watershed_level_3 in cv_mainstems/cv_watersheds
+  mutate(watershed = case_when(channel == "Sacramento River" ~ "Sacramento River",
+                                       section == "Lower San Joaquin River" ~ "San Joaquin River",
+                                       TRUE ~ section))
+
+streamgage_attr |> usethis::use_data(overwrite=T)
 ```
 
 ```{r eval=FALSE, include=FALSE}
@@ -393,7 +401,7 @@ test <- dhsi_from_gauge_ts_csv(cdec_filenames$filename[[6]])
 test 
 ##
 
-future::plan(future::multisession, workers = 8)
+future::plan(future::multisession, workers = 6)
 
 outputs <- cdec_filenames |> # head(2) |>
   mutate(dhsi_tbl = future_map(filename, dhsi_from_gauge_ts_csv))
@@ -404,23 +412,36 @@ outputs |> saveRDS(here::here("data-raw", "results", "dhsi_by_streamgage_wy_raw.
 outputs_processed <- outputs |> 
   select(station_id, dhsi_tbl) |>
   unnest(dhsi_tbl) |> 
-  #group_by(station_id, run, habitat, water_year) |>
-  #complete(model_q, fill = as.list(interp_flows)) |>
-  #mutate(max_days_inundated = coalesce(max_days_inundated, 0)) |>
-  arrange(station_id, run, habitat, water_year, model_q) |>
-  inner_join(wy_lookup, by=join_by(water_year)) 
-
-outputs |> saveRDS(here::here("data-raw", "results", "dhsi_by_streamgage_wy.Rds"))
-
-outputs_processed_wy_type <- outputs_processed |>
-  group_by(station_id, run, habitat, wy_group) |>
+  group_by(station_id, run, habitat, water_year) |>
   complete(model_q = interp_flows) |>
   mutate(max_days_inundated = coalesce(max_days_inundated, 0)) |>
+  arrange(station_id, run, habitat, water_year, model_q) |>
+  inner_join(wy_lookup, by=join_by(water_year)) |>
+  mutate(durhsi_rearing_vl = habistat::duration_hsi_rearing_vl(max_days_inundated),
+         durhsi_rearing_vf = habistat::duration_hsi_rearing_vf(max_days_inundated),
+         durhsi_spawning = habistat::duration_hsi_spawning(max_days_inundated))
+
+outputs_processed |> saveRDS(here::here("data-raw", "results", "dhsi_by_streamgage_wy.Rds"))
+
+outputs_processed_wy_type <- outputs_processed |>
+  # group_by(station_id, run, habitat, wy_group) |>
+  # complete(model_q = interp_flows) |>
+  # mutate(max_days_inundated = coalesce(max_days_inundated, 0)) |>
   group_by(station_id, run, habitat, wy_group, model_q) |>
-  summarize(avg_max_days_inundated = mean(max_days_inundated))
+  summarize(avg_max_days_inundated = mean(max_days_inundated)) |>
+  ungroup() |>
+  mutate(durhsi_rearing_vl = habistat::duration_hsi_rearing_vl(avg_max_days_inundated),
+       durhsi_rearing_vf = habistat::duration_hsi_rearing_vf(avg_max_days_inundated),
+       durhsi_spawning = habistat::duration_hsi_spawning(avg_max_days_inundated)) 
 
-outputs |> saveRDS(here::here("data-raw", "results", "dhsi_by_streamgage_wyt.Rds"))
+outputs_processed_wy_type |> saveRDS(here::here("data-raw", "results", "dhsi_by_streamgage_wyt.Rds"))
 
+streamgage_duration_rating_curves <- outputs_processed_wy_type |>
+  nest(.by = c(station_id, run, habitat, wy_group))
+
+streamgage_duration_rating_curves |> usethis::use_data(overwrite=T)
 ```
 
+```{r}
 
+```

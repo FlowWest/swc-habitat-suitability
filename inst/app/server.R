@@ -103,6 +103,7 @@ function(input, output, session){
       geom_line(aes(y = wua_per_lf_pred_SD_ph_bfc_rm, color="Scale-Dependent", linetype="Post-Model BFC Removal")) +
       geom_line(aes(y = wua_per_lf_pred_SN, color="Scale-Normalized", linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
       geom_line(aes(y = wua_per_lf_pred_SN_ph_bfc_rm, color="Scale-Normalized", linetype="Post-Model BFC Removal")) +
+      geom_line(data=duration_curve(), aes(x = q, y = durwua, linetype="Duration Analysis")) +
       #geom_hline(aes(yintercept = chan_width_ft)) + #, linetype="Channel Width (ft)")) +
       #geom_vline(aes(xintercept = baseflow_cfs)) +
       #geom_text(aes(x = 1, y = chan_width_ft, label = chan_width_ft)) +
@@ -115,6 +116,7 @@ function(input, output, session){
       scale_linetype_manual(name = "Baseflow Method",
                             values = c("Prior BFC Removal" = "solid",
                                        "No BFC Removal" = "solid",
+                                       "Duration Analysis" = "dashed",
                                        "Post-Model BFC Removal" = "dotted"))
   } else {
       ggplot()
@@ -281,5 +283,91 @@ selected_watershed <- reactiveValues(object_id = NA,
     }
   })
 
+  ### DURATION ANALYSIS --------------------------------------------------------
+
+  streamgages <- get_data(streamgage_attr, package = "habistat") |>
+    transmute(watershed, station_id,
+              station_label = glue::glue("{str_to_upper(station_id)}: {str_to_upper(name)} ({min_wy}-{max_wy})")) |>
+    nest(.by = watershed) |>
+    mutate(data = map(data, function(x) deframe(x) |> as.list())) |>
+    deframe()
+
+  streamgage_drc <- reactive({
+
+    active_comid_gradient_class <- (attr |>
+                                      filter(comid == selected_point$comid) |>
+                                      pull(hqt_gradient_class))[[1]]
+
+    message("streamgage_drc for ", input$streamgage_id,
+            " ", input$selected_run,
+            " ", input$habitat_type,
+            " ", input$selected_wyt)
+
+    active_streamgage_data <-
+      get_data(streamgage_duration_rating_curves, package = "habistat") |>
+      filter((station_id == input$streamgage_id) &
+               (run == input$selected_run) &
+               (habitat == input$habitat_type) &
+               (wy_group == input$selected_wyt)) |>
+      glimpse()
+
+    if (nrow(active_streamgage_data) > 0) {
+
+      (active_streamgage_data |> pull(data))[[1]] |>
+        mutate(dhsi_selected = case_when(
+          input$habitat_type == "spawning" ~ durhsi_spawning,
+          active_comid_gradient_class == "Valley Lowland" ~ durhsi_rearing_vl,
+          TRUE ~ durhsi_rearing_vf)) |>
+        glimpse()
+
+    } else {
+
+      tibble(model_q = list(), dhsi_selected = list())
+
+    }
+
+  })
+
+  output$streamgage_selector <- renderUI({
+
+    active_comid_watershed_name <- (attr |>
+      filter(comid == selected_point$comid) |>
+      pull(watershed_level_3))[[1]]
+
+    streamgage_options <- streamgages[[active_comid_watershed_name]]
+    selectInput(inputId = "streamgage_id",
+                label = "Select Gage for Duration Analysis",
+                choices = setNames(names(streamgage_options), streamgage_options),
+                selected = names(streamgage_options)[[1]])
+  })
+
+  duration_curve <- reactive({
+
+    message("fsa")
+    fsa <-
+      predictions |>
+      filter(comid == selected_point$comid) |>
+      filter(habitat == input$habitat_type) |>
+      transmute(flow_cfs, selected_wua = !!sym(input$wua_var)) |>
+      glimpse()
+
+    if (nrow(streamgage_drc()) > 0) {
+
+      message("duration hsi curve")
+      habistat::duration_apply_dhsi_to_fsa_curve(
+        fsa = fsa,
+        fsa_q = flow_cfs,
+        fsa_wua = selected_wua,
+        drc = streamgage_drc(),
+        drc_q = model_q,
+        drc_dhsi = dhsi_selected) |>
+        glimpse()
+
+    } else {
+
+        tibble(q = list(), durwua = list())
+
+    }
+  })
 
 }

@@ -45,3 +45,11 @@
 #' @examples
 #' cv_watersheds |> ggplot2::ggplot() + ggplot2::geom_sf()
 "cv_watersheds"
+
+#' @name streamgage_attr
+#' @title CDEC Mainstem Streamgage Attributes
+"streamgage_attr"
+
+#' @name streamgage_duration_rating_curves
+#' @title CDEC Mainstem Streamgage Duration Rating Curves
+"streamgage_duration_rating_curves"

@@ -75,6 +75,31 @@ watersheds <- get_data(cv_watersheds, package = "habistat") |>
 
 gc()
 
+predictions_watershed <- get_data(wua_predicted_cv_watersheds, package = "habistat") |>
+  ungroup() |>
+  #filter(habitat == "rearing") |>
+  mutate(model_id = if_else((habitat=="rearing" & model_bfc),
+                            paste0(model_name, "_ph_bfc_rm"), # post-hoc baseflow channel removal
+                            model_name)) |>
+  select(watershed_level_3, flow_cfs, habitat, model_id, wua_per_lf_pred) |>
+  pivot_wider(names_from = model_id,
+              values_from = wua_per_lf_pred,
+              names_glue = c("wua_per_lf_pred_{model_id}"))
+
+predictions_mainstem <- get_data(wua_predicted_cv_mainstems, package = "habistat") |>
+  ungroup() |>
+  #filter(habitat == "rearing") |>
+  mutate(model_id = if_else((habitat=="rearing" & model_bfc),
+                            paste0(model_name, "_ph_bfc_rm"), # post-hoc baseflow channel removal
+                            model_name)) |>
+  select(river_cvpia, flow_cfs, habitat, model_id, wua_per_lf_pred) |>
+  pivot_wider(names_from = model_id,
+              values_from = wua_per_lf_pred,
+              names_glue = c("wua_per_lf_pred_{model_id}"))
+
+gc() # garbage collect after loading from habistat package
+
+
 # PLOT STYLES AND PALETTES -----------------------------------------------------
 
 pal <- function(x, n = 10,

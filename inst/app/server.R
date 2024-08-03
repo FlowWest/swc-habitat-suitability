@@ -1,6 +1,8 @@
 function(input, output, session){
 
-  # REACTIVE FLOW FILTER -------------------------------------------------------
+  most_recent_map_click <- reactiveValues(type = "none")
+
+  # REACTIVE FLOW FILTER (COMID) -----------------------------------------------
 
   message(paste(names(predictions), collapse = ", "))
 
@@ -48,6 +50,7 @@ function(input, output, session){
     cat(input$main_map_shape_click$id)
     if (!is.null(input$main_map_shape_click$id)) {
       if(substr(input$main_map_shape_click$id, 1, 6) == "comid_") {
+        most_recent_map_click$type <- "comid"
         selected_point$object_id <- input$main_map_shape_click$id
         selected_point$lng <- input$main_map_shape_click$lng
         selected_point$lat <- input$main_map_shape_click$lat
@@ -56,10 +59,19 @@ function(input, output, session){
     }
   })
 
+  # PREDICTION TABLES, ATTRIBUTES, PLOTS ---------------------------------------
+
   active_pred_table <- reactive({
-    if (!is.null(selected_point$object_id)) {
+    #if (!is.null(selected_point$object_id)) {
+    if (most_recent_map_click$type == "comid") {
       active_predictions() |>
         filter(comid == selected_point$comid) |>
+        select(where(is.numeric)) |>
+        pivot_longer(everything()) |>
+        mutate(across(value, function(x) round(x, 2)))
+    } else if (most_recent_map_click$type == "watershed") {
+      active_predictions_watershed() |>
+        filter(watershed_level_3 == selected_watershed$watershed_id) |>
         select(where(is.numeric)) |>
         pivot_longer(everything()) |>
         mutate(across(value, function(x) round(x, 2)))
@@ -67,15 +79,16 @@ function(input, output, session){
   })
 
   output$pred_table <- DT::renderDT({
-    if (!is.null(selected_point$object_id)) {
+    if (most_recent_map_click$type == "none") {
       DT::datatable(active_pred_table(),
                     options = list(paging = F, searching = F))
     }
   })
 
-  active_attr_table <- reactive({
+  active_attr_table <- reactive({ # for COMID only
    #if (!is.null(selected_point$object_id) & (length(selected_point$comid)>0)) {
-     if (!is.null(selected_point$object_id)) {
+     # if (!is.null(selected_point$object_id)) {
+     if (most_recent_map_click$type == "comid") {
      result <- attr |>
        filter(comid == selected_point$comid) |>
        select(where(is.numeric)) |>
@@ -86,14 +99,14 @@ function(input, output, session){
   })
 
   output$attr_table <- DT::renderDT({
-      if (!is.null(selected_point$object_id)) {
+     if (most_recent_map_click$type == "comid") {
         DT::datatable(active_attr_table(),
                       options = list(paging = F, searching = F))
       }
     })
 
   output$fsa_plot <- renderPlot({
-    if (!is.null(selected_point$object_id)) { #& (length(selected_point$comid)>0)) {
+    if (most_recent_map_click$type == "comid") { #& (length(selected_point$comid)>0)) {
     predictions |>
       filter(comid == selected_point$comid) |>
       filter(habitat == input$habitat_type) |>
@@ -118,7 +131,28 @@ function(input, output, session){
                                        "No BFC Removal" = "solid",
                                        "Duration Analysis" = "dashed",
                                        "Post-Model BFC Removal" = "dotted"))
-  } else {
+    } else if (most_recent_map_click$type == "watershed") {
+      #TODO: For watersheds, plot total acreage rather than WUA/LF
+      predictions_watershed |>
+        filter(watershed_level_3 == selected_watershed$watershed_name) |>
+        filter(habitat == input$habitat_type) |>
+        ggplot(aes(x = flow_cfs)) +
+        geom_line(aes(y = wua_per_lf_pred_SD, color="Scale-Dependent", linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
+        geom_line(aes(y = wua_per_lf_pred_SD_ph_bfc_rm, color="Scale-Dependent", linetype="Post-Model BFC Removal")) +
+        geom_line(aes(y = wua_per_lf_pred_SN, color="Scale-Normalized", linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
+        geom_line(aes(y = wua_per_lf_pred_SN_ph_bfc_rm, color="Scale-Normalized", linetype="Post-Model BFC Removal")) +
+        #geom_line(data=duration_curve(), aes(x = q, y = durwua, linetype="Duration Analysis")) +
+        scale_x_log10(labels = scales::label_comma()) + annotation_logticks(sides = "b") +
+        scale_y_continuous(limits = c(0, NA)) +
+        theme_minimal() + theme(panel.grid.minor = element_blank(), legend.position = "top", legend.box="vertical") +
+        xlab("Flow (cfs)") + ylab("WUA (ft2) per linear ft") +
+        scale_color_discrete(name = "Model Type") +
+        scale_linetype_manual(name = "Baseflow Method",
+                              values = c("Prior BFC Removal" = "solid",
+                                         "No BFC Removal" = "solid",
+                                         "Duration Analysis" = "dashed",
+                                         "Post-Model BFC Removal" = "dotted"))
+    } else {
       ggplot()
     }})
 
@@ -223,6 +257,7 @@ function(input, output, session){
 # SELECTED WATERSHED OBSERVER ----------------------------------------------------
 
 selected_watershed <- reactiveValues(object_id = NA,
+                                     watershed_name = NA,
                                      lng = NA,
                                      lat = NA)
 
@@ -230,7 +265,9 @@ selected_watershed <- reactiveValues(object_id = NA,
     cat(input$main_map_shape_click$id)
     if (!is.null(input$main_map_shape_click$id)) {
       if(substr(input$main_map_shape_click$id, 1, 10) == "watershed_") {
+        most_recent_map_click$type <- "watershed"
         selected_watershed$object_id <- input$main_map_shape_click$id
+        selected_watershed$watershed_name <-watersheds$watershed_level_3[[which(watersheds$watershed_id==input$main_map_shape_click$id)]]
         selected_watershed$lng <- input$main_map_shape_click$lng
         selected_watershed$lat <- input$main_map_shape_click$lat
       }
@@ -255,6 +292,8 @@ selected_watershed <- reactiveValues(object_id = NA,
     }
   })
 
+  # ACTIVE PLOT LOGIC ------------------------------------------------
+
   observe({
 
     message(selected_watershed$object_id)
@@ -262,7 +301,8 @@ selected_watershed <- reactiveValues(object_id = NA,
     proxy <- leaflet::leafletProxy("main_map") |>
       leaflet::removeShape("active_watershed")
 
-    if (nrow(active_watershed_geom()) > 0) {
+    if (most_recent_map_click$type == "watershed") {
+      # (nrow(active_watershed_geom()) > 0) &
       proxy |>
         leaflet::addPolygons(data = active_watershed_geom(),
                              stroke = T,
@@ -280,10 +320,42 @@ selected_watershed <- reactiveValues(object_id = NA,
                              lat1 = active_watershed_bbox()$ymin,
                              lng2 = active_watershed_bbox()$xmax,
                              lat2 = active_watershed_bbox()$ymax)
+    } else {
+
+      leaflet::leafletProxy("main_map") |>
+        leaflet::removeShape("active_watershed")
+
     }
+
+    if (most_recent_map_click$type == "comid") {
+      proxy |>
+        leaflet::addPolylines(data = active_geom(),
+                             stroke = T,
+                             weight = 2,
+                             color = "red",
+                             opacity = 1,
+                             layerId = "active_comid",
+                             label = ~lapply(object_label, htmltools::HTML))
+
+    } else {
+
+      leaflet::leafletProxy("main_map") |>
+        leaflet::removeShape("active_comid")
+
+    }
+
   })
 
-  ### DURATION ANALYSIS --------------------------------------------------------
+  # REACTIVE FLOW FILTER (WATERSHED) -------------------------------------------
+
+  active_predictions_watershed <- reactive({
+    predictions_watershed |>
+      filter(flow_cfs == input$active_flow) |>
+      filter(habitat == input$habitat_type) |>
+      glimpse()
+  })
+
+  # DURATION ANALYSIS ----------------------------------------------------------
 
   streamgages <- get_data(streamgage_attr, package = "habistat") |>
     transmute(watershed, station_id,
@@ -330,9 +402,13 @@ selected_watershed <- reactiveValues(object_id = NA,
 
   output$streamgage_selector <- renderUI({
 
-    active_comid_watershed_name <- (attr |>
-      filter(comid == selected_point$comid) |>
-      pull(watershed_level_3))[[1]]
+    if (most_recent_map_click$type == "comid") {
+      active_comid_watershed_name <- (attr |>
+                                        filter(comid == selected_point$comid) |>
+                                        pull(watershed_level_3))[[1]]
+    } else {
+      active_comid_watershed_name <- selected_watershed$watershed_name
+    }
 
     streamgage_options <- streamgages[[active_comid_watershed_name]]
     selectInput(inputId = "streamgage_id",
@@ -344,12 +420,22 @@ selected_watershed <- reactiveValues(object_id = NA,
   duration_curve <- reactive({
 
     message("fsa")
-    fsa <-
-      predictions |>
-      filter(comid == selected_point$comid) |>
-      filter(habitat == input$habitat_type) |>
-      transmute(flow_cfs, selected_wua = !!sym(input$wua_var)) |>
-      glimpse()
+
+    if (most_recent_map_click$type == "comid") {
+      fsa <-
+        predictions |>
+        filter(comid == selected_point$comid) |>
+        filter(habitat == input$habitat_type) |>
+        transmute(flow_cfs, selected_wua = !!sym(input$wua_var)) |>
+        glimpse()
+    } else {
+      fsa <-
+        predictions_watershed |>
+        filter(watershed_level_3 == selected_watershed$watershed_name) |>
+        filter(habitat == input$habitat_type) |>
+        transmute(flow_cfs, selected_wua = !!sym(input$wua_var)) |>
+        glimpse()
+    }
 
     if (nrow(streamgage_drc()) > 0) {
 

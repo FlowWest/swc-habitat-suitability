@@ -1,3 +1,5 @@
+# TODO Duration gages should only be an option on mainstems
+
 function(input, output, session){
 
   most_recent_map_click <- reactiveValues(type = "none")
@@ -35,7 +37,26 @@ function(input, output, session){
                                    "Scale-Normalized Model (post-model baseflow removal): ",
                                    round(wua_per_lf_pred_SN_ph_bfc_rm,2), " ft2/ft", "<br />",
                                    "Actual: ", round(wua_per_lf_actual,2), " ft2/ft")) |>
-      #filter(watershed_name == active_watershed_name()) |>
+      #filter(watershed_name == selected_watershed_name()) |>
+      glimpse()
+  })
+
+  active_geom_mainstem <- reactive({
+    mainstems |>
+      inner_join(active_predictions_mainstem(),
+                 by = join_by(river_cvpia)) |>
+      mutate(wua_per_lf = !!sym(input$wua_var)) |>
+      filter(!is.na(wua_per_lf)) |>
+      mutate(object_label = paste0("<strong>", river_cvpia, "</strong>", "<br />",
+                                   "Scale-Dependent Model: ",
+                                   round(wua_per_lf_pred_SD,2), " ft2/ft", "<br />",
+                                   "Scale-Dependent Model (post-model baseflow removal): ",
+                                   round(wua_per_lf_pred_SD_ph_bfc_rm,2), " ft2/ft", "<br />",
+                                   "Scale-Normalized Model: ",
+                                   round(wua_per_lf_pred_SN,2), " ft2/ft", "<br />",
+                                   "Scale-Normalized Model (post-model baseflow removal): ",
+                                   round(wua_per_lf_pred_SN_ph_bfc_rm,2), " ft2/ft")) |>
+      #filter(watershed_name == selected_watershed_name()) |>
       glimpse()
   })
 
@@ -152,6 +173,26 @@ function(input, output, session){
                                          "No BFC Removal" = "solid",
                                          "Duration Analysis" = "dashed",
                                          "Post-Model BFC Removal" = "dotted"))
+    } else if (most_recent_map_click$type == "mainstem") {
+      predictions_mainstem |>
+        filter(river_cvpia == selected_mainstem$river_name) |>
+        filter(habitat == input$habitat_type) |>
+        ggplot(aes(x = flow_cfs)) +
+        geom_line(aes(y = wua_per_lf_pred_SD, color="Scale-Dependent", linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
+        geom_line(aes(y = wua_per_lf_pred_SD_ph_bfc_rm, color="Scale-Dependent", linetype="Post-Model BFC Removal")) +
+        geom_line(aes(y = wua_per_lf_pred_SN, color="Scale-Normalized", linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
+        geom_line(aes(y = wua_per_lf_pred_SN_ph_bfc_rm, color="Scale-Normalized", linetype="Post-Model BFC Removal")) +
+        geom_line(data=duration_curve(), aes(x = q, y = durwua, linetype="Duration Analysis")) +
+        scale_x_log10(labels = scales::label_comma()) + annotation_logticks(sides = "b") +
+        scale_y_continuous(limits = c(0, NA)) +
+        theme_minimal() + theme(panel.grid.minor = element_blank(), legend.position = "top", legend.box="vertical") +
+        xlab("Flow (cfs)") + ylab("WUA (ft2) per linear ft") +
+        scale_color_discrete(name = "Model Type") +
+        scale_linetype_manual(name = "Baseflow Method",
+                              values = c("Prior BFC Removal" = "solid",
+                                         "No BFC Removal" = "solid",
+                                         "Duration Analysis" = "dashed",
+                                         "Post-Model BFC Removal" = "dotted"))
     } else {
       ggplot()
     }})
@@ -193,9 +234,9 @@ function(input, output, session){
     return(m)
   }
 
-  layer_flowlines <- function(m, show = TRUE) {
+  layer_flowlines <- function(m, show = TRUE, type = "comid") {
+    if(type == "comid") {
     if(show) {
-      #pal_limits <- c(0, 100) #,
       pal_limits <- c(min(active_geom()$wua_per_lf), max(active_geom()$wua_per_lf))
       message("plotting ", nrow(active_geom()), " flowlines")
       #m |> leafgl::addGlPolylines(data = active_geom(),layerId = ~object_id)
@@ -216,9 +257,34 @@ function(input, output, session){
                            labels = c(round(pal_limits[[2]],2), rep("", 5-1), round(pal_limits[[1]],2)),
                            title = "WUA (ft2) per linear ft",
                            layerId = "clegend")
-    } else {
-      m |> leaflet::removeShape(active_geom()$comid) |> leaflet::removeControl("clegend")
-      # TODO switch to leaflet::removeGlPolylines
+      } else {
+        m |> leaflet::removeShape(active_geom()$comid) |> leaflet::removeControl("clegend")
+        # TODO switch to leaflet::removeGlPolylines
+      }
+    } else if (type == "mainstem") {
+    if(show) {
+      pal_limits <- c(min(active_geom_mainstem()$wua_per_lf), max(active_geom_mainstem()$wua_per_lf))
+      message("plotting ", nrow(active_geom_mainstem()), " flowlines")
+      m |> leaflet::addPolylines(data = active_geom_mainstem(),
+                                 layerId = ~mainstem_id,
+                                 label = ~lapply(object_label, htmltools::HTML),
+                                 color = ~pal(wua_per_lf), #pal(wua_per_lf),
+                                 opacity = 1,
+                                 weight = 2,
+                                 options = leaflet::pathOptions(pane = "Flowlines"),
+                                 group = "flowlines",
+                                 highlightOptions = leaflet::highlightOptions(color = "#8B0000",
+                                                                              weight = 3,
+                                                                              bringToFront = TRUE)
+      ) |>
+        leaflet::addLegend(position = "bottomright",
+                           colors = rev(pal(seq(pal_limits[[1]], pal_limits[[2]], (pal_limits[[2]]-pal_limits[[1]])/5))),
+                           labels = c(round(pal_limits[[2]],2), rep("", 5-1), round(pal_limits[[1]],2)),
+                           title = "WUA (ft2) per linear ft",
+                           layerId = "clegend")
+      } else {
+        m |> leaflet::removeShape(active_geom_mainstem()$object_id) |> leaflet::removeControl("clegend")
+      }
     }
   }
 
@@ -246,7 +312,7 @@ function(input, output, session){
                                                                fillOpacity = 0.5,
                                                                bringToFront = F)
       ) |>
-      layer_flowlines() #|>
+      layer_flowlines(type = input$flowline_scope) #|>
     #leaflet::addLayersControl(baseGroups = c("watersheds", "none"),
     #                          overlayGroups = c("flowlines", "aoi"),
     #                          position = "bottomleft",
@@ -274,22 +340,48 @@ selected_watershed <- reactiveValues(object_id = NA,
     }
   })
 
-  active_watershed_geom <- reactive({
+  selected_watershed_geom <- reactive({
     watersheds |>
       filter(watershed_id == selected_watershed$object_id) |>
       mutate(object_id = "active_watershed")
   })
 
-  active_watershed_bbox <- reactive({
-    st_bbox(active_watershed_geom())
+  selected_watershed_bbox <- reactive({
+    st_bbox(selected_watershed_geom())
   })
 
-  active_watershed_name <- reactive({
+  selected_watershed_name <- reactive({
     if(!is.na(selected_watershed$object_id)) {
       watersheds$watershed_level_3[[which(watersheds$watershed_id==selected_watershed$object_id)]]
     } else {
       NA
     }
+  })
+
+  # SELECTED MAINSTEM OBSERVER ----------------------------------------------------
+
+  selected_mainstem <- reactiveValues(object_id = NA,
+                                       river_name = NA,
+                                       lng = NA,
+                                       lat = NA)
+
+  observeEvent(input$main_map_shape_click, {
+    cat(input$main_map_shape_click$id)
+    if (!is.null(input$main_map_shape_click$id)) {
+      if(substr(input$main_map_shape_click$id, 1, 9) == "mainstem_") {
+        most_recent_map_click$type <- "mainstem"
+        selected_mainstem$object_id <- input$main_map_shape_click$id
+        selected_mainstem$river_name <-mainstems$mainstem_label[[which(mainstems$mainstem_id==input$main_map_shape_click$id)]]
+        selected_mainstem$lng <- input$main_map_shape_click$lng
+        selected_mainstem$lat <- input$main_map_shape_click$lat
+      }
+    }
+  })
+
+  active_mainstem_geom <- reactive({
+    watersheds |>
+      filter(mainstem_id == selected_mainstem$object_id) |>
+      mutate(object_id = "active_mainstem")
   })
 
   # ACTIVE PLOT LOGIC ------------------------------------------------
@@ -302,9 +394,9 @@ selected_watershed <- reactiveValues(object_id = NA,
       leaflet::removeShape("active_watershed")
 
     if (most_recent_map_click$type == "watershed") {
-      # (nrow(active_watershed_geom()) > 0) &
+      # (nrow(selected_watershed_geom()) > 0) &
       proxy |>
-        leaflet::addPolygons(data = active_watershed_geom(),
+        leaflet::addPolygons(data = selected_watershed_geom(),
                              stroke = T,
                              weight = 2,
                              color = "red",
@@ -316,10 +408,10 @@ selected_watershed <- reactiveValues(object_id = NA,
                              label = ~lapply(watershed_label, htmltools::HTML))
 
       proxy |>
-        leaflet::flyToBounds(lng1 = active_watershed_bbox()$xmin,
-                             lat1 = active_watershed_bbox()$ymin,
-                             lng2 = active_watershed_bbox()$xmax,
-                             lat2 = active_watershed_bbox()$ymax)
+        leaflet::flyToBounds(lng1 = selected_watershed_bbox()$xmin,
+                             lat1 = selected_watershed_bbox()$ymin,
+                             lng2 = selected_watershed_bbox()$xmax,
+                             lat2 = selected_watershed_bbox()$ymax)
     } else {
 
       leaflet::leafletProxy("main_map") |>
@@ -344,12 +436,37 @@ selected_watershed <- reactiveValues(object_id = NA,
 
     }
 
+    if (most_recent_map_click$type == "mainstem") {
+      proxy |>
+        leaflet::addPolylines(data = active_geom_mainstem(),
+                              stroke = T,
+                              weight = 2,
+                              color = "red",
+                              opacity = 1,
+                              layerId = "active_mainstem",
+                              label = ~lapply(mainstem_label, htmltools::HTML))
+
+    } else {
+
+      leaflet::leafletProxy("main_map") |>
+        leaflet::removeShape("active_mainstem")
+
+    }
+
+
   })
 
-  # REACTIVE FLOW FILTER (WATERSHED) -------------------------------------------
+  # REACTIVE FLOW FILTER (WATERSHED AND MAINSTEM) ------------------------------
 
   active_predictions_watershed <- reactive({
     predictions_watershed |>
+      filter(flow_cfs == input$active_flow) |>
+      filter(habitat == input$habitat_type) |>
+      glimpse()
+  })
+
+  active_predictions_mainstem <- reactive({
+    predictions_mainstem |>
       filter(flow_cfs == input$active_flow) |>
       filter(habitat == input$habitat_type) |>
       glimpse()
@@ -365,10 +482,14 @@ selected_watershed <- reactiveValues(object_id = NA,
     deframe()
 
   streamgage_drc <- reactive({
-
-    active_comid_gradient_class <- (attr |>
+    if (most_recent_map_click$type == "comid") {
+    active_reach_gradient_class <- (attr |>
                                       filter(comid == selected_point$comid) |>
                                       pull(hqt_gradient_class))[[1]]
+    } else if (most_recent_map_click$type == "mainstem") {
+      # TODO: FIX (this is a placeholder)
+      active_reach_gradient_class <- "Valley Foothill"
+    }
 
     message("streamgage_drc for ", input$streamgage_id,
             " ", input$selected_run,
@@ -388,7 +509,7 @@ selected_watershed <- reactiveValues(object_id = NA,
       (active_streamgage_data |> pull(data))[[1]] |>
         mutate(dhsi_selected = case_when(
           input$habitat_type == "spawning" ~ durhsi_spawning,
-          active_comid_gradient_class == "Valley Lowland" ~ durhsi_rearing_vl,
+          active_reach_gradient_class == "Valley Lowland" ~ durhsi_rearing_vl,
           TRUE ~ durhsi_rearing_vf)) |>
         glimpse()
 
@@ -402,19 +523,36 @@ selected_watershed <- reactiveValues(object_id = NA,
 
   output$streamgage_selector <- renderUI({
 
+    active_reach_is_mainstem <- FALSE
+    active_reach_watershed_name <- NA
+
     if (most_recent_map_click$type == "comid") {
-      active_comid_watershed_name <- (attr |>
+      active_reach_watershed_name <- (attr |>
                                         filter(comid == selected_point$comid) |>
                                         pull(watershed_level_3))[[1]]
-    } else {
-      active_comid_watershed_name <- selected_watershed$watershed_name
+      active_reach_is_mainstem <- !is.na((attr |>
+                                     filter(comid == selected_point$comid) |>
+                                     pull(river_cvpia))[[1]])
+    } else if (most_recent_map_click$type == "watershed"){
+      active_reach_watershed_name <- selected_watershed$watershed_name
+      active_reach_is_mainstem <- FALSE
+    } else if (most_recent_map_click$type == "mainstem"){
+      active_reach_watershed_name <- selected_mainstem$river_name
+      active_reach_is_mainstem <- TRUE
     }
 
-    streamgage_options <- streamgages[[active_comid_watershed_name]]
-    selectInput(inputId = "streamgage_id",
-                label = "Select Gage for Duration Analysis",
-                choices = setNames(names(streamgage_options), streamgage_options),
-                selected = names(streamgage_options)[[1]])
+    if(active_reach_is_mainstem) {
+      streamgage_options <- streamgages[[active_reach_watershed_name]]
+      selectInput(inputId = "streamgage_id",
+                  label = "Select Gage for Duration Analysis",
+                  choices = setNames(names(streamgage_options), streamgage_options),
+                  selected = names(streamgage_options)[[1]])
+    } else {
+      selectInput(inputId = "streamgage_id",
+                  label = "Select Gage for Duration Analysis",
+                  choices = c())
+    }
+    # TODO Update this to default to the gage closest to the click point
   })
 
   duration_curve <- reactive({
@@ -425,6 +563,13 @@ selected_watershed <- reactiveValues(object_id = NA,
       fsa <-
         predictions |>
         filter(comid == selected_point$comid) |>
+        filter(habitat == input$habitat_type) |>
+        transmute(flow_cfs, selected_wua = !!sym(input$wua_var)) |>
+        glimpse()
+    } else if (most_recent_map_click$type == "mainstem") {
+      fsa <-
+        predictions_mainstem |>
+        filter(river_cvpia == selected_mainstem$river_name) |>
         filter(habitat == input$habitat_type) |>
         transmute(flow_cfs, selected_wua = !!sym(input$wua_var)) |>
         glimpse()

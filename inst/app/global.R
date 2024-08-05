@@ -73,6 +73,16 @@ watersheds <- get_data(cv_watersheds, package = "habistat") |>
                                           paste0("<br />", watershed_level_3, " Subwatershed"),
                                           "")))
 
+mainstems <- get_data(cv_mainstems, package = "habistat") |>
+  group_by(river_cvpia) |> #, range_pisces) |>
+  summarize() |>
+  ungroup() |>
+  st_union(by_feature=T) |>
+  st_transform("+proj=longlat +datum=NAD83") |>
+  st_set_crs("+proj=longlat +datum=WGS84") |> # for display purposes only
+  mutate(mainstem_id = paste0("mainstem_", row_number()),
+         mainstem_label = paste0(river_cvpia))
+
 gc()
 
 predictions_watershed <- get_data(wua_predicted_cv_watersheds, package = "habistat") |>

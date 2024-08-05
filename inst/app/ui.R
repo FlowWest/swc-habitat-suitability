@@ -12,6 +12,7 @@ shinyUI(
                  width = 6,
                  div(id = "mapControls",
                      h2("Map Controls"),
+                     radioButtons("flowline_scope", "Select Calculation Scope", choices=c("comid", "mainstem"), selected="comid", inline=T),
                      #selectInput("habitat_type", "Select Habitat Type", c("rearing", "spawning"), selected="rearing"),
                      radioButtons("habitat_type", "Select Habitat Type", choices=c("rearing", "spawning"), selected="rearing", inline=T),
                      #selectInput("active_flow", "Select Flow (cfs)", as.list(all_flows), selected=1000),

@@ -27,6 +27,11 @@ Duration suitability criteria from the CBEC LYR analysis and HQT are:
 * 1 to 9 days: 1.00
 * 10+ days: 0.66
 
+Duration suitability for spawning (based on average incubation time of 12 weeks):
+
+* 0 days to 83 days: 0
+* 84+ days: 1.00
+
 Additionally, we modify such that >=100 days is suitability 0, to effectively exclude the baseflow channel. 
 
 ```{r setup, message=FALSE, warning=FALSE}
@@ -42,6 +47,7 @@ knitr::opts_chunk$set(eval=TRUE, fig.width=6.5, fig.height=4, dpi=300)
 theme_set(theme_minimal())
 
 source(here::here("data-raw", "scripts", "data-functions.R"))
+source(here::here("data-raw", "scripts", "inundation-duration-functions.R"))
 
 test_comids <- c(12071016, 12071090, 12071178, 12071286, 12075424, 7981730, 7981752, 7981808, 7981872, 7981878, 7981882, 7982794, 7982804, 7982810, 7982884, 7982886, 2819792, 2819796, 2819800, 2819818, 2819824, 2819862, 2821822, 2821824, 2821830, 2821832, 2821836)
 ```
@@ -74,8 +80,8 @@ water_year_types <- read_csv(here::here("data-raw", "source", "water_year_type",
 
 # select a representative best flow gage to use for each reach, ideally available 25+ years
 # refer to https://cdec.water.ca.gov/dynamicapp/staMeta?station_id=### start 10/1/1997 - 09/30/2023
-# drainage areas from StreamStats gage-pages
-# mean annual flow is joined in based on the comid that the gage is located in
+# drainage areas from StreamStats gage-pages: https://streamstats.usgs.gov/ss/?gage=### using USGS ID
+# mean annual flow is joined in based on the comid that the gage is located in - refer to https://rivers.codefornature.org/#/map
 
 # get list of modelled flows for each dataset
 training_flows <- flow_to_suitable_area |>
@@ -90,7 +96,8 @@ training_reach_gages <- tribble(
   ~river, ~usgs_id, ~cdec_sta, ~cdec_sen, ~cdec_dur, ~start_date, ~end_date, ~da_gauge_sq_mi, ~gauge_comid, ~flows,
   "Deer Creek",       11383500, "DVD", 20, "E", mdy("10/1/1997"), mdy("9/30/2023"), 208, 8020924, training_flows[["Deer Creek"]],
   "Lower Yuba River", 11421000, "MRY", 20, "E", mdy("10/1/1997"), mdy("9/30/2023"), 1339, 7981844, training_flows[["Lower Yuba River"]],
-  "Stanislaus River", 11303000, "RIP", 20, "E", mdy("10/1/1997"), mdy("9/30/2023"), 1075, 2819818, training_flows[["Stanislaus River"]]
+  "Stanislaus River", 11303000, "RIP", 20, "E", mdy("10/1/1997"), mdy("9/30/2023"), 1075, 2819818, training_flows[["Stanislaus River"]],
+  "Tuolumne River (Basso-La Grange)", 11289650, "LGN", 20, "E", mdy("10/1/1997"), mdy("9/30/2023"), 1538, 2823750, training_flows[["Tuolumne River (Basso-La Grange)"]],
 ) |>
   mutate(da_gauge_sq_km = da_gauge_sq_mi * 1.609344^2) |>
   mutate(filename = pmap_chr(list(cdec_sta, cdec_sen, cdec_dur), 
@@ -141,15 +148,8 @@ calculate_exceedence_summary <- function(q_gauge, q_crit, baseflow_threshold_day
     filter(exceeds_q) |>
     summarize(duration_days = max(cumulative_exceedence)) |>
     mutate(#duration_days = pmin(duration_days, 365), 
-           durhsi_vl = case_when(duration_days == 0  ~ 0,
-                                 duration_days < 18  ~ 0.66,
-                                 duration_days < 25 ~ 1.00,
-                                 duration_days < baseflow_threshold_days ~ 0.66,
-                                 duration_days >= baseflow_threshold_days ~ 0),
-           durhsi_vf = case_when(duration_days <= 0  ~ 0,
-                                 duration_days < 10 ~ 1.00,
-                                 duration_days < baseflow_threshold_days ~ 0.66,
-                                 duration_days >= baseflow_threshold_days ~ 0)) 
+           durhsi_vl = habistat::duration_hsi_rearing_vl(duration_days, baseflow_threshold_days),
+           durhsi_vf = habistat::duration_hsi_rearing_vf(duration_days, baseflow_threshold_days)) 
     
   exceedence_intervals |>
     summarize(n_inundations = n(),
@@ -205,6 +205,13 @@ durhsi_by_model_q |>
   ggplot() + 
   geom_histogram(aes(x = value)) + 
   facet_wrap(~name, ncol=1)
+
+durhsi_by_model_q |> ggplot() +
+  facet_wrap(~river, ncol=1) + 
+  geom_line(aes(x = model_q, y = pmin(240,max_days_inundated))) + # 240 because we are looking at a 8-month sub-water year
+  scale_x_log10(labels = scales::label_comma()) +
+  scale_y_continuous(limits = c(0,240), breaks = c(0,60,120,180,240), minor_breaks=NULL) +
+  xlab("Flow (cfs)") + ylab("Maximum contiguous days inundated (days)") + ggtitle("Inundation Duration")
 ```
 
 ### Revised Version 2: Max Contiguous Days Inundated by Water Year
@@ -253,15 +260,8 @@ durhsi_by_model_q_wy <-
          river=="Lower Yuba River" ~ "Sacramento Valley",
          river=="Stanislaus River" ~ "San Joaquin Valley")) |>
   inner_join(water_year_types, by=join_by(location, water_year), relationship="many-to-one") |>
-    mutate(durhsi_vl = case_when(max_days_inundated == 0  ~ 0,
-                                 max_days_inundated < 18  ~ 0.66,
-                                 max_days_inundated < 25 ~ 1.00,
-                                 max_days_inundated < baseflow_threshold_days ~ 0.66,
-                                 max_days_inundated >= baseflow_threshold_days ~ 0),
-           durhsi_vf = case_when(max_days_inundated <= 0  ~ 0,
-                                 max_days_inundated < 10 ~ 1.00,
-                                 max_days_inundated < baseflow_threshold_days ~ 0.66,
-                                 max_days_inundated >= baseflow_threshold_days ~ 0)) |>
+    mutate(durhsi_vl = habistat::duration_hsi_rearing_vl(max_days_inundated, baseflow_threshold_days),
+           durhsi_vf = habistat::duration_hsi_rearing_vf(max_days_inundated, baseflow_threshold_days)) |>
   glimpse()
 
 durhsi_by_model_q_wy |>
@@ -437,15 +437,8 @@ baseflow_threshold_days <- 100
 # need a public facing function that takes an input daily hydrograph and outputs this rating curve
 duration_rating_curves <- durhsi_by_model_q |> 
   select(river, model_q, avg_days_inundated) |>
-  mutate(durhsi_vl = case_when(avg_days_inundated == 0  ~ 0,
-                               avg_days_inundated < 18  ~ 0.66,
-                               avg_days_inundated < 25 ~ 1.00,
-                               avg_days_inundated < baseflow_threshold_days ~ 0.66,
-                               avg_days_inundated >= baseflow_threshold_days ~ 0),
-         durhsi_vf = case_when(avg_days_inundated <= 0  ~ 0,
-                               avg_days_inundated < 10 ~ 1.00,
-                               avg_days_inundated < baseflow_threshold_days ~ 0.66,
-                               avg_days_inundated >= baseflow_threshold_days ~ 0)) 
+  mutate(durhsi_vl = habistat::duration_hsi_rearing_vl(avg_days_inundated, baseflow_threshold_days),
+         durhsi_vf = habistat::duration_hsi_rearing_vf(avg_days_inundated, baseflow_threshold_days)) 
 
 duration_rating_curves |>
   filter(river=="Deer Creek") |>
@@ -549,16 +542,9 @@ calculate_daily_inundation_duration <- function(q_gauge, q_crit) {
 
 dhsi <- function(duration_days, type) {
   if (type=="vl") {
-    case_when(duration_days == 0  ~ 0,
-              duration_days < 18  ~ 0.66,
-              duration_days < 25 ~ 1.00,
-              duration_days < baseflow_threshold_days ~ 0.66,
-              duration_days >= baseflow_threshold_days ~ 0)
+    habistat::duration_hsi_rearing_vl(duration_days, baseflow_threshold_days)
   } else if (type=="vf") {
-    case_when(duration_days <= 0  ~ 0,
-              duration_days < 10 ~ 1,
-              duration_days < baseflow_threshold_days ~ 0.66,
-              duration_days >= baseflow_threshold_days ~ 0)
+    habistat::duration_hsi_rearing_vf(duration_days, baseflow_threshold_days)
   }
 }
 
@@ -667,13 +653,6 @@ example_result |>
 ### Revised Version 2
 
 ```{r posthoc-duration-func-simple}
-# https://stackoverflow.com/a/73215592
-# cummean.na.rm <- function(x) {
-#   idx <- cumsum(!is.na(x))
-#   x_filtered <- x[!is.na(x)]
-#   cummean(x_filtered)[idx]
-# }
-
 # simple version
 # apply_durations_to_fsa_curve <- function(fsa, drc, fsa_q=q, fsa_wua=wua, drc_q=q, drc_dhsi=dhsi) {
 #   full_join(fsa |> transmute(q={{fsa_q}}, wua={{fsa_wua}}),
@@ -849,16 +828,36 @@ batch_res_ts |>
             aes(x = q, y = wua_ac))
 ```
 
-## Floodplain-Instream Split 
+## Baseflow Elimination
 
-(eventually move this to its own file)
+Function for simple elimination of baseflow given a threshold flow, without needing to know a full hydrology: 
 
-Need method to determine the flow theshold (aka bankfull flow) to use to split instream and floodplain
+```{r eliminate-bfc}
+test_threshold <- 330 #cfs
+
+test_output <- fsa |> 
+  flow_threshold_remove_baseflow(test_threshold, .flow_var=flow_cfs, .habitat_var=wua) |>
+  glimpse()
+
+test_output |> 
+  ggplot() + 
+  geom_line(aes(x=flow_cfs, y=wua, color="original")) + 
+  geom_point(aes(x=flow_cfs, y=wua, color="original")) + 
+  geom_line(data=fsa, aes(x=flow_cfs, y=wua, color="baseflow removed")) +
+  geom_point(data=fsa, aes(x=flow_cfs, y=wua, color="baseflow removed")) +
+  geom_vline(aes(xintercept = test_threshold), linetype="dashed") +
+  scale_x_log10()
+
+```
+
+## Floodplain-Instream Split (test/ not run)
+
+Need method to determine the flow threshold (aka bankfull flow) to use to split instream and floodplain
 
 As a placeholder, is there a bankfull flow contained in the flowline_attributes? 
 Or assume some channel shape and derive from bf w and bf d using Manning's
 
-```{r floodplain-split-func}
+```{r floodplain-split-func, eval=FALSE, include=FALSE}
 fp <- function(suitable_area, flow, flow_threshold) {
   
   if (length(flow) > 0 & 
@@ -899,7 +898,7 @@ fp <- function(suitable_area, flow, flow_threshold) {
 }
 ```
 
-```{r floodplain-split-example}
+```{r floodplain-split-example, eval=FALSE, include=FALSE}
 # rough example of instream-floodplain flow thresholds derived from bankfull width/depth
 bankfull_flows <- 
   flowline_attributes |>
@@ -940,3 +939,5 @@ batch_res_fp |>
         panel.grid.minor=element_blank(), 
         legend.position = "top")
 ```
+
+

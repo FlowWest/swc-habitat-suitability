@@ -6,6 +6,8 @@
 \alias{habistat-package}
 \title{habistat: HabiStat}
 \description{
+\if{html}{\figure{logo.png}{options: style='float: right' alt='logo' width='120'}}
+
 Description here
 }
 \author{

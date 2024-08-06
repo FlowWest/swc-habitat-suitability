@@ -1,7 +1,7 @@
 Flow Data Analysis for Inundation Duration HSI Component
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-05-09
+2024-05-14
 
 - [Import Flow Time Series Data](#import-flow-time-series-data)
 - [Flow Exceedence Calculation](#flow-exceedence-calculation)
@@ -17,6 +17,7 @@ Flow Data Analysis for Inundation Duration HSI Component
   - [Version 1 (skip down to “Revised Version
     2”)](#version-1-skip-down-to-revised-version-2)
   - [Revised Version 2](#revised-version-2)
+- [Baseflow Elimination](#baseflow-elimination)
 - [Floodplain-Instream Split](#floodplain-instream-split)
 
 Duration suitability criteria from the CBEC LYR analysis and HQT are:
@@ -48,6 +49,7 @@ knitr::opts_chunk$set(eval=TRUE, fig.width=6.5, fig.height=4, dpi=300)
 theme_set(theme_minimal())
 
 source(here::here("data-raw", "scripts", "data-functions.R"))
+source(here::here("data-raw", "scripts", "inundation-duration-functions.R"))
 
 test_comids <- c(12071016, 12071090, 12071178, 12071286, 12075424, 7981730, 7981752, 7981808, 7981872, 7981878, 7981882, 7982794, 7982804, 7982810, 7982884, 7982886, 2819792, 2819796, 2819800, 2819818, 2819824, 2819862, 2821822, 2821824, 2821830, 2821832, 2821836)
 ```
@@ -84,48 +86,13 @@ water_year_types <- read_csv(here::here("data-raw", "source", "water_year_type",
 ## Import Flow Time Series Data
 
 ``` r
-# functions from interoperable flows
-
-retrieve_cdec_csv <- function(sta=character(), sen=character(), dur=character(), 
-                     start_date=ymd("1900-10-01"), end_date=ymd("2023-09-30"),
-                     dir="temp") {
-  name <- str_to_upper(paste0(sta, "_", sen, "_", dur))
-  filename <- file.path(dir, paste0(name,".csv.gz"))
-  if(!file.exists(filename)){
-    message(paste0("downloading to ",filename))
-    dir.create(dir, recursive = TRUE)
-    data_raw <-
-      httr::GET(
-      url="https://cdec.water.ca.gov/dynamicapp/req/CSVDataServlet",
-      query=list(Stations=sta, SensorNums=sen, dur_code=dur, 
-                 Start=format(start_date,"%Y-%m-%d"), End=format(end_date,"%Y-%m-%d"))) |> 
-      httr::content("raw") 
-    gzf <- gzcon(file(filename, "wb"))
-    data_raw |> writeBin(gzf)
-    close(gzf)
-  } else {
-    message(paste0(filename, " exists, loading"))
-  }
-  return(filename)
-}
-
-parse_cdec_csv <- function(filename) {
-  read_csv(filename, 
-           col_select = c(date_time = "DATE TIME", value = "VALUE"),
-           col_types = list(col_datetime(), col_double())) |>
-    janitor::clean_names() |>
-    mutate(water_year = if_else(month(date_time)>=10, year(date_time)+1, year(date_time)))
-}
-```
-
-``` r
 # refer to https://cdec.water.ca.gov/webgis/?appid=cdecstation
 # refer to https://docs.google.com/spreadsheets/d/1OaohqeYbp-dTyIim3mFDYP11GEqIZWqSYIfT67b5-eE/edit
 
 # select a representative best flow gage to use for each reach, ideally available 25+ years
 # refer to https://cdec.water.ca.gov/dynamicapp/staMeta?station_id=### start 10/1/1997 - 09/30/2023
-# drainage areas from StreamStats gage-pages
-# mean annual flow is joined in based on the comid that the gage is located in
+# drainage areas from StreamStats gage-pages: https://streamstats.usgs.gov/ss/?gage=### using USGS ID
+# mean annual flow is joined in based on the comid that the gage is located in - refer to https://rivers.codefornature.org/#/map
 
 # get list of modelled flows for each dataset
 training_flows <- flow_to_suitable_area |>
@@ -140,11 +107,12 @@ training_reach_gages <- tribble(
   ~river, ~usgs_id, ~cdec_sta, ~cdec_sen, ~cdec_dur, ~start_date, ~end_date, ~da_gauge_sq_mi, ~gauge_comid, ~flows,
   "Deer Creek",       11383500, "DVD", 20, "E", mdy("10/1/1997"), mdy("9/30/2023"), 208, 8020924, training_flows[["Deer Creek"]],
   "Lower Yuba River", 11421000, "MRY", 20, "E", mdy("10/1/1997"), mdy("9/30/2023"), 1339, 7981844, training_flows[["Lower Yuba River"]],
-  "Stanislaus River", 11303000, "RIP", 20, "E", mdy("10/1/1997"), mdy("9/30/2023"), 1075, 2819818, training_flows[["Stanislaus River"]]
+  "Stanislaus River", 11303000, "RIP", 20, "E", mdy("10/1/1997"), mdy("9/30/2023"), 1075, 2819818, training_flows[["Stanislaus River"]],
+  "Tuolumne River (Basso-La Grange)", 11289650, "LGN", 20, "E", mdy("10/1/1997"), mdy("9/30/2023"), 1538, 2823750, training_flows[["Tuolumne River (Basso-La Grange)"]],
 ) |>
   mutate(da_gauge_sq_km = da_gauge_sq_mi * 1.609344^2) |>
   mutate(filename = pmap_chr(list(cdec_sta, cdec_sen, cdec_dur), 
-                             function(x, y, z) retrieve_cdec_csv(sta=x, sen=y, dur=z))) |>
+                             function(x, y, z) retrieve_cdec_csv(sta=x, sen=y, dur=z, dir=here::here("data-raw", "temp")))) |>
   left_join(flowline_attributes |> 
               transmute(comid, maf_gauge = erom_q_ma_cfs), by=join_by(gauge_comid == comid))
 
@@ -165,9 +133,9 @@ training_cdec_data <- training_reach_gages |>
   glimpse() 
 ```
 
-    ## Rows: 15,982
+    ## Rows: 22,341
     ## Columns: 4
-    ## Groups: river [3]
+    ## Groups: river [4]
     ## $ river      <chr> "Deer Creek", "Deer Creek", "Deer Creek", "Deer Creek", "De…
     ## $ date       <date> 1997-11-01, 1997-11-02, 1997-11-03, 1997-11-04, 1997-11-05…
     ## $ q_gauge    <dbl> 68.28125, 65.77083, 64.25000, 64.32292, 63.40625, 66.07292,…
@@ -283,7 +251,7 @@ durhsi_by_model_q <-
   glimpse()
 ```
 
-    ## Rows: 55
+    ## Rows: 71
     ## Columns: 14
     ## $ river                   <chr> "Deer Creek", "Deer Creek", "Deer Creek", "Dee…
     ## $ model_q                 <dbl> 100, 250, 300, 400, 500, 600, 1000, 3000, 5000…
@@ -332,22 +300,34 @@ durhsi_by_model_q |>
 
 ![](inundation-duration_files/figure-gfm/calc-duration-hsi-3.png)<!-- -->
 
+``` r
+durhsi_by_model_q |> ggplot() +
+  facet_wrap(~river, ncol=1) + 
+  geom_line(aes(x = model_q, y = pmin(240,max_days_inundated))) + # 240 because we are looking at a 8-month sub-water year
+  scale_x_log10(labels = scales::label_comma()) +
+  scale_y_continuous(limits = c(0,240), breaks = c(0,60,120,180,240), minor_breaks=NULL) +
+  xlab("Flow (cfs)") + ylab("Maximum contiguous days inundated (days)") + ggtitle("Inundation Duration")
+```
+
+![](inundation-duration_files/figure-gfm/calc-duration-hsi-4.png)<!-- -->
+
 ### Revised Version 2: Max Contiguous Days Inundated by Water Year
 
 ``` r
 # simple version, for data within one water year only
+
 calculate_days_inundated <- function(q_gauge, q_crit, stat="max") {
-  
+
   n_days <- length(q_gauge)
-  
-  exceedence_intervals <- 
+
+  exceedence_intervals <-
     tibble(exceeds_q = q_gauge > q_crit,
            exceedence_event = with(rle(exceeds_q), rep(seq_along(lengths), lengths))) |>
     group_by(exceedence_event) |>
     mutate(cumulative_exceedence = if_else(exceeds_q, seq_along(exceedence_event), 0)) |>
     filter(exceeds_q) |>
     summarize(duration_days = max(cumulative_exceedence))
-  
+
   if(stat=="sum"){
     return(sum(exceedence_intervals$duration_days))
   } else if(stat=="max") {
@@ -556,20 +536,13 @@ durhsi_by_model_q |>
   geom_hline(aes(yintercept = if_else(gradient_class=="vf", 10, 25)))
 ```
 
-    ## Warning: Removed 1 row containing missing values (`geom_line()`).
+    ## Warning: Removed 2 rows containing missing values (`geom_line()`).
 
 ![](inundation-duration_files/figure-gfm/unnamed-chunk-4-1.png)<!-- -->
 
 ### Revised Version 2
 
 ``` r
-# https://stackoverflow.com/a/73215592
-cummean.na.rm <- function(x) {
-  idx <- cumsum(!is.na(x))
-  x_filtered <- x[!is.na(x)]
-  cummean(x_filtered)[idx]
-}
-
 # simple version
 apply_durations_to_fsa_curve <- function(fsa, drc, fsa_q=q, fsa_wua=wua, drc_q=q, drc_dhsi=dhsi) {
   full_join(fsa |> transmute(q={{fsa_q}}, wua={{fsa_wua}}),
@@ -617,7 +590,7 @@ fsa <- flow_to_suitable_area |>
     ## Rows: 18
     ## Columns: 2
     ## $ flow_cfs <dbl> 100, 250, 300, 400, 500, 600, 1000, 3000, 5000, 6000, 7000, 9…
-    ## $ wua      <dbl> 3.121631, 3.478145, 3.955550, 5.045296, 6.136411, 9.655995, 1…
+    ## $ wua      <dbl> 6.492608, 3.428500, 3.562407, 4.455920, 5.275116, 8.739918, 1…
 
 ``` r
 fsa |> ggplot() + geom_line(aes(x=flow_cfs, y=wua)) + scale_x_log10() + scale_y_log10() +
@@ -662,15 +635,15 @@ res <- apply_durations_to_fsa_curve(fsa, drc,
     ## Rows: 18
     ## Columns: 10
     ## $ q                       <dbl> 100, 250, 300, 400, 500, 600, 1000, 3000, 5000…
-    ## $ wua                     <dbl> 3.121631, 3.478145, 3.955550, 5.045296, 6.1364…
+    ## $ wua                     <dbl> 6.492608, 3.428500, 3.562407, 4.455920, 5.2751…
     ## $ dhsi                    <dbl> 0.00, 0.66, 0.66, 0.66, 0.66, 1.00, 0.00, 0.00…
-    ## $ marginal_wua            <dbl> 3.1216314, 0.3565132, 0.4774058, 1.0897456, 1.…
-    ## $ wua_added               <dbl> 3.1216314, 0.3565132, 0.4774058, 1.0897456, 1.…
-    ## $ marginal_durwua_added   <dbl> 0.0000000, 0.2352987, 0.3150878, 0.7192321, 0.…
-    ## $ wua_removed             <dbl> 0.0000000, 0.0000000, 0.0000000, 0.0000000, 0.…
-    ## $ marginal_durwua_removed <dbl> 0.00000000, 0.00000000, 0.00000000, 0.00000000…
-    ## $ marginal_durwua         <dbl> 0.00000000, 0.23529874, 0.31508785, 0.71923208…
-    ## $ durwua                  <dbl> 0.0000000, 0.2352987, 0.5503866, 1.2696187, 1.…
+    ## $ marginal_wua            <dbl> 6.49260823, -3.06410834, 0.13390705, 0.8935127…
+    ## $ wua_added               <dbl> 6.49260823, 0.00000000, 0.13390705, 0.89351276…
+    ## $ marginal_durwua_added   <dbl> 0.00000000, 0.00000000, 0.08837865, 0.58971842…
+    ## $ wua_removed             <dbl> 0.0000000, 3.0641083, 0.0000000, 0.0000000, 0.…
+    ## $ marginal_durwua_removed <dbl> 0.000000, 1.011156, 0.000000, 0.000000, 0.0000…
+    ## $ marginal_durwua         <dbl> 0.00000000, -1.01115575, 0.08837865, 0.5897184…
+    ## $ durwua                  <dbl> 0.0000000, 0.0000000, 0.0000000, 0.0000000, 0.…
 
 ``` r
 res |> 
@@ -700,12 +673,12 @@ batch_fsa <- flow_to_suitable_area |>
 
     ## Joining with `by = join_by(comid)`
 
-    ## Rows: 178
+    ## Rows: 183
     ## Columns: 4
-    ## $ dataset <chr> "Deer Creek", "Deer Creek", "Deer Creek", "Deer Creek", "Deer …
+    ## $ dataset <chr> "Lower Yuba River", "Lower Yuba River", "Lower Yuba River", "L…
     ## $ hqt_cls <chr> "VF", "VF", "VF", "VF", "VF", "VF", "VF", "VF", "VF", "VF", "V…
-    ## $ comid   <dbl> 12069362, 12069384, 12071016, 12071090, 12071174, 12071178, 12…
-    ## $ tbl_fsa <list> [<tbl_df[18 x 2]>], [<tbl_df[18 x 2]>], [<tbl_df[18 x 2]>], […
+    ## $ comid   <dbl> 8061185, 8062589, 7981730, 7982892, 7983002, 8061195, 8061207,…
+    ## $ tbl_fsa <list> [<tbl_df[21 x 2]>], [<tbl_df[21 x 2]>], [<tbl_df[24 x 2]>], […
 
 ``` r
 batch_drc <- durhsi_by_model_q_wy |>
@@ -736,22 +709,22 @@ batch_res <-
   glimpse()
 ```
 
-    ## Rows: 89,550
+    ## Rows: 92,750
     ## Columns: 14
-    ## $ dataset                 <chr> "Deer Creek", "Deer Creek", "Deer Creek", "Dee…
+    ## $ dataset                 <chr> "Lower Yuba River", "Lower Yuba River", "Lower…
     ## $ hqt_cls                 <chr> "VF", "VF", "VF", "VF", "VF", "VF", "VF", "VF"…
-    ## $ comid                   <dbl> 12069362, 12069362, 12069362, 12069362, 120693…
+    ## $ comid                   <dbl> 8061185, 8061185, 8061185, 8061185, 8061185, 8…
     ## $ water_year              <dbl> 1998, 1998, 1998, 1998, 1998, 1998, 1998, 1998…
-    ## $ q                       <dbl> 100, 250, 300, 400, 500, 600, 1000, 3000, 5000…
-    ## $ wua                     <dbl> 5.392430, 7.059794, 5.816499, 4.216601, 3.4070…
-    ## $ dhsi                    <dbl> 0.66, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00…
-    ## $ marginal_wua            <dbl> 5.39242987, 1.66736437, -1.24329482, -1.599898…
-    ## $ wua_added               <dbl> 5.39242987, 1.66736437, 0.00000000, 0.00000000…
-    ## $ marginal_durwua_added   <dbl> 3.559004, 0.000000, 0.000000, 0.000000, 0.0000…
-    ## $ wua_removed             <dbl> 0.0000000, 0.0000000, 1.2432948, 1.5998988, 0.…
-    ## $ marginal_durwua_removed <dbl> 0.000000000, 0.000000000, 0.273524861, 0.26398…
-    ## $ marginal_durwua         <dbl> 3.559003712, 0.000000000, -0.273524861, -0.263…
-    ## $ durwua                  <dbl> 3.559004, 3.559004, 3.285479, 3.021496, 2.9146…
+    ## $ q                       <dbl> 700, 800, 880, 930, 1000, 1300, 1500, 1700, 20…
+    ## $ wua                     <dbl> 17.947822, 15.905079, 14.475416, 13.684917, 12…
+    ## $ dhsi                    <dbl> 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00…
+    ## $ marginal_wua            <dbl> 17.94782162, -2.04274306, -1.42966285, -0.7904…
+    ## $ wua_added               <dbl> 17.94782162, 0.00000000, 0.00000000, 0.0000000…
+    ## $ marginal_durwua_added   <dbl> 0.000000, 0.000000, 0.000000, 0.000000, 0.0000…
+    ## $ wua_removed             <dbl> 0.0000000, 2.0427431, 1.4296629, 0.7904988, 0.…
+    ## $ marginal_durwua_removed <dbl> 0.0000000, 0.0000000, 0.0000000, 0.0000000, 0.…
+    ## $ marginal_durwua         <dbl> 0.0000000, 0.0000000, 0.0000000, 0.0000000, 0.…
+    ## $ durwua                  <dbl> 0.000000, 0.000000, 0.000000, 0.000000, 0.0000…
 
 ``` r
 batch_res |>
@@ -834,6 +807,57 @@ batch_res_ts |>
 
 ![](inundation-duration_files/figure-gfm/posthoc-duration-func-time-series-1.png)<!-- -->
 
+## Baseflow Elimination
+
+Function for simple elimination of baseflow given a threshold flow,
+without needing to know a full hydrology:
+
+``` r
+# EDIT: Moved this to inundation-duration-functions.R
+# eliminate_baseflow <- function(fsa, baseflow_threshold_flow, fsa_q=q, fsa_wua=wua, ...) {
+# 
+#   min_q <- 0
+#   max_q <- fsa |> pull({{fsa_q}}) |> max()
+# 
+#   baseflow_removal_drc <-
+#     fsa |>
+#     complete(flow_cfs = baseflow_threshold_flow) |>
+#     arrange(flow_cfs) |>
+#     transmute(q = flow_cfs,
+#               dhsi = if_else(flow_cfs <= baseflow_threshold_flow, 0, 1))
+# 
+#   apply_durations_to_fsa_curve(fsa=fsa, drc=baseflow_removal_drc,
+#                                fsa_q={{fsa_q}}, fsa_wua={{fsa_wua}}, ...) |>
+#     transmute({{fsa_q}} := q,
+#               {{fsa_wua}} := durwua)
+# 
+# }
+
+test_threshold <- 330 #cfs
+
+test_output <- fsa |> 
+  eliminate_baseflow(test_threshold, fsa_q=flow_cfs, fsa_wua=wua) |>
+  glimpse()
+```
+
+    ## Rows: 19
+    ## Columns: 2
+    ## $ flow_cfs <dbl> 100, 250, 300, 330, 400, 500, 600, 1000, 3000, 5000, 6000, 70…
+    ## $ wua      <dbl> 0.0000000, 0.0000000, 0.0000000, 0.0000000, 0.6254589, 1.4446…
+
+``` r
+test_output |> 
+  ggplot() + 
+  geom_line(aes(x=flow_cfs, y=wua, color="original")) + 
+  geom_point(aes(x=flow_cfs, y=wua, color="original")) + 
+  geom_line(data=fsa, aes(x=flow_cfs, y=wua, color="baseflow removed")) +
+  geom_point(data=fsa, aes(x=flow_cfs, y=wua, color="baseflow removed")) +
+  geom_vline(aes(xintercept = test_threshold), linetype="dashed") +
+  scale_x_log10()
+```
+
+![](inundation-duration_files/figure-gfm/eliminate-bfc-1.png)<!-- -->
+
 ## Floodplain-Instream Split
 
 (eventually move this to its own file)
@@ -914,15 +938,15 @@ batch_res_fp <- batch_res |>
     ## `summarise()` has grouped output by 'comid', 'water_year'. You can override
     ## using the `.groups` argument.
 
-    ## Rows: 87,600
+    ## Rows: 90,700
     ## Columns: 8
     ## $ comid              <dbl> 2819786, 2819786, 2819786, 2819786, 2819786, 281978…
     ## $ water_year         <dbl> 1998, 1998, 1998, 1998, 1998, 1998, 1998, 1998, 199…
     ## $ bf_q_cfs           <dbl> 1741.525, 1741.525, 1741.525, 1741.525, 1741.525, 1…
     ## $ flow               <dbl> 500, 750, 1000, 1250, 1500, 1750, 2250, 3000, 5000,…
-    ## $ suitable_area      <dbl> 0.0000000, 0.0000000, 0.0000000, 0.0000000, 0.00000…
+    ## $ suitable_area      <dbl> 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 1…
     ## $ is_floodplain      <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, TRUE, TRUE, TRUE…
-    ## $ habitat_instream   <dbl> 0.0000000, 0.0000000, 0.0000000, 0.0000000, 0.00000…
+    ## $ habitat_instream   <dbl> 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, …
     ## $ habitat_floodplain <dbl> 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 1…
 
 ``` r

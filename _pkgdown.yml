@@ -10,7 +10,7 @@ navbar:
     right: [search]
   components:
     maplink:
-      href: https://flowwest.shinyapps.io/habistat/
+      href: https://flowwest.shinyapps.io/swc-habistat-dev/
       text: "Interactive Map"
 articles:
 - title: Articles
@@ -27,6 +27,7 @@ reference:
   contents:
   - starts_with("flowline_")
   - starts_with("wua_")
+  - starts_with("cv_")
 - title: "Suitability Functions"
   desc: "..."
   contents:
@@ -43,6 +44,7 @@ reference:
   desc: "Used Internally"
   contents:
   - starts_with("const_")
-  - starts_with("linterp")
+  - ends_with("interp")
   - starts_with("drive_file_by_id")
   - starts_with("perpendicular_")
+  - starts_with("st_")

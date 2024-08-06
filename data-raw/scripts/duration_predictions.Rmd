@@ -86,7 +86,7 @@ cdec_stations <- cdec_station_sensors |>
   summarize(sensors = list(unique(sensor_number))) |>
   st_union(by_feature = TRUE) 
 
-cdec_stations |> 
+cdec_stations_geom <- cdec_stations |> 
   mutate(sensors = map_chr(sensors, function(x) paste(x, collapse=", "))) |>
   st_write(here::here("data-raw", "temp", "cdec_stations.shp"), append=FALSE)
 
@@ -207,6 +207,14 @@ streamgage_attr <- cdec_filenames |>
                                        TRUE ~ section))
 
 streamgage_attr |> usethis::use_data(overwrite=T)
+
+streamgage_geom <- 
+  cdec_stations_geom |>
+  filter(station_id %in% streamgage_attr$station_id) |>
+  st_transform(st_crs(habistat::flowline_geom_proj)) |>
+  select(station_id)
+
+streamgage_geom |> usethis::use_data(overwrite=T)
 ```
 
 ```{r eval=FALSE, include=FALSE}

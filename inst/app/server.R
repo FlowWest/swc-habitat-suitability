@@ -2,7 +2,9 @@
 
 function(input, output, session){
 
-  most_recent_map_click <- reactiveValues(type = "none")
+  most_recent_map_click <- reactiveValues(type = "none",
+                                          lng = NULL,
+                                          lat = NULL)
 
   # REACTIVE FLOW FILTER (COMID) -----------------------------------------------
 
@@ -73,8 +75,8 @@ function(input, output, session){
       if(substr(input$main_map_shape_click$id, 1, 6) == "comid_") {
         most_recent_map_click$type <- "comid"
         selected_point$object_id <- input$main_map_shape_click$id
-        selected_point$lng <- input$main_map_shape_click$lng
-        selected_point$lat <- input$main_map_shape_click$lat
+        most_recent_map_click$lng <- input$main_map_shape_click$lng
+        most_recent_map_click$lat <- input$main_map_shape_click$lat
         selected_point$comid <- as.numeric(str_replace(selected_point$object_id, "comid_", ""))
       }
     }
@@ -334,8 +336,8 @@ selected_watershed <- reactiveValues(object_id = NA,
         most_recent_map_click$type <- "watershed"
         selected_watershed$object_id <- input$main_map_shape_click$id
         selected_watershed$watershed_name <-watersheds$watershed_level_3[[which(watersheds$watershed_id==input$main_map_shape_click$id)]]
-        selected_watershed$lng <- input$main_map_shape_click$lng
-        selected_watershed$lat <- input$main_map_shape_click$lat
+        most_recent_map_click$lng <- input$main_map_shape_click$lng
+        most_recent_map_click$lat <- input$main_map_shape_click$lat
       }
     }
   })
@@ -372,8 +374,8 @@ selected_watershed <- reactiveValues(object_id = NA,
         most_recent_map_click$type <- "mainstem"
         selected_mainstem$object_id <- input$main_map_shape_click$id
         selected_mainstem$river_name <-mainstems$mainstem_label[[which(mainstems$mainstem_id==input$main_map_shape_click$id)]]
-        selected_mainstem$lng <- input$main_map_shape_click$lng
-        selected_mainstem$lat <- input$main_map_shape_click$lat
+        most_recent_map_click$lng <- input$main_map_shape_click$lng
+        most_recent_map_click$lat <- input$main_map_shape_click$lat
       }
     }
   })
@@ -481,6 +483,10 @@ selected_watershed <- reactiveValues(object_id = NA,
     mutate(data = map(data, function(x) deframe(x) |> as.list())) |>
     deframe()
 
+  streamgage_locs <- get_data(streamgage_geom, package = "habistat") |>
+    st_transform("+proj=longlat +datum=NAD83") |>
+    st_set_crs("+proj=longlat +datum=WGS84") # for display purposes only
+
   streamgage_drc <- reactive({
     if (most_recent_map_click$type == "comid") {
     active_reach_gradient_class <- (attr |>
@@ -543,10 +549,19 @@ selected_watershed <- reactiveValues(object_id = NA,
 
     if(active_reach_is_mainstem) {
       streamgage_options <- streamgages[[active_reach_watershed_name]]
+      streamgage_options_geom <- streamgage_geom |> filter(station_id %in% names(streamgage_options))
+
+      streamgage_options_selected <-
+        streamgage_options_geom$station_id[[
+          st_nearest_feature(st_point(c(most_recent_map_click$lng,
+                                        most_recent_map_click$lat)),
+                           streamgage_options_geom,
+                           check_crs = FALSE)]]
+
       selectInput(inputId = "streamgage_id",
                   label = "Select Gage for Duration Analysis",
                   choices = setNames(names(streamgage_options), streamgage_options),
-                  selected = names(streamgage_options)[[1]])
+                  selected = streamgage_options_selected) # names(streamgage_options)[[1]])
     } else {
       selectInput(inputId = "streamgage_id",
                   label = "Select Gage for Duration Analysis",

@@ -50,6 +50,10 @@
 #' @title CDEC Mainstem Streamgage Attributes
 "streamgage_attr"
 
+#' @name streamgage_geom
+#' @title CDEC Mainstem Streamgage Point Geometries
+"streamgage_geom"
+
 #' @name streamgage_duration_rating_curves
 #' @title CDEC Mainstem Streamgage Duration Rating Curves
 "streamgage_duration_rating_curves"

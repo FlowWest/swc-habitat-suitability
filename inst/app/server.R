@@ -2,9 +2,30 @@
 
 function(input, output, session){
 
+  # IDENTIFIERS FOR CLICKED ELEMENT --------------------------------------------
+
   most_recent_map_click <- reactiveValues(type = "none",
                                           lng = NULL,
                                           lat = NULL)
+
+  clicked_item_label <- reactive({
+    if (most_recent_map_click$type == "comid") {
+      comid_name <- attr$gnis_name[[which(attr$comid==selected_point$comid)]]
+      comid_watershed_name <- attr$watershed_level_3[[which(attr$comid==selected_point$comid)]]
+      comid_name_suffix <- if_else(!is.na(comid_name),
+                                   glue::glue(" ({comid_name})"),
+                                   glue::glue(" (tributary of {comid_watershed_name})"))
+      paste0("ComID ", selected_point$comid, comid_name_suffix)
+    } else if (most_recent_map_click$type == "mainstem") {
+      paste0(selected_mainstem$river_name, " Mainstem")
+    } else if (most_recent_map_click$type == "watershed") {
+      paste0(selected_watershed$watershed_name, " Watershed")
+    }
+  })
+
+  output$clicked_item_heading <- renderUI({
+    h4(clicked_item_label())
+  })
 
   # REACTIVE FLOW FILTER (COMID) -----------------------------------------------
 
@@ -129,12 +150,20 @@ function(input, output, session){
     })
 
   output$fsa_plot <- renderPlot({
+    palette_linetypes <- c("Prior BFC Removal" = "solid",
+                           "No BFC Removal" = "solid",
+                           "Duration Analysis" = "dashed",
+                           "Post-Model BFC Removal" = "dotted")
+    palette_colors <- c("Scale-Dependent" = "#6388b4",
+                        "Scale-Normalized" = "#8cc2ca",
+                        "Actual" = "#ffae34")
+
     if (most_recent_map_click$type == "comid") { #& (length(selected_point$comid)>0)) {
     predictions |>
       filter(comid == selected_point$comid) |>
       filter(habitat == input$habitat_type) |>
       ggplot(aes(x = flow_cfs)) +
-      geom_line(aes(y = wua_per_lf_actual, color="Actual", linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal")), linewidth=2) +
+      geom_line(aes(y = wua_per_lf_actual, color="Actual", linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
       geom_line(aes(y = wua_per_lf_pred_SD, color="Scale-Dependent", linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
       geom_line(aes(y = wua_per_lf_pred_SD_ph_bfc_rm, color="Scale-Dependent", linetype="Post-Model BFC Removal")) +
       geom_line(aes(y = wua_per_lf_pred_SN, color="Scale-Normalized", linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
@@ -148,12 +177,10 @@ function(input, output, session){
       #scale_y_continuous(trans = ihs, labels = scales::label_comma(), limits = c(0, NA)) +
       theme_minimal() + theme(panel.grid.minor = element_blank(), legend.position = "top", legend.box="vertical") +
       xlab("Flow (cfs)") + ylab("WUA (ft2) per linear ft") +
-      scale_color_discrete(name = "Model Type") +
+        scale_color_manual(name = "Model Type",
+                           values = palette_colors) +
       scale_linetype_manual(name = "Baseflow Method",
-                            values = c("Prior BFC Removal" = "solid",
-                                       "No BFC Removal" = "solid",
-                                       "Duration Analysis" = "dashed",
-                                       "Post-Model BFC Removal" = "dotted"))
+                            values = palette_linetypes)
     } else if (most_recent_map_click$type == "watershed") {
       #TODO: For watersheds, plot total acreage rather than WUA/LF
       predictions_watershed |>
@@ -169,12 +196,10 @@ function(input, output, session){
         scale_y_continuous(limits = c(0, NA)) +
         theme_minimal() + theme(panel.grid.minor = element_blank(), legend.position = "top", legend.box="vertical") +
         xlab("Flow (cfs)") + ylab("WUA (ft2) per linear ft") +
-        scale_color_discrete(name = "Model Type") +
+        scale_color_manual(name = "Model Type",
+                           values = palette_colors) +
         scale_linetype_manual(name = "Baseflow Method",
-                              values = c("Prior BFC Removal" = "solid",
-                                         "No BFC Removal" = "solid",
-                                         "Duration Analysis" = "dashed",
-                                         "Post-Model BFC Removal" = "dotted"))
+                              values = palette_linetypes)
     } else if (most_recent_map_click$type == "mainstem") {
       predictions_mainstem |>
         filter(river_cvpia == selected_mainstem$river_name) |>
@@ -189,12 +214,10 @@ function(input, output, session){
         scale_y_continuous(limits = c(0, NA)) +
         theme_minimal() + theme(panel.grid.minor = element_blank(), legend.position = "top", legend.box="vertical") +
         xlab("Flow (cfs)") + ylab("WUA (ft2) per linear ft") +
-        scale_color_discrete(name = "Model Type") +
+        scale_color_manual(name = "Model Type",
+                           values = palette_colors) +
         scale_linetype_manual(name = "Baseflow Method",
-                              values = c("Prior BFC Removal" = "solid",
-                                         "No BFC Removal" = "solid",
-                                         "Duration Analysis" = "dashed",
-                                         "Post-Model BFC Removal" = "dotted"))
+                              values = palette_linetypes)
     } else {
       ggplot()
     }})
@@ -615,5 +638,22 @@ selected_watershed <- reactiveValues(object_id = NA,
 
     }
   })
+
+  output$dur_plot <- renderPlot({
+
+  })
+
+#   # INTERFACE
+#
+#   hide(id = "pred_table")
+#   hide(id = "attr_table")
+#
+#   observeEvent(input$showPredTable,{
+#     toggle(id = "pred_table",anim = T)
+#   })
+#
+#   observeEvent(input$showAttrTable,{
+#     toggle(id = "attr_table",anim = T)
+#   })
 
 }

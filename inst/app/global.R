@@ -1,6 +1,7 @@
 library(tidyverse)
 library(sf)
 library(shiny)
+library(shinyjs)
 library(leaflet)
 library(leafgl)
 library(habistat)

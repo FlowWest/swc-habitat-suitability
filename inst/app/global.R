@@ -5,6 +5,7 @@ library(shinyjs)
 library(leaflet)
 library(leafgl)
 library(habistat)
+library(patchwork)
 
 get_data <- function(...) {
   # use this for loading data from R package such that it can be easily garbage-collected

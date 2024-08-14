@@ -31,9 +31,11 @@ shinyUI(
                      div(id = "fsaPlot",
                          shinycssloaders::withSpinner(plotOutput("fsa_plot"), hide.ui=F),
                          div(id = "durationOptions",
+                             h4("Duration Analysis"),
                             uiOutput("streamgage_selector"),
                             selectInput("selected_run", "Select Run", choices=c("fall", "late fall", "spring", "winter", "steelhead"), selected="fall"),
-                            radioButtons("selected_wyt", "Select Water Year Type", choices=c("Dry", "Wet"), selected="Dry", inline=T))
+                            radioButtons("selected_wyt", "Select Water Year Type", choices=c("Dry", "Wet"), selected="Dry", inline=T)),
+                            shinycssloaders::withSpinner(plotOutput("dur_plot"), hide.ui=F),
                          )
                      ),
                  div(id = "detailTables",

@@ -516,7 +516,7 @@ selected_watershed <- reactiveValues(object_id = NA,
                                       filter(comid == selected_point$comid) |>
                                       pull(hqt_gradient_class))[[1]]
     } else if (most_recent_map_click$type == "mainstem") {
-      # TODO: FIX (this is a placeholder)
+      # TODO: FIX (this is a placeholder using VF for all)
       active_reach_gradient_class <- "Valley Foothill"
     }
 
@@ -544,7 +544,7 @@ selected_watershed <- reactiveValues(object_id = NA,
 
     } else {
 
-      tibble(model_q = list(), dhsi_selected = list())
+      tibble(model_q = list(), dhsi_selected = list(), avg_max_days_inundated = list())
 
     }
 
@@ -640,6 +640,39 @@ selected_watershed <- reactiveValues(object_id = NA,
   })
 
   output$dur_plot <- renderPlot({
+
+    plt_days <-
+      ggplot() +
+      geom_step(data=streamgage_drc(), aes(x = model_q, y = avg_max_days_inundated)) +
+      xlab("Flow (cfs)") +
+      ylab("Days per WY") + scale_y_continuous(limits = c(0, 365)) +
+      ggtitle("Max Length of Period Exceeding Flow per WY-Season")
+
+    plt_dhsi <-
+      ggplot() +
+      geom_step(data=streamgage_drc(), aes(x = model_q, y = dhsi_selected)) +
+      xlab("Flow (cfs)") +
+      ylab("Weight") + scale_y_continuous(limits = c(0, 1)) +
+      ggtitle("Duration Suitability Factor")
+
+    plt_dwua <- ggplot() +
+      geom_line(data=duration_curve(), aes(x = q, y = wua, linetype = "Original")) +
+      geom_line(data=duration_curve(), aes(x = q, y = durwua, linetype = "Duration-Weighted")) +
+      xlab("Flow (cfs)") +
+      ylab("WUA (ft2/ft)") +
+      ggtitle("Suitable Habitat Area") +
+      scale_linetype_manual(name = "",
+                            values = c("Original" = "solid",
+                                       "Duration-Weighted" = "dashed"))
+
+
+    (plt_days + plt_dhsi + plt_dwua) +
+      plot_layout(heights = c(2, 1, 2), axes = "collect", ncol = 1) &
+      theme(legend.position = "bottom") &
+      scale_x_log10(labels = scales::label_comma()) &
+      annotation_logticks(sides = "b")
+
+    # TODO fix so that axesline up
 
   })
 

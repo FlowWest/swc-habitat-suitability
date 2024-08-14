@@ -640,39 +640,72 @@ selected_watershed <- reactiveValues(object_id = NA,
   })
 
   output$dur_plot <- renderPlot({
+    if((nrow(streamgage_drc())>0) & (nrow(duration_curve()) > 0)) {
+      bind_rows("days" = streamgage_drc() |> transmute(x = model_q, y = avg_max_days_inundated),
+                "dhsi" = streamgage_drc() |> transmute(x = model_q, y = dhsi_selected),
+                "wua" = bind_rows("wua" = duration_curve() |> transmute(x = q, y = wua),
+                                  "durwua" = duration_curve() |> transmute(x = q, y = durwua),
+                                  .id = "grp"),
+                .id = "varname") |>
+        bind_rows(tribble(~varname, ~grp, ~x, ~y,
+                          "dhsi", "ref", -Inf, 1,
+                          "dhsi", "ref", Inf,  1)) |>
+        mutate(varname = varname |> factor(levels = c("days", "dhsi", "wua"),
+                                           labels = c("Max Length of Period Exceeding Flow per WY-Season (days)",
+                                                      "Duration Suitability Factor",
+                                                      "Suitable Habitat Curve (ft2/ft)")),
+               grp = grp |> coalesce("None") |>
+                            factor(levels = c("None", "ref", "wua", "durwua"),
+                                   labels = c("None", "ref", "Original", "Duration-Weighted"))) |>
+        ggplot() +
+        geom_step(aes(x = x, y = y, linetype = grp)) +
+        facet_wrap(~varname, ncol = 1, scales="free_y") +
+        scale_x_log10(breaks = scales::breaks_log(8), labels = scales::label_comma()) +
+        scale_y_continuous(breaks = scales::breaks_extended(8), labels = scales::label_comma(), limits=c(0, NA)) +
+        annotation_logticks(sides = "b") +
+        ylab("") + xlab("Flow (cfs)") +
+        theme(legend.position = "none",
+              panel.grid.minor = element_blank()) +
+        scale_linetype_manual(name = "",
+                              values = c("None" = "solid",
+                                         "ref" = "dashed",
+                                         "Original" = "solid",
+                                         "Duration-Weighted" = "dashed"))
+    } else {
+      ggplot()
+    }
 
-    plt_days <-
-      ggplot() +
-      geom_step(data=streamgage_drc(), aes(x = model_q, y = avg_max_days_inundated)) +
-      xlab("Flow (cfs)") +
-      ylab("Days per WY") + scale_y_continuous(limits = c(0, 365)) +
-      ggtitle("Max Length of Period Exceeding Flow per WY-Season")
-
-    plt_dhsi <-
-      ggplot() +
-      geom_step(data=streamgage_drc(), aes(x = model_q, y = dhsi_selected)) +
-      xlab("Flow (cfs)") +
-      ylab("Weight") + scale_y_continuous(limits = c(0, 1)) +
-      ggtitle("Duration Suitability Factor")
-
-    plt_dwua <- ggplot() +
-      geom_line(data=duration_curve(), aes(x = q, y = wua, linetype = "Original")) +
-      geom_line(data=duration_curve(), aes(x = q, y = durwua, linetype = "Duration-Weighted")) +
-      xlab("Flow (cfs)") +
-      ylab("WUA (ft2/ft)") +
-      ggtitle("Suitable Habitat Area") +
-      scale_linetype_manual(name = "",
-                            values = c("Original" = "solid",
-                                       "Duration-Weighted" = "dashed"))
-
-
-    (plt_days + plt_dhsi + plt_dwua) +
-      plot_layout(heights = c(2, 1, 2), axes = "collect", ncol = 1) &
-      theme(legend.position = "bottom") &
-      scale_x_log10(labels = scales::label_comma()) &
-      annotation_logticks(sides = "b")
-
-    # TODO fix so that axesline up
+#    plt_days <-
+#      ggplot() +
+#      geom_step(data=streamgage_drc(), aes(x = model_q, y = avg_max_days_inundated)) +
+#      xlab("Flow (cfs)") +
+#      ylab("Days per WY") + scale_y_continuous(limits = c(0, 365)) +
+#      ggtitle("Max Length of Period Exceeding Flow per WY-Season")
+#
+#    plt_dhsi <-
+#      ggplot() +
+#      geom_step(data=streamgage_drc(), aes(x = model_q, y = dhsi_selected)) +
+#      xlab("Flow (cfs)") +
+#      ylab("Weight") + scale_y_continuous(limits = c(0, 1)) +
+#      ggtitle("Duration Suitability Factor")
+#
+#    plt_dwua <- ggplot() +
+#      geom_line(data=duration_curve(), aes(x = q, y = wua, linetype = "Original")) +
+#      geom_line(data=duration_curve(), aes(x = q, y = durwua, linetype = "Duration-Weighted")) +
+#      xlab("Flow (cfs)") +
+#      ylab("WUA (ft2/ft)") +
+#      ggtitle("Suitable Habitat Area") +
+#      scale_linetype_manual(name = "",
+#                            values = c("Original" = "solid",
+#                                       "Duration-Weighted" = "dashed"))
+#
+#    # plt_dwua <- set_dim(plt_dwua, get_dim(plt_dhsi))
+#
+#    (plt_days + plt_dhsi + plt_dwua) +
+#      plot_layout(heights = c(2, 1, 2), axes = "collect", ncol = 1) &
+#      theme(legend.position = "bottom") &
+#      scale_x_log10(labels = scales::label_comma()) &
+#      annotation_logticks(sides = "b")
 
   })
 

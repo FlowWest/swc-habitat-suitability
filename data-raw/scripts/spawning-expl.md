@@ -1,7 +1,7 @@
 Spawning Data Exploration
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-07-29
+2024-08-16
 
 - [Determining the Geographic Scope](#determining-the-geographic-scope)
   - [HQT gradient class and known spawning
@@ -15,6 +15,7 @@ Spawning Data Exploration
 - [Reach by Reach Analysis](#reach-by-reach-analysis)
   - [Sediment Transport Approach](#sediment-transport-approach)
   - [Alternative Approach](#alternative-approach)
+- [Additional criteria to explore](#additional-criteria-to-explore)
 - [Export result](#export-result)
 
 ``` r
@@ -194,18 +195,19 @@ spawning_reach_geomorph_classes |>
   arrange(-total_mi)
 ```
 
-    ## # A tibble: 9 × 2
-    ##   geomorph_class                                                        total_mi
-    ##   <fct>                                                                    <dbl>
-    ## 1 Unconfined, low width-to-depth ratio, gravel                           353.   
-    ## 2 Confined, boulder-bedrock, uniform                                     138.   
-    ## 3 Partly-confined, cobble-boulder, uniform                               111.   
-    ## 4 Unconfined, gravel-cobble, riffle-pool                                  94.2  
-    ## 5 Confined, boulder-bedrock, low-gradient step-pool                       49.3  
-    ## 6 Confined, boulder, high gradient, step-pool/cascade                     32.2  
-    ## 7 Partly-confined, low width-to-depth ratio, gravel-cobble, riffle-pool   28.9  
-    ## 8 Confined, gravel-cobble, uniform                                        21.3  
-    ## 9 <NA>                                                                     0.496
+    ## # A tibble: 10 × 2
+    ##    geomorph_class                                                       total_mi
+    ##    <fct>                                                                   <dbl>
+    ##  1 Unconfined, low width-to-depth ratio, gravel                          276.   
+    ##  2 Partly-confined, low width-to-depth ratio, gravel-cobble, riffle-po…  117.   
+    ##  3 Unconfined, gravel-cobble, riffle-pool                                114.   
+    ##  4 Confined, gravel-cobble, uniform                                      113.   
+    ##  5 Partly-confined, cobble-boulder, uniform                               95.8  
+    ##  6 Confined, boulder, high gradient, step-pool/cascade                    47.3  
+    ##  7 Confined, boulder-bedrock, low-gradient step-pool                      36.4  
+    ##  8 Confined, boulder-bedrock, uniform                                     26.3  
+    ##  9 <NA>                                                                    0.496
+    ## 10 Partly-confined, high width-to-depth ratio, gravel-cobble, riffle-p…    0.189
 
 ``` r
 # plot
@@ -469,6 +471,7 @@ elevation_ranges |>
 | Butte Creek             |             29.68 |            320.47 |               27.81 |              320.47 |          29.68 |         320.47 |
 | Calaveras River         |             38.58 |            164.74 |               38.58 |              164.74 |          38.58 |         164.74 |
 | Clear Creek             |            128.46 |            294.58 |              128.46 |              409.98 |         128.46 |         409.98 |
+| Cosumnes River          |             29.44 |            109.50 |                2.52 |              109.50 |          29.44 |         109.50 |
 | Cottonwood Creek        |            105.79 |            779.62 |              105.79 |              796.53 |         105.79 |         796.53 |
 | Cow Creek               |            113.55 |           1434.78 |              113.55 |             1434.78 |         113.55 |        1434.78 |
 | Deer Creek              |             51.80 |           1092.27 |               51.29 |             1092.27 |          51.80 |        1092.27 |
@@ -476,20 +479,17 @@ elevation_ranges |>
 | Feather River           |             24.18 |             44.65 |                7.68 |             1499.90 |          24.18 |        1499.90 |
 | Merced River            |             30.39 |             91.45 |               17.44 |              623.74 |          30.39 |         623.74 |
 | Mill Creek              |             60.95 |           1669.79 |               60.95 |             1669.79 |          60.95 |        1669.79 |
-| Mokelumne River         |             15.97 |             30.64 |                5.36 |              364.36 |          15.97 |         364.36 |
+| Mokelumne River         |             15.97 |             30.64 |                0.00 |              364.36 |          15.97 |         364.36 |
 | Paynes Creek            |             79.80 |            974.41 |               79.80 |              974.41 |          79.80 |         974.41 |
-| Sacramento River        |             34.25 |            153.34 |                5.67 |              311.23 |          34.25 |         311.23 |
-| San Joaquin River       |             29.44 |            109.50 |                3.80 |              109.50 |          29.44 |         109.50 |
+| Sacramento River        |             34.25 |            153.34 |               -0.24 |              311.23 |          34.25 |         311.23 |
 | Stanislaus River        |             23.23 |            102.71 |                6.50 |             1063.44 |          23.23 |        1063.44 |
 | Stony Creek             |             44.73 |            113.73 |               44.73 |              310.07 |          44.73 |         310.07 |
 | Thomes Creek            |             56.62 |            486.66 |               56.62 |              516.93 |          56.62 |         516.93 |
 | Tuolumne River          |             22.57 |             80.73 |                7.33 |              854.89 |          22.57 |         854.89 |
 | Yuba River              |             18.37 |             81.69 |               14.53 |             1569.78 |          18.37 |        1569.78 |
 | McCloud River           |                NA |                NA |              325.42 |              924.43 |         325.42 |         924.43 |
-| North Delta             |                NA |                NA |               -0.24 |                5.67 |             NA |           5.67 |
 | Pit River               |                NA |                NA |              325.42 |             1012.90 |         325.42 |        1012.90 |
-| South Delta             |                NA |                NA |                0.00 |                6.50 |             NA |           6.50 |
-| Sutter Bypass           |                NA |                NA |                7.68 |                8.34 |             NA |           8.34 |
+| San Joaquin River       |                NA |                NA |                0.00 |               49.72 |             NA |          49.72 |
 | Upper Sacramento River  |                NA |                NA |              311.23 |             1648.93 |         311.23 |        1648.93 |
 | Upper San Joaquin River |                NA |                NA |               49.72 |             1016.16 |          49.72 |        1016.16 |
 
@@ -959,6 +959,11 @@ spawning_flowlines_final |>
 ```
 
 ![](spawning-expl_files/figure-gfm/step-2-combined-filter-1.png)<!-- -->
+
+## Additional criteria to explore
+
+- Intersection of gradient and confinement: Excluding narrow steep
+  bedrock streams
 
 ## Export result
 

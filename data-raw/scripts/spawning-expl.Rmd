@@ -672,6 +672,10 @@ spawning_flowlines_final |>
                                 "Potential Spawning Habitat - Most Likely Spawning Gravels" = "mediumvioletred"))
 ```
 
+## Additional criteria to explore
+
+* Intersection of gradient and confinement: Excluding narrow steep bedrock streams 
+
 ## Export result
 
 ```{r}

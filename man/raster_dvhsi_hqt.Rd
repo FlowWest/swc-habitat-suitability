@@ -15,6 +15,5 @@ raster_dvhsi_hqt(d, v)
 A \code{terra} raster layer of habitat suitability index values between 0 and 1.
 }
 \description{
-The function can be applied simply as raster_dvhsi_hqt(d, v)
-But performance is improved using terra::lapp(c(d, v), raster_dvhsi_hqt)
+Raster Habitat Suitability Index (HSI) function: HQT
 }

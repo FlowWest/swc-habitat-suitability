@@ -4,12 +4,14 @@
 \alias{vector_dvhsi_spawning}
 \title{Vector Habitat Suitability Index (HSI) function: Fall-Run Chinook Spawning}
 \usage{
-vector_dvhsi_spawning(d, v)
+vector_dvhsi_spawning(d, v, run = "max")
 }
 \arguments{
 \item{d}{a vector of depths in feet}
 
 \item{v}{a vector of velocities in feet per second}
+
+\item{run}{identifier for the salmon run of interest (one of \code{fall}, \code{late_fall}, \code{winter}, \code{spring}) or \code{max} to use the outer envelope of all runs. Defaults to \code{max}.}
 }
 \value{
 A vector of habitat suitability index values between 0 and 1.

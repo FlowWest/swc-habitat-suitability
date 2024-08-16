@@ -81,14 +81,27 @@ vector_dvhsi_lyr <- function(d, v) {
 #'
 #' @param d a vector of depths in feet
 #' @param v a vector of velocities in feet per second
+#' @param run identifier for the salmon run of interest (one of `fall`, `late_fall`, `winter`, `spring`) or `max` to use the outer envelope of all runs. Defaults to `max`.
 #'
 #' @return A vector of habitat suitability index values between 0 and 1.
 #' @md
 #' @examples
 #'
 #' @export
-vector_dvhsi_spawning <- function(d, v) {
-  if_else(d>0 & d<=7.9 & v>0 & v<=5.9, 1, 0)
+vector_dvhsi_spawning <- function(d, v, run="max") {
+  # if_else(d>0 & d<=6.56 & v>0 & v<=5.9, 1, 0)
+
+  fct_dep <-
+    case_when(run == "winter" ~ if_else(d>1 & d<=6.56, 1, 0),
+              TRUE ~            if_else(d>0 & d<=6.56, 1, 0))
+
+  fct_vel <-
+    approx(x = habistat::suitability_hsi_vel_spawning[[run]]$velocity,
+           y = habistat::suitability_hsi_vel_spawning[[run]]$hsi,
+           xout = v, yleft = 0, yright = 0)$y
+
+  return(fct_dep * fct_vel)
+
 }
 
 #' Calculate HSI for each row of SRH-2D results

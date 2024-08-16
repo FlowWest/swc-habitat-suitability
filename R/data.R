@@ -57,3 +57,7 @@
 #' @name streamgage_duration_rating_curves
 #' @title CDEC Mainstem Streamgage Duration Rating Curves
 "streamgage_duration_rating_curves"
+
+#' @name suitability_hsi_vel_spawning
+#' @title Velocity suitability criteria for spawning by run
+"suitability_hsi_vel_spawning"

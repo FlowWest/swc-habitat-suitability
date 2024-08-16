@@ -142,32 +142,51 @@ usethis::use_data(spawning_depth_hsi, overwrite = T)
 ```
 
 ```{r, echo=FALSE}
-# depth (ranges)
-spawning_dep_hsi <- spawning_hsc_dep |> 
-  rename(run = race,
-         depth = units_si, 
-         hsi = max_suit_index) |> 
-  mutate(run = janitor::make_clean_names(run, allow_dupes=T),
-         hsi = round(hsi, 1)) 
-
-knitr::kable(spawning_dep_hsi, caption = "Depth HSI - for each run, the depth HSI range") |> 
-  kableExtra::kable_styling(position = "left")
-
-usethis::use_data(spawning_dep_hsi, overwrite = T)
+# # depth (ranges)
+# spawning_dep_hsi <- spawning_hsc_dep |> 
+#   rename(run = race,
+#          depth = units_si, 
+#          hsi = max_suit_index) |> 
+#   mutate(run = janitor::make_clean_names(run, allow_dupes=T),
+#          hsi = round(hsi, 1)) 
+# 
+# knitr::kable(spawning_dep_hsi, caption = "Depth HSI - for each run, the depth HSI range") |> 
+#   kableExtra::kable_styling(position = "left")
+# 
+# usethis::use_data(spawning_dep_hsi, overwrite = T)
 ```
 
 ```{r, echo = FALSE}
 # velocity (ranges)
-spawning_vel_hsi <- spawning_hsc_vel |> 
+spawning_vel_hsi <- 
+  spawning_hsc_vel |> 
   rename(run = race,
          velocity = units_si, # m/s
-         hsi = max_suit_index) |> 
-  mutate(run = janitor::make_clean_names(run, allow_dupes=T),
-         hsi = round(hsi, 1)) |> 
-  arrange(run)
+         hsi = max_suit_index) |>
+  mutate(run = janitor::make_clean_names(run, allow_dupes=T)) |>
+  group_by(run) |>
+  complete(velocity = sort(unique(spawning_hsc_vel$units_si))) |>
+  arrange(run, velocity) |>
+  mutate(hsi = zoo::na.approx(hsi, x = velocity, na.rm=F)) |> #, rule=2)) |>
+  mutate(hsi = coalesce(hsi, 0)) |>
+  mutate(hsi = round(hsi, 1)) %>%
+  bind_rows(. |> 
+              group_by(velocity) |> 
+              summarize(hsi = max(hsi), 
+                        run = "max") |>
+              ungroup())
 
 knitr::kable(spawning_vel_hsi, caption = "Velocity HSI - for each run, the velocity HSI range") |> 
   kableExtra::kable_styling(position = "left")
 
-usethis::use_data(spawning_vel_hsi, overwrite = T)
+# usethis::use_data(spawning_vel_hsi, overwrite = T)
+
+suitability_hsi_vel_spawning <-
+  spawning_vel_hsi |>
+  ungroup() |>
+  nest(.by = run) |>
+  deframe() 
+
+usethis::use_data(suitability_hsi_vel_spawning, overwrite = T)
+# use like: suitability_hsi_vel_spawning$winter
 ```

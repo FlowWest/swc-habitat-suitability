@@ -23,8 +23,6 @@ raster_prep_grid <- function(filenames){
 #' Raster Habitat Suitability Index (HSI) function: HQT
 #'
 #' @description
-#' The function can be applied simply as raster_dvhsi_hqt(d, v)
-#' But performance is improved using terra::lapp(c(d, v), raster_dvhsi_hqt)
 #'
 #' @param d a `terra` raster layer for depth in feet
 #' @param v a `terra` raster layer for velocity in feet per second
@@ -35,13 +33,14 @@ raster_prep_grid <- function(filenames){
 #'
 #' @examples
 
-raster_dvhsi_hqt <- function(d, v) (d>1.0 & d<=3.28) & (v>0 & v<=1.5)
+raster_dvhsi_hqt <- function(d, v) {
+  #(d>1.0 & d<=3.28) & (v>0 & v<=1.5)
+  terra::lapp(c(d, v), raster_dvhsi_hqt)
+}
 
 #' Raster Habitat Suitability Index (HSI) function: LYR
 #'
 #' @description
-#' The function can be applied simply as raster_dvhsi_lyr(d, v)
-#' But performance is improved using terra::lapp(c(d, v), raster_dvhsi_lyr)
 #'
 #' @param d a `terra` raster layer for depth in feet
 #' @param v a `terra` raster layer for velocity in feet per second
@@ -51,13 +50,14 @@ raster_dvhsi_hqt <- function(d, v) (d>1.0 & d<=3.28) & (v>0 & v<=1.5)
 #' @export
 #'
 #' @examples
-raster_dvhsi_lyr <- function(d, v) (d>0.5 & d<=5.2) & (v>0 & v<=4.0)
+raster_dvhsi_lyr <- function(d, v) {
+  #(d>0.5 & d<=5.2) & (v>0 & v<=4.0)
+  terra::lapp(c(d, v), raster_dvhsi_lyr)
+}
 
 #' Raster Habitat Suitability Index (HSI) function: Fall-Run Chinook Spawning
 #'
 #' @description
-#' The function can be applied simply as raster_dvhsi_lyr(d, v)
-#' But performance is improved using terra::lapp(c(d, v), raster_dvhsi_lyr)
 #'
 #' @param d a `terra` raster layer for depth in feet
 #' @param v a `terra` raster layer for velocity in feet per second
@@ -67,7 +67,9 @@ raster_dvhsi_lyr <- function(d, v) (d>0.5 & d<=5.2) & (v>0 & v<=4.0)
 #' @export
 #'
 #' @examples
-raster_dvhsi_spawning <- function(d, v) (d>0 & d<=7.9) & (v>0 & v<=5.9)
+raster_dvhsi_spawning <- function(d, v, run="max") {
+  terra::lapp(c(d, v), function(d, v) vector_dvhsi_spawning(d, v, run=run))
+}
 
 #' Calculate HSI based on HEC-RAS 2D rasters
 #'
@@ -158,8 +160,8 @@ raster_summarize_hsi <- function(rasters,
     ext <- (d > 0)
 
     message(paste(flow, " - apply habitat suitability function"))
-    #hsi <- hsi_func(d, v)
-    hsi <- terra::lapp(c(d, v), hsi_func)
+    hsi <- hsi_func(d, v)
+    #hsi <- terra::lapp(c(d, v), hsi_func)
 
     if(!is.null(msk)) {
       message(paste(flow, " - apply mask"))

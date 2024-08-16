@@ -4,7 +4,7 @@
 \alias{raster_dvhsi_spawning}
 \title{Raster Habitat Suitability Index (HSI) function: Fall-Run Chinook Spawning}
 \usage{
-raster_dvhsi_spawning(d, v)
+raster_dvhsi_spawning(d, v, run = "max")
 }
 \arguments{
 \item{d}{a \code{terra} raster layer for depth in feet}
@@ -15,6 +15,5 @@ raster_dvhsi_spawning(d, v)
 A \code{terra} raster layer of habitat suitability index values between 0 and 1.
 }
 \description{
-The function can be applied simply as raster_dvhsi_lyr(d, v)
-But performance is improved using terra::lapp(c(d, v), raster_dvhsi_lyr)
+Raster Habitat Suitability Index (HSI) function: Fall-Run Chinook Spawning
 }

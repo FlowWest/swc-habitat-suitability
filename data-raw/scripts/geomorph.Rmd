@@ -150,9 +150,12 @@ geomorph_attr |>
   ggplot() +
   geom_point(aes(x = slope*100, y = da_area_sq_km, color = geomorph_class)) + 
   scale_x_log10() + scale_y_log10() + annotation_logticks() +
-  theme(panel.grid.minor = element_blank()) 
+  theme(panel.grid.minor = element_blank()) +
+  scale_fill_brewer(type="qual", palette="Paired", aesthetics = c("fill", "color"))
 
 ```
+
+### version 1
 
 ```{r geomorph-fill-gaps, eval=FALSE, include=FALSE}
 geomorph_training_data <- 
@@ -261,6 +264,8 @@ geomorph_pred |> select(comid, starts_with("geomorph_")) |>  #select(comid, geom
   saveRDS(here::here("data-raw", "results", "attr_geomorph_class.Rds"))
 ```
 
+### version 2
+
 ```{r geomorph-fill-gaps-train}
 geomorph_training_data <- 
   geomorph_site_data |>
@@ -357,5 +362,106 @@ ggplot() +
   scale_fill_brewer(type="qual", palette="Paired", aesthetics = c("fill", "color"))
 
 geomorph_pred |> select(comid, starts_with("geomorph_")) |>  #select(comid, geomorph_class) |> 
+  saveRDS(here::here("data-raw", "results", "attr_geomorph_class.Rds"))
+```
+
+
+## UCD Geomorph Classes
+
+Guillon, H., Byrne, C.F., Lane, B.A., Sandoval-Solis, S., and Pasternack G.B. (2020). Machine Learning Predicts Reach-Scale Channel Types from Coarse-Scale Geospatial Data in a Large River Basin. J. of Water Resources Research. https://doi.org/10.1029/2019WR026691 [Article]
+
+Guillon, Hervé et al. (2020). Channel types predictions for the Sacramento River basin [Dataset]. Dryad. https://doi.org/10.25338/B8031W
+
+Sandoval-Solis, S., Lane, B.A., Pasternack G.B., Byrne, C.F. & Pasternack, G.B. Appendix F. Geomorphic Classification of California Rivers. in California Environmental Flows Framework. https://ceff.ucdavis.edu/sites/g/files/dgvnsk5566/files/media/documents/Appendix_F%20Geomorphic%20Classification%20of%20CA.pdf
+
+```{r}
+geomorph_nhd_ucd <- read_sf(here::here("data-raw", "source", "ucd_geomorph", "SAC_channel-types_predictions_v1.shp.zip")) |>
+  transmute(comid = COMID,
+            geomorph_class_num=str_replace(group, "SAC","") |> as.numeric(),
+            geomorph_class = factor(group, 
+              levels = paste0("SAC",sprintf("%02d", seq(1,10,1))),
+              labels = c("SAC01"  = "Unconfined, boulder-bedrock, bed undulating",
+              "SAC02"  = "Confined, boulder, high gradient, step-pool/cascade",
+              "SAC03"  = "Confined, boulder-bedrock, uniform",
+              "SAC04"  = "Confined, boulder-bedrock, low-gradient step-pool",
+              "SAC05"  = "Confined, gravel-cobble, uniform",
+              "SAC06"  = "Partly-confined, low width-to-depth ratio, gravel-cobble, riffle-pool",
+              "SAC07"  = "Partly-confined, cobble-boulder, uniform",
+              "SAC08"  = "Partly-confined, high width-to-depth ratio, gravel-cobble, riffle-pool",
+              "SAC09"  = "Unconfined, low width-to-depth ratio, gravel",
+              "SAC010" = "Unconfined, gravel-cobble, riffle-pool")))
+
+ggplot() + 
+  geom_sf(data = geomorph_nhd_ucd, aes(color = geomorph_class)) + 
+  geom_sf(data = geomorph_site_data, aes(fill = geomorph_class), shape=21) + 
+  scale_fill_brewer(type="qual", palette="Paired", aesthetics = c("fill", "color"))
+```
+
+```{r eval=FALSE, include=FALSE}
+geomorph_training_data_v2 <- 
+  geomorph_nhd_ucd |>
+  left_join(flowline_attributes |> select(-starts_with("geomorph_")), by=join_by(comid)) |>
+  select(comid, geomorph_class, geomorph_class_num,
+         da_area_sq_km, slope, bf_depth_m, bf_width_m, bf_w_d_ratio,  
+         mtpi30_min, loc_k_erodibility, sinuosity, da_elev_mean, da_ppt_mean_mm, 
+         da_elev_min, da_elev_max, da_elev_rel, hqt_gradient_class, hyd_cls) |>
+  drop_na() |>
+  st_drop_geometry()
+
+geomorph_fit_v2 <- 
+  workflow() |>
+  add_recipe(geomorph_rec) |>
+  add_model(geomorph_spec) |>
+  fit(data=geomorph_training_data_v2)
+
+geomorph_pred_v2 <- 
+  geomorph_prediction_data |>
+  mutate(geomorph_class = predict(geomorph_fit_v2, geomorph_prediction_data)[[".pred_class"]]) |>
+  mutate(geomorph_confined = str_split_i(geomorph_class, ", ", 1) |> as_factor(),
+         geomorph_uniform = str_detect(geomorph_class, "uniform"),
+         geomorph_steppool = str_detect(geomorph_class, "step-pool"), 
+         geomorph_riffles = str_detect(geomorph_class, "riffle"),
+         geomorph_gravel = str_detect(geomorph_class, "gravel"),
+         geomorph_spawning = (geomorph_riffles | geomorph_steppool))
+
+ggplot() + 
+  geom_sf(data = inner_join(flowlines, geomorph_pred_v2), aes(color = geomorph_class)) + 
+  geom_sf(data = geomorph_site_data, aes(fill = geomorph_class), shape=21) + 
+  scale_fill_brewer(type="qual", palette="Paired", aesthetics = c("fill", "color"))
+```
+
+Combine the official UCD dataset for Sac with our rougher classification for San Joaquin
+
+```{r}
+geomorph_final <- 
+  geomorph_pred |>
+  #geomorph_pred_v2 |>
+  select(comid, geomorph_class_pred = geomorph_class) |>
+  left_join(geomorph_nhd_ucd |>
+              st_drop_geometry() |>
+              select(comid, geomorph_class_ucd = geomorph_class), by=join_by(comid)) |>
+  transmute(comid,
+            geomorph_class = coalesce(geomorph_class_ucd, geomorph_class_pred)) |>
+  mutate(geomorph_confined = str_split_i(geomorph_class, ", ", 1) |> as_factor(),
+         geomorph_uniform = str_detect(geomorph_class, "uniform"),
+         geomorph_steppool = str_detect(geomorph_class, "step-pool"), 
+         geomorph_riffles = str_detect(geomorph_class, "riffle"),
+         geomorph_gravel = str_detect(geomorph_class, "gravel"),
+         geomorph_spawning = (geomorph_riffles | geomorph_steppool))
+
+# # validation matrix
+# geomorph_final |>
+#   group_by(geomorph_class_ucd, geomorph_class_pred) |>
+#   tally() |> 
+#   mutate(n=coalesce(n,0)) |>
+#   spread(geomorph_class_ucd, n) |>
+#   knitr::kable()
+
+ggplot() + 
+  geom_sf(data = inner_join(flowlines, geomorph_final), aes(color = geomorph_class)) + 
+  geom_sf(data = geomorph_site_data, aes(fill = geomorph_class), shape=21) + 
+  scale_fill_brewer(type="qual", palette="Paired", aesthetics = c("fill", "color"))
+
+geomorph_final |> select(comid, starts_with("geomorph_")) |>  #select(comid, geomorph_class) |> 
   saveRDS(here::here("data-raw", "results", "attr_geomorph_class.Rds"))
 ```

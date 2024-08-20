@@ -105,7 +105,7 @@ if(!file.exists(outpath)) {
 
 deer_dir <- here::here("data-raw", "temp", "deer-creek")
 dir.create(deer_dir, recursive=T)
-drive_file_by_id("1rmMw6PXJGS0-ui52eaotABCSlJsZOzvr") |>
+drive_file_by_id("1rmMw6PXJGS0-ui52eaotABCSlJsZOzvr", dir=deer_dir) |>
   archive::archive_extract(deer_dir)
 
 deer_filenames <-
@@ -186,6 +186,7 @@ outpath <- here::here("data-raw", "results", "fsa_deer_spawning.Rds")
 if(!file.exists(outpath)) {
 
   deer_result_spawning <- deer_rast |>
+    #list(depth=deer_rast$depth$`10000`, velocity=deer_rast$velocity$`10000`) |>
     raster_summarize_hsi(deer_groups, .group_var = comid, hsi_func = raster_dvhsi_spawning) |>
     suitability_postprocess(deer_groups, .group_var = comid)
 

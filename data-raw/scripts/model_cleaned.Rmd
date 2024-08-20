@@ -176,6 +176,7 @@ model_data <- habistat::flowline_attr |>
   # EXPAND TO COVER EACH COMBINATION OF SPECS AND MODEL TYPES ------------------
   expand_grid("model_variant" = c("SD0", "SD1", "SD2", "SN0", "SN1", "SN2"),
               "model_type" = c("LM", "RF")) |>
+              #"model_type" = c("LM", "RF", "ML")) |>
   mutate(model_name = substr(model_variant, 1, 2)) |> # SD or SN
   mutate(across(c(model_variant, model_type, model_name), as_factor)) # for storage efficiency
 ```
@@ -256,25 +257,97 @@ model_result <-
       step_normalize(all_numeric_predictors()) 
     }
   })) |>
-  # DEFINE MODEL SPECS: LINEAR OR RANDOM FOREST --------------------------------
-  mutate(model_spec = pmap(list(model_type, model_recipe), function(x, rec) {
-    if (x == "LM") {
-      linear_reg()
-    } else if(x == "RF") {
-      mtry <- floor((length(rec$var_info$variable) - 2) / 3)
-      rand_forest(mode = "regression", trees = 2^8, mtry = mtry, min_n = 10) |>
-        set_engine("ranger", num.threads = 4)
+#  # DEFINE MODEL SPECS: LINEAR OR RANDOM FOREST --------------------------------
+#  mutate(model_spec = pmap(list(model_type, model_recipe), function(x, rec) {
+#    if (x == "LM") {
+#      linear_reg()
+#    } else if(x == "RF") {
+#      mtry <- floor((length(rec$var_info$variable) - 2) / 3)
+#      rand_forest(mode = "regression", trees = 2^8, mtry = mtry, min_n = 10) |>
+#        set_engine("ranger", num.threads = 4)
+#    } else if(x == "ML") {
+#        mlp(mode = "regression",
+#            hidden_units = c(8, 8, 8), # number of nodes in each hidden layer
+#            penalty = 0.0, # L1 lasso penalty
+#            dropout = 0.1, # both penalty and dropout should not be used
+#            epochs = 100,
+#            learn_rate = 0.01,
+#            activation = "relu") |>
+#        set_engine("brulee")
+#    }
+#  })) |>
+    # FIT MODEL WITH VALIDATION: LINEAR OR RANDOM FOREST -----------------------
+  mutate(model_wkfl = pmap(list(training, model_recipe, model_type), 
+                               function(d, rec, typ) {
+    if (typ == "LM") {
+      
+      spec <- linear_reg()
+      
+      workflow() |>
+        add_recipe(rec) |>
+        add_model(spec) |>
+        add_case_weights(case_wt) 
+    
+    } else if(typ == "RF") {
+      
+      cv_grid <- expand_grid(mtry = c(floor((length(rec$var_info$variable) - 2) / 4),
+                                      floor((length(rec$var_info$variable) - 2) / 3),
+                                      floor((length(rec$var_info$variable) - 2) / 2)),
+                             trees = 2^c(7, 8, 9),
+                             min_n = 2^c(2, 3, 4))
+
+      spec <- rand_forest(mode = "regression", 
+                  trees = tune(), 
+                  mtry = tune(), 
+                  min_n = tune()) |>
+        set_engine("ranger", num.threads = 8)
+      
+      wkfl <- workflow() |>
+        add_recipe(rec) |>
+        add_model(spec) |>
+        add_case_weights(case_wt) 
+      
+      set.seed(47)
+      tngr <- wkfl |> tune_grid(
+        resamples = vfold_cv(d, v = 10),
+        grid = cv_grid)
+      
+      wkfl |>
+        finalize_workflow(tngr |> 
+                            select_best(metric = "rmse") |> 
+                            as.list())
+      
+#     } else if(x == "ML") {
+#         mlp(mode = "regression",
+#             hidden_units = c(8, 8, 8), # number of nodes in each hidden layer
+#             penalty = 0.0, # L1 lasso penalty
+#             dropout = 0.1, # both penalty and dropout should not be used
+#             epochs = 100,
+#             learn_rate = 0.01,
+#             activation = "relu") |>
+#         set_engine("brulee")
     }
   })) |>
-  # FIT MODELS -----------------------------------------------------------------
-  mutate(model_fit = pmap(list(training, model_recipe, model_spec), 
-                               function(d, rec, spec) {
-    workflow() |>
-      add_recipe(rec) |>
-      add_model(spec) |>
-      add_case_weights(case_wt) |>
-      fit(data = d)
-  })) |>
+  mutate(model_fit = pmap(list(training, model_wkfl, model_type), 
+                               function(d, wkfl, typ) {
+                                 wkfl |> fit(data = d)
+                               })) |>
+#  # FIT MODELS -----------------------------------------------------------------
+#  mutate(model_fit = pmap(list(training, model_recipe, model_spec, model_type), 
+#                               function(d, rec, spec, typ) {
+#    if(typ == "ML") {
+#      workflow() |>
+#        add_recipe(rec) |>
+#        add_model(spec) |>
+#        fit(data = d)
+#    } else {
+#      workflow() |>
+#        add_recipe(rec) |>
+#        add_model(spec) |>
+#        add_case_weights(case_wt) |>
+#        fit(data = d)
+#    }
+#  })) |>
   # PREDICT FOR TRAINING AND TESTING DATASET -----------------------------------
   mutate(model_res = pmap(list(td, model_name, model_fit),
                              function(d, x, m) {
@@ -502,6 +575,7 @@ mainstems_comid |>
 ```
 
 ```{r dsmhabitat-join, fig.width=6.5, fig.height=6.5, dpi=300}
+#remotes::install_github("CVPIA-OSC/DSMhabitat")
 watersheds <- mainstems |> pull(river) |> unique()
 watershed_name <- tolower(gsub(pattern = "-| ", replacement = "_", x = watersheds))
 watershed_rda_name <- paste(watershed_name, "floodplain", sep = "_")
@@ -717,4 +791,11 @@ wua_predicted_cv_mainstems |>
   theme(panel.grid.minor = element_blank(), legend.position = "top", legend.box="vertical", axis.text.x = element_text(angle=90)) 
 
 # ggsave(here::here("vignettes", "figures", "model_comparison.png"))
+```
+
+
+
+```{r}
+# install.packages(c("brulee", "torch"))
+
 ```

@@ -107,8 +107,14 @@ wua_hydraulic |> usethis::use_data(overwrite = TRUE)
 Limit to a specified flow range and interpolate gaps
 
 ```{r preprocess-interpolate}
-interp_flows <- seq(300,15000,100)
+#interp_flows <- seq(300,15000,100)
 #interp_flows <- c(oom_range(100, 10000), 15000)
+
+# log10 seq
+seq_log10 <- function(from, to, by = 0.1) {
+  10^(seq(log10(from), log10(to), by))
+}
+interp_flows <- seq_log10(100, 15000, 0.05)
 
 flow_to_suitable_area <- 
   wua_hydraulic |>
@@ -178,7 +184,7 @@ model_data <- habistat::flowline_attr |>
               "model_type" = c("LM", "RF")) |>
               #"model_type" = c("LM", "RF", "ML")) |>
   mutate(model_name = substr(model_variant, 1, 2)) |> # SD or SN
-  mutate(across(c(model_variant, model_type, model_name), as_factor)) # for storage efficiency
+  mutate(across(c(model_variant, model_type, model_name, model_hab), as_factor)) # for storage efficiency
 ```
 
 ## Define and Run Models
@@ -279,14 +285,15 @@ model_result <-
     # FIT MODEL WITH VALIDATION: LINEAR OR RANDOM FOREST -----------------------
   mutate(model_wkfl = pmap(list(training, model_recipe, model_type), 
                                function(d, rec, typ) {
+                               message(paste("cross-validation", typ))
     if (typ == "LM") {
       
       spec <- linear_reg()
       
-      workflow() |>
+      return(workflow() |>
         add_recipe(rec) |>
         add_model(spec) |>
-        add_case_weights(case_wt) 
+        add_case_weights(case_wt))
     
     } else if(typ == "RF") {
       
@@ -312,24 +319,51 @@ model_result <-
         resamples = vfold_cv(d, v = 10),
         grid = cv_grid)
       
-      wkfl |>
+      return(wkfl |>
         finalize_workflow(tngr |> 
                             select_best(metric = "rmse") |> 
-                            as.list())
+                            as.list()))
       
-#     } else if(x == "ML") {
-#         mlp(mode = "regression",
-#             hidden_units = c(8, 8, 8), # number of nodes in each hidden layer
-#             penalty = 0.0, # L1 lasso penalty
-#             dropout = 0.1, # both penalty and dropout should not be used
-#             epochs = 100,
-#             learn_rate = 0.01,
-#             activation = "relu") |>
-#         set_engine("brulee")
+     } else if(typ == "ML") {
+       
+      cv_grid <- tribble(~hidden_units,
+                          c(128, 128, 128), 
+                          c(128, 128),
+                          c(64, 64, 64), 
+                          c(64, 64),
+                          c(32, 32, 32),
+                          c(32, 32)) |>
+        expand_grid(dropout = c(0.1, 0.2, 0.3),
+                    learn_rate = c(0.01, 0.001))
+
+      spec <- mlp(mode = "regression",
+             hidden_units = tune(),
+             penalty = 0.0, # L1 lasso penalty
+             dropout = tune(),
+             epochs = 100,
+             learn_rate = tune(),
+             activation = "relu") |>
+         set_engine("brulee")
+      
+      wkfl <- workflow() |>
+        add_recipe(rec) |>
+        add_model(spec) 
+      
+      set.seed(47)
+      tngr <- wkfl |> tune_grid(
+        resamples = vfold_cv(d, v = 10),
+        grid = cv_grid)
+      
+      mlp_best <- tngr |> select_best(metric = "rmse") |> as.list()
+      mlp_best$hidden_units <- mlp_best$hidden_units |> unlist()
+      
+      return(wkfl |> finalize_workflow(mlp_best))
+      
     }
   })) |>
   mutate(model_fit = pmap(list(training, model_wkfl, model_type), 
                                function(d, wkfl, typ) {
+                               message(paste("model fit", typ))
                                  wkfl |> fit(data = d)
                                })) |>
 #  # FIT MODELS -----------------------------------------------------------------
@@ -351,8 +385,9 @@ model_result <-
   # PREDICT FOR TRAINING AND TESTING DATASET -----------------------------------
   mutate(model_res = pmap(list(td, model_name, model_fit),
                              function(d, x, m) {
+                               message(paste("prediction", x))
       if(x == "SD") { 
-        d |>
+        d |>s
         transmute(comid, flow_cfs, training_sample,
                   # actuals
                   ihs_wua_per_lf,
@@ -373,7 +408,9 @@ model_result <-
                   wua_per_lf_pred = wua_per_lf_norm_pred * da_scalar_maf)
       }}))
   
-model_result
+# save this very large object so that it can be reloaded where needed
+# this contains all the training/testing datasets, all the trained models, etc.
+model_result |> saveRDS(here::here("data-raw", "results", "model_result.Rds"))
 ```
 
 ## Validation
@@ -501,12 +538,12 @@ flowlines_pred |>
 
 model_predicted_filtered <- 
   model_predicted |> 
+  filter((model_type == "RF") & (model_variant %in% c("SD2", "SN2")) & (model_hab == "rearing")) |>
   filter(comid %in% flowlines_pred$comid) |>
   left_join(habistat::flowline_attr |>
               select(comid, river_cvpia, starts_with("watershed_"), reach_length_ft), by=join_by(comid)) |>
   # select just the desired rows and columns for saving and reporting
   # pick the best variant of SD and SN models
-  filter((model_type == "RF") & (model_variant %in% c("SD2", "SN2")) & (model_hab == "rearing")) |>
   transmute(comid, model_bfc, model_name, flow_cfs, wua_per_lf_pred, 
          river_cvpia = as.factor(river_cvpia),
          watershed_level_3 = as.factor(watershed_level_3),
@@ -535,12 +572,12 @@ flowlines_pred_spawning |>
 
 model_predicted_spawning <- 
   model_predicted |> 
+  filter((model_type == "RF") & (model_variant %in% c("SD2", "SN2")) & (model_hab == "spawning")) |>
   filter(comid %in% flowlines_pred_spawning$comid) |>
   left_join(habistat::flowline_attr |>
               select(comid, river_cvpia, starts_with("watershed_"), reach_length_ft), by=join_by(comid)) |>
   # select just the desired rows and columns for saving and reporting
   # pick the best variant of SD and SN models
-  filter((model_type == "RF") & (model_variant %in% c("SD2", "SN2")) & (model_hab == "spawning")) |>
   transmute(comid, model_bfc, model_name, flow_cfs, wua_per_lf_pred, 
          river_cvpia = as.factor(river_cvpia),
          watershed_level_3 = as.factor(watershed_level_3),
@@ -793,9 +830,78 @@ wua_predicted_cv_mainstems |>
 # ggsave(here::here("vignettes", "figures", "model_comparison.png"))
 ```
 
+## Figures for slides
+
+```{r}
+# flowlines_pred <-
+#   habistat::flowline_geom_proj |>
+#   left_join(habistat::flowline_attr, by=join_by(comid)) |>
+#   # filter for just the Sacramento and San Joaquin Basins
+#   filter(watershed_level_1 %in% c("Sacramento River", "San Joaquin River")) |>
+#   # filter for just known extant spawning habitat
+#   #filter((range_pisces == "extant") | (comid %in% ms$comid)) |>
+#   # filter based on size of the stream
+#   # filter((stream_order >= 4) | (da_area_sq_km >= 100) | (comid %in% habistat::cv_mainstems$comid)) #|>
+#   filter((((stream_order >= 4) & (da_area_sq_km > 1)) | ((stream_order >= 3) & (da_area_sq_km >= 50))) | 
+#            (comid %in% habistat::cv_mainstems$comid))
+# 
+# spawning_context <- readRDS(here::here("data-raw", "results", "spawning_context.Rds"))
+# 
+# flowlines_pred_spawning <- 
+#   habistat::flowline_geom_proj |>
+#   left_join(spawning_context, by=join_by(comid)) |>
+#   filter(spawning_geographic_context)
+
+scale_color_flowlines <- c("Mainstems" = "darkblue",
+                           "Tributaries" = "cornflowerblue")
+                           #"Not Included"= "darkgray")
+  
+plt_rearing <- 
+  ggplot() + 
+  geom_sf(data=habistat::cv_watersheds, fill = "lightgray", color = NA) + #, color = "darkgray") + 
+  geom_sf(data=flowlines_pred, aes(color = "Tributaries")) +
+  geom_sf(data=habistat::cv_mainstems, aes(color="Mainstems")) +
+  theme(axis.text = element_blank()) +
+  ggtitle("Rearing") +
+  scale_color_manual(name = "Flowline Type",
+                     values = scale_color_flowlines,
+                     limits = names(scale_color_flowlines))
+
+plt_spawning <- 
+  ggplot() + 
+  #geom_sf(data=flowlines_pred, aes(color="Not Included")) +
+  geom_sf(data=habistat::cv_watersheds, fill = "lightgray", color = NA) + #, color = "darkgray") + 
+  geom_sf(data=flowlines_pred_spawning, aes(color = "Tributaries")) +
+  geom_sf(data=habistat::cv_mainstems |> filter(comid %in% flowlines_pred_spawning$comid), aes(color="Mainstems")) +
+  theme(axis.text = element_blank()) +
+  ggtitle("Spawning") +
+  scale_color_manual(name = "Flowline Type",
+                     values = scale_color_flowlines,
+                     limits = names(scale_color_flowlines))
+
+plt_rearing + plt_spawning + 
+  plot_layout(guides = "collect", axes = "collect")
+```
+
+## test
 
 
 ```{r}
-# install.packages(c("brulee", "torch"))
+inner_join(habistat::wua_hydraulic |> filter(habitat=="rearing" & !bfc) |> select(dataset, comid, flow_cfs, wua_per_lf),
+           habistat::wua_predicted |> filter(model_name=="SD" & !model_bfc & habitat=="rearing") |> select(comid, flow_cfs, wua_per_lf_pred),
+           by=join_by(comid, flow_cfs)) |>
+  ggplot() + geom_point(aes(x = wua_per_lf, y = wua_per_lf_pred, color = flow_cfs, group = comid)) + 
+  scale_x_log10(breaks=c(1, 10, 100, 1000)) + 
+  scale_y_log10(breaks=c(1, 10, 100, 1000)) + 
+  facet_wrap(~dataset) + 
+  coord_fixed() + annotation_logticks() +
+  theme(panel.grid.minor = element_blank()) + 
+  xlab("Actual WUA/LF") + ylab("Predicted WUA/LF") +
+  geom_abline(slope = 1, intercept = 0)
 
+v1 <- readRDS(here::here("data-raw", "temp", "backup20240822", "model_predicted_spawning.Rds"))
+v2 <- readRDS(here::here("data-raw", "results", "model_predicted_spawning.Rds"))
+inner_join(v1 |> filter(model_name=="SD") |> select(comid, flow_cfs, wua_per_lf_pred1 = wua_per_lf_pred),
+           v2 |> filter(model_name=="SD") |> select(comid, flow_cfs, wua_per_lf_pred2 = wua_per_lf_pred)) |>
+  inner_join(wua_hydraulic_interp |> filter(habitat=="spawning") |> select(comid, flow_cfs, wua_per_lf))
 ```

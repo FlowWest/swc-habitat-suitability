@@ -1,4 +1,8 @@
 # TODO Duration gages should only be an option on mainstems
+# Data not updating?
+# (1) Check that the latest source hydraulic Rds outputs are present
+# (2) Run model_cleaned.Rmd to re-export wua_hydraulic and wua_hydraulic_interp
+# (3) Rebuild package and restart R session
 
 function(input, output, session){
 
@@ -611,13 +615,15 @@ selected_watershed <- reactiveValues(object_id = NA,
         filter(habitat == input$habitat_type) |>
         transmute(flow_cfs, selected_wua = !!sym(input$wua_var)) |>
         glimpse()
-    } else {
+    } else if (most_recent_map_click$type == "watershed") {
       fsa <-
         predictions_watershed |>
         filter(watershed_level_3 == selected_watershed$watershed_name) |>
         filter(habitat == input$habitat_type) |>
         transmute(flow_cfs, selected_wua = !!sym(input$wua_var)) |>
         glimpse()
+    } else {
+      fsa <- tibble()
     }
 
     if (nrow(streamgage_drc()) > 0) {

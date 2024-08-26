@@ -28,9 +28,9 @@ predictions <- get_data(wua_predicted, package = "habistat") |>
               values_from = wua_per_lf_pred,
               names_glue = c("wua_per_lf_pred_{model_id}")) |>
   left_join(get_data(wua_hydraulic_interp, package = "habistat") |>
-              filter(!bfc) |> # only showing the actuals with prior bfc removed for now
-              select(comid, flow_cfs, wua_per_lf_actual = wua_per_lf),
-            by = join_by(comid, flow_cfs)) |>
+              filter((habitat=="rearing" & !bfc) | (habitat=="spawning")) |> # only showing the actuals with prior bfc removed for now
+              select(habitat, comid, flow_cfs, wua_per_lf_actual = wua_per_lf),
+            by = join_by(habitat, comid, flow_cfs)) |>
   left_join(get_data(flowline_attr, package = "habistat") |>
               transmute(comid,
                         chan_width_ft = chan_width_m/0.3048,
@@ -61,8 +61,7 @@ gc() # garbage collect after loading from habistat package
 
 watersheds <- get_data(cv_watersheds, package = "habistat") |>
   group_by(watershed_level_1, watershed_level_2, watershed_level_3) |> #, range_pisces) |>
-  summarize() |>
-  ungroup() |>
+  summarize(.groups = "drop") |>
   st_union(by_feature=T) |>
   st_transform("+proj=longlat +datum=NAD83") |>
   st_set_crs("+proj=longlat +datum=WGS84") |> # for display purposes only
@@ -77,8 +76,7 @@ watersheds <- get_data(cv_watersheds, package = "habistat") |>
 
 mainstems <- get_data(cv_mainstems, package = "habistat") |>
   group_by(river_cvpia) |> #, range_pisces) |>
-  summarize() |>
-  ungroup() |>
+  summarize(.groups = "drop") |>
   st_union(by_feature=T) |>
   st_transform("+proj=longlat +datum=NAD83") |>
   st_set_crs("+proj=longlat +datum=WGS84") |> # for display purposes only

@@ -56,3 +56,7 @@ data-raw/git_ignore/
 
 # also don't sync the main prediction dataset which is too big
 data-raw/results/model_predicted.Rds
+
+data-raw/source/gages_gagegap/
+
+*BACKUP.rda

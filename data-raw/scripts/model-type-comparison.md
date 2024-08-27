@@ -253,10 +253,10 @@ habistat::flowline_geom_proj |>
   facet_grid(rows = vars(model_name), cols = vars(flow_cfs), switch = "both") + 
   geom_sf(aes(color = wua_per_lf_pred)) + 
   scale_color_gradientn(name = "WUA per LF",
-                        limits = c(0, 300),
-                        breaks = c(0, 1, 3, 10, 30, 100, 300), 
-                        trans = habistat::trans_semiIHS,
-                        values = scales::rescale(habistat::semiIHS(c(0, 1, 3, 10, 30, 100, 300))),
+                        limits = c(0, 120),
+                        breaks = c(0, 20, 40, 60, 80, 100, 120), 
+                        #trans = habistat::trans_semiIHS,
+                        #values = scales::rescale(habistat::semiIHS(c(0, 1, 3, 10, 30, 100, 300))),
                         colors = c("darkblue", "turquoise", "gold", "darkorange", "darkred", "violetred4", "mediumvioletred")) + 
   theme(legend.key.height = unit(48, "pt"),
         axis.text = element_blank()) + 

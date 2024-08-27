@@ -57,12 +57,12 @@ function(input, output, session){
       mutate(object_label = paste0("<strong>", comid, " ", gnis_name, "</strong>", "<br />",
                                    "Scale-Dependent Model: ",
                                    round(wua_per_lf_pred_SD,2), " ft2/ft", "<br />",
-                                   "Scale-Dependent Model (post-model baseflow removal): ",
-                                   round(wua_per_lf_pred_SD_ph_bfc_rm,2), " ft2/ft", "<br />",
+                                   #"Scale-Dependent Model (post-model baseflow removal): ",
+                                   #round(wua_per_lf_pred_SD_ph_bfc_rm,2), " ft2/ft", "<br />",
                                    "Scale-Normalized Model: ",
                                    round(wua_per_lf_pred_SN,2), " ft2/ft", "<br />",
-                                   "Scale-Normalized Model (post-model baseflow removal): ",
-                                   round(wua_per_lf_pred_SN_ph_bfc_rm,2), " ft2/ft", "<br />",
+                                   #"Scale-Normalized Model (post-model baseflow removal): ",
+                                   #round(wua_per_lf_pred_SN_ph_bfc_rm,2), " ft2/ft", "<br />",
                                    "Actual: ", round(wua_per_lf_actual,2), " ft2/ft")) |>
       #filter(watershed_name == selected_watershed_name()) |>
       glimpse()
@@ -77,12 +77,12 @@ function(input, output, session){
       mutate(object_label = paste0("<strong>", river_cvpia, "</strong>", "<br />",
                                    "Scale-Dependent Model: ",
                                    round(wua_per_lf_pred_SD,2), " ft2/ft", "<br />",
-                                   "Scale-Dependent Model (post-model baseflow removal): ",
-                                   round(wua_per_lf_pred_SD_ph_bfc_rm,2), " ft2/ft", "<br />",
+                                   #"Scale-Dependent Model (post-model baseflow removal): ",
+                                   #round(wua_per_lf_pred_SD_ph_bfc_rm,2), " ft2/ft", "<br />",
                                    "Scale-Normalized Model: ",
-                                   round(wua_per_lf_pred_SN,2), " ft2/ft", "<br />",
-                                   "Scale-Normalized Model (post-model baseflow removal): ",
-                                   round(wua_per_lf_pred_SN_ph_bfc_rm,2), " ft2/ft")) |>
+                                   round(wua_per_lf_pred_SN,2), " ft2/ft", "<br />")) |>
+                                   #"Scale-Normalized Model (post-model baseflow removal): ",
+                                   #round(wua_per_lf_pred_SN_ph_bfc_rm,2), " ft2/ft")
       #filter(watershed_name == selected_watershed_name()) |>
       glimpse()
   })
@@ -154,10 +154,8 @@ function(input, output, session){
     })
 
   output$fsa_plot <- renderPlot({
-    palette_linetypes <- c("Prior BFC Removal" = "solid",
-                           "No BFC Removal" = "solid",
-                           "Duration Analysis" = "dashed",
-                           "Post-Model BFC Removal" = "dotted")
+    palette_linetypes <- c("Unscaled" = "solid",
+                           "Duration Scaled" = "dashed")
     palette_colors <- c("Scale-Dependent" = "#6388b4",
                         "Scale-Normalized" = "#8cc2ca",
                         "Actual" = "#ffae34")
@@ -167,12 +165,15 @@ function(input, output, session){
       filter(comid == selected_point$comid) |>
       filter(habitat == input$habitat_type) |>
       ggplot(aes(x = flow_cfs)) +
-      geom_line(aes(y = wua_per_lf_actual, color="Actual", linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
-      geom_line(aes(y = wua_per_lf_pred_SD, color="Scale-Dependent", linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
+      geom_line(aes(y = wua_per_lf_actual, color="Actual", linetype = "Unscaled")) + #, linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
+      geom_line(aes(y = wua_per_lf_pred_SD, color="Scale-Dependent", linetype = "Unscaled")) + #, linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
       #geom_line(aes(y = wua_per_lf_pred_SD_ph_bfc_rm, color="Scale-Dependent", linetype="Post-Model BFC Removal")) +
-      geom_line(aes(y = wua_per_lf_pred_SN, color="Scale-Normalized", linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
+      geom_line(aes(y = wua_per_lf_pred_SN, color="Scale-Normalized", linetype = "Unscaled")) +#, linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
      # geom_line(aes(y = wua_per_lf_pred_SN_ph_bfc_rm, color="Scale-Normalized", linetype="Post-Model BFC Removal")) +
-      geom_line(data=duration_curve(), aes(x = q, y = durwua, linetype="Duration Analysis")) +
+      geom_line(data=duration_curve(), aes(x = q, y = durwua, linetype="Duration Scaled", color = case_when(
+        input$wua_var == "wua_per_lf_pred_SD" ~ "Scale-Dependent",
+        input$wua_var == "wua_per_lf_pred_SN" ~ "Scale-Normalized",
+        input$wua_var == "wua_per_lf_actual" ~ "Actual"))) +
       #geom_hline(aes(yintercept = chan_width_ft)) + #, linetype="Channel Width (ft)")) +
       #geom_vline(aes(xintercept = baseflow_cfs)) +
       #geom_text(aes(x = 1, y = chan_width_ft, label = chan_width_ft)) +
@@ -183,7 +184,7 @@ function(input, output, session){
       xlab("Flow (cfs)") + ylab("WUA (ft2) per linear ft") +
         scale_color_manual(name = "Model Type",
                            values = palette_colors) +
-      scale_linetype_manual(name = "Baseflow Method",
+      scale_linetype_manual(name = "Duration Analysis",
                             values = palette_linetypes)
     } else if (most_recent_map_click$type == "watershed") {
       #TODO: For watersheds, plot total acreage rather than WUA/LF
@@ -191,9 +192,9 @@ function(input, output, session){
         filter(watershed_level_3 == selected_watershed$watershed_name) |>
         filter(habitat == input$habitat_type) |>
         ggplot(aes(x = flow_cfs)) +
-        geom_line(aes(y = wua_per_lf_pred_SD, color="Scale-Dependent", linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
+        geom_line(aes(y = wua_per_lf_pred_SD, color="Scale-Dependent", linetype = "Unscaled")) + #, linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
         #geom_line(aes(y = wua_per_lf_pred_SD_ph_bfc_rm, color="Scale-Dependent", linetype="Post-Model BFC Removal")) +
-        geom_line(aes(y = wua_per_lf_pred_SN, color="Scale-Normalized", linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
+        geom_line(aes(y = wua_per_lf_pred_SN, color="Scale-Normalized", linetype = "Unscaled")) + #, linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
         #geom_line(aes(y = wua_per_lf_pred_SN_ph_bfc_rm, color="Scale-Normalized", linetype="Post-Model BFC Removal")) +
         #geom_line(data=duration_curve(), aes(x = q, y = durwua, linetype="Duration Analysis")) +
         scale_x_log10(labels = scales::label_comma()) + annotation_logticks(sides = "b") +
@@ -202,25 +203,28 @@ function(input, output, session){
         xlab("Flow (cfs)") + ylab("WUA (ft2) per linear ft") +
         scale_color_manual(name = "Model Type",
                            values = palette_colors) +
-        scale_linetype_manual(name = "Baseflow Method",
+        scale_linetype_manual(name = "Duration Analysis",
                               values = palette_linetypes)
     } else if (most_recent_map_click$type == "mainstem") {
       predictions_mainstem |>
         filter(river_cvpia == selected_mainstem$river_name) |>
         filter(habitat == input$habitat_type) |>
         ggplot(aes(x = flow_cfs)) +
-        geom_line(aes(y = wua_per_lf_pred_SD, color="Scale-Dependent", linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
+        geom_line(aes(y = wua_per_lf_pred_SD, color="Scale-Dependent", linetype="Unscaled")) + # linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
        # geom_line(aes(y = wua_per_lf_pred_SD_ph_bfc_rm, color="Scale-Dependent", linetype="Post-Model BFC Removal")) +
-        geom_line(aes(y = wua_per_lf_pred_SN, color="Scale-Normalized", linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
+        geom_line(aes(y = wua_per_lf_pred_SN, color="Scale-Normalized", linetype="Unscaled")) + # linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
         #geom_line(aes(y = wua_per_lf_pred_SN_ph_bfc_rm, color="Scale-Normalized", linetype="Post-Model BFC Removal")) +
-        geom_line(data=duration_curve(), aes(x = q, y = durwua, linetype="Duration Analysis")) +
+        geom_line(data=duration_curve(), aes(x = q, y = durwua, linetype="Duration Scaled", color = case_when(
+          input$wua_var == "wua_per_lf_pred_SD" ~ "Scale-Dependent",
+          input$wua_var == "wua_per_lf_pred_SN" ~ "Scale-Normalized",
+          input$wua_var == "wua_per_lf_actual" ~ "Actual"))) +
         scale_x_log10(labels = scales::label_comma()) + annotation_logticks(sides = "b") +
         scale_y_continuous(limits = c(0, NA)) +
         theme_minimal() + theme(panel.grid.minor = element_blank(), legend.position = "top", legend.box="vertical", text=element_text(size=21)) +
         xlab("Flow (cfs)") + ylab("WUA (ft2) per linear ft") +
         scale_color_manual(name = "Model Type",
                            values = palette_colors) +
-        scale_linetype_manual(name = "Baseflow Method",
+        scale_linetype_manual(name = "Duration Analysis",
                               values = palette_linetypes)
     } else {
       ggplot()

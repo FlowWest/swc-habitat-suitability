@@ -169,9 +169,9 @@ function(input, output, session){
       ggplot(aes(x = flow_cfs)) +
       geom_line(aes(y = wua_per_lf_actual, color="Actual", linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
       geom_line(aes(y = wua_per_lf_pred_SD, color="Scale-Dependent", linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
-      geom_line(aes(y = wua_per_lf_pred_SD_ph_bfc_rm, color="Scale-Dependent", linetype="Post-Model BFC Removal")) +
+      #geom_line(aes(y = wua_per_lf_pred_SD_ph_bfc_rm, color="Scale-Dependent", linetype="Post-Model BFC Removal")) +
       geom_line(aes(y = wua_per_lf_pred_SN, color="Scale-Normalized", linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
-      geom_line(aes(y = wua_per_lf_pred_SN_ph_bfc_rm, color="Scale-Normalized", linetype="Post-Model BFC Removal")) +
+     # geom_line(aes(y = wua_per_lf_pred_SN_ph_bfc_rm, color="Scale-Normalized", linetype="Post-Model BFC Removal")) +
       geom_line(data=duration_curve(), aes(x = q, y = durwua, linetype="Duration Analysis")) +
       #geom_hline(aes(yintercept = chan_width_ft)) + #, linetype="Channel Width (ft)")) +
       #geom_vline(aes(xintercept = baseflow_cfs)) +
@@ -179,7 +179,7 @@ function(input, output, session){
       scale_x_log10(labels = scales::label_comma()) + annotation_logticks(sides = "b") +
       scale_y_continuous(limits = c(0, NA)) +
       #scale_y_continuous(trans = ihs, labels = scales::label_comma(), limits = c(0, NA)) +
-      theme_minimal() + theme(panel.grid.minor = element_blank(), legend.position = "top", legend.box="vertical") +
+      theme_minimal() + theme(panel.grid.minor = element_blank(), legend.position = "top", legend.box="vertical", text=element_text(size=21)) +
       xlab("Flow (cfs)") + ylab("WUA (ft2) per linear ft") +
         scale_color_manual(name = "Model Type",
                            values = palette_colors) +
@@ -192,13 +192,13 @@ function(input, output, session){
         filter(habitat == input$habitat_type) |>
         ggplot(aes(x = flow_cfs)) +
         geom_line(aes(y = wua_per_lf_pred_SD, color="Scale-Dependent", linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
-        geom_line(aes(y = wua_per_lf_pred_SD_ph_bfc_rm, color="Scale-Dependent", linetype="Post-Model BFC Removal")) +
+        #geom_line(aes(y = wua_per_lf_pred_SD_ph_bfc_rm, color="Scale-Dependent", linetype="Post-Model BFC Removal")) +
         geom_line(aes(y = wua_per_lf_pred_SN, color="Scale-Normalized", linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
-        geom_line(aes(y = wua_per_lf_pred_SN_ph_bfc_rm, color="Scale-Normalized", linetype="Post-Model BFC Removal")) +
+        #geom_line(aes(y = wua_per_lf_pred_SN_ph_bfc_rm, color="Scale-Normalized", linetype="Post-Model BFC Removal")) +
         #geom_line(data=duration_curve(), aes(x = q, y = durwua, linetype="Duration Analysis")) +
         scale_x_log10(labels = scales::label_comma()) + annotation_logticks(sides = "b") +
         scale_y_continuous(limits = c(0, NA)) +
-        theme_minimal() + theme(panel.grid.minor = element_blank(), legend.position = "top", legend.box="vertical") +
+        theme_minimal() + theme(panel.grid.minor = element_blank(), legend.position = "top", legend.box="vertical", text=element_text(size=21)) +
         xlab("Flow (cfs)") + ylab("WUA (ft2) per linear ft") +
         scale_color_manual(name = "Model Type",
                            values = palette_colors) +
@@ -210,13 +210,13 @@ function(input, output, session){
         filter(habitat == input$habitat_type) |>
         ggplot(aes(x = flow_cfs)) +
         geom_line(aes(y = wua_per_lf_pred_SD, color="Scale-Dependent", linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
-        geom_line(aes(y = wua_per_lf_pred_SD_ph_bfc_rm, color="Scale-Dependent", linetype="Post-Model BFC Removal")) +
+       # geom_line(aes(y = wua_per_lf_pred_SD_ph_bfc_rm, color="Scale-Dependent", linetype="Post-Model BFC Removal")) +
         geom_line(aes(y = wua_per_lf_pred_SN, color="Scale-Normalized", linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
-        geom_line(aes(y = wua_per_lf_pred_SN_ph_bfc_rm, color="Scale-Normalized", linetype="Post-Model BFC Removal")) +
+        #geom_line(aes(y = wua_per_lf_pred_SN_ph_bfc_rm, color="Scale-Normalized", linetype="Post-Model BFC Removal")) +
         geom_line(data=duration_curve(), aes(x = q, y = durwua, linetype="Duration Analysis")) +
         scale_x_log10(labels = scales::label_comma()) + annotation_logticks(sides = "b") +
         scale_y_continuous(limits = c(0, NA)) +
-        theme_minimal() + theme(panel.grid.minor = element_blank(), legend.position = "top", legend.box="vertical") +
+        theme_minimal() + theme(panel.grid.minor = element_blank(), legend.position = "top", legend.box="vertical", text=element_text(size=21)) +
         xlab("Flow (cfs)") + ylab("WUA (ft2) per linear ft") +
         scale_color_manual(name = "Model Type",
                            values = palette_colors) +

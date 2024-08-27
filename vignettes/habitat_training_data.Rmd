@@ -71,16 +71,22 @@ The result is two values for each ComID (reach) at each flow. Units are ft2/ft, 
 
 * **suitable area per linear ft** is our habitat variable of interest-- the effective habitat area in the channel, normalized by reach length so that the (somewhat arbitrary) division of reaches does not influence model outputs. Because it's an area divided by a length, it can also be thought of as an "effective width of habitat." 
 
-* **total area per linear ft** can likewise be interpreted as the average width of wetted channel at the given flow. This is useful for comparison purposes.
+* **total inundated area per linear ft** can likewise be interpreted as the average width of wetted channel at the given flow. This is useful for comparison purposes.
 
-### Vector (SRH-2D)
+### Vector Functions for SRH-2D Model Outputs
 
-> (Discuss the detailed procedures here)
+* [`vector_prep_mesh`](../reference/vector_prep_mesh.html) imports a polygon shapefile describing model cells, and calculates the area of each cell.
+* [`vector_import_srh2d`](../reference/vector_import_srh2d.html) imports a series of tabular datasets containing the depth and velocity estimates by cell for all flows.
+* [`vector_calculate_hsi`](../reference/vector_calculate_hsi.html) creates habitat suitability index estimates for each cell based on the specified suitability criteria. 
+* [`vector_summarize_hsi`](../reference/vector_summarize_hsi.html) calculates suitable area of each grid/mesh cell by multiplying area by suitability, then aggregates cells by ComID (reach) polygon, calculating total area and total suitable area.
+* [`suitability_postprocess`](../reference/suitability_postprocess.html) spatially joins the ComID (reach) polygons to the NHD flowlines, then divides total area and total suitable area by the length of the corresponding flowline. The result is *total inundated area (ft2) per linear ft* and *suitable habitat area (ft2) per linear ft* for each reach, at each flow.
 
-### Raster (HEC-RAS 2D)
+### Raster Functions for HEC-RAS 2D Model Outputs
 
-> (Discuss the detailed procedures here)
+* [`raster_prep_grid`](../reference/raster_prep_grid.html) imports depth and velocity grid/mesh for all flows and combines them into a `terra` raster dataset. 
+* [`raster_summarize_hsi`](../reference/raster_summarize_hsi.html) applies the specified habitat suitability index, then calculates zonal statistics by ComID (reach) polygon to achieve total area and total suitable area for each polygon.
+* [`suitability_postprocess`](../reference/suitability_postprocess.html) spatially joins the ComID (reach) polygons to the NHD flowlines, then divides total area and total suitable area by the length of the corresponding flowline. The result is *total inundated area (ft2) per linear ft* and *suitable habitat area (ft2) per linear ft* for each reach, at each flow.
 
 ## Output
 
-The summarized habitat training dataset by reach is available in the data package as _______.
+The summarized habitat training dataset by reach is available in the data package as [`wua_hydraulic`](../reference/wua_hydraulic.html).

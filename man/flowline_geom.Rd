@@ -5,12 +5,15 @@
 \alias{flowline_geom}
 \title{NHD Flowline (ComID) Geometries}
 \format{
-An object of class \code{sf} (inherits from \code{data.frame}) with 178868 rows and 2 columns.
+An object of class \code{sf} (inherits from \code{tbl_df}, \code{tbl}, \code{data.frame}) with 178868 rows and 2 columns.
 }
 \usage{
 flowline_geom
 }
 \description{
 NHD Flowline (ComID) Geometries
+}
+\examples{
+flowline_geom |> pillar::glimpse()
 }
 \keyword{datasets}

@@ -1,13 +1,14 @@
 Predictor Data Preparation and Consolidation
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-05-24
+2024-06-06
 
 - [Case study geographic scope](#case-study-geographic-scope)
   - [Import Flowline Geometry](#import-flowline-geometry)
 - [Data Import](#data-import)
   - [Consolidating NHDPlusV2 Flowline
     Attributes](#consolidating-nhdplusv2-flowline-attributes)
+  - [Range and watershed summary](#range-and-watershed-summary)
   - [Combine all attributes](#combine-all-attributes)
 - [Join to Flowline Geometry](#join-to-flowline-geometry)
 - [Maps of attribute data
@@ -32,7 +33,7 @@ watersheds <-
   read_sf() |> 
   janitor::clean_names() |>
   filter(huc_8 %in% selected_huc_8) |>
-  st_transform(project_crs)
+  st_transform(habistat::const_proj_crs())
 ```
 
     ## ! Using an auto-discovered, cached token.
@@ -48,7 +49,7 @@ watersheds <-
 
     ## Auto-refreshing stale OAuth token.
 
-    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/WBD_Subwatershed.zip already exists and will be used...
+    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/WBD_Subwatershed.shp.zip already exists and will be used...
 
 ``` r
 watersheds |> ggplot() + geom_sf()
@@ -85,7 +86,7 @@ flowline_geom |> usethis::use_data(overwrite = T)
 ``` r
 # projected version
 flowline_geom_proj <- flowline_geom |> 
-  st_transform(project_crs)
+  st_transform(habistat::const_proj_crs())
 
 flowline_geom_proj |> saveRDS(here::here("data-raw", "results", "flowline_geometries_proj.Rds"))
 
@@ -119,7 +120,7 @@ EPA](https://www.epa.gov/waterdata/nhdplus-california-data-vector-processing-uni
 - If routing is needed, [improved
   versions](https://www.sciencebase.gov/catalog/item/5b92790be4b0702d0e809fe5)
   exist for this purpose. R package
-  [`nhdplustools`](https://doi-usgs.github.io/nhdplusTools/) also
+  [`nhdplusTools`](https://doi-usgs.github.io/nhdplusTools/) also
   provides routing functionality.
 
 ``` r
@@ -136,8 +137,10 @@ fcodes <-
 # flowline shapefile attribute table
 drive_file_by_id("1UiG8AeMr6mFOw7Jx--LyNRzez7GsDhzK") |>
   archive::archive_extract(dir = here::here("data-raw", "temp"), file = "NHDFlowline.dbf")
+
 flowline_table <- 
-  foreign::read.dbf(here::here("data-raw", "temp", "NHDFlowline.dbf")) |> 
+  foreign::read.dbf(here::here("data-raw", "temp", "NHDFlowline.dbf")) |>
+  as_tibble() |>
   janitor::clean_names() |>
   select(comid, reachcode, gnis_id, gnis_name, lengthkm, ftype, fcode) |>
   mutate(rc_huc_8 = substr(reachcode, 1, 8),
@@ -152,19 +155,22 @@ flowline_table <-
 wbd_watersheds <- 
   drive_file_by_id("1ncwKAUNoJUNkPLEy6NzrUKCYqVG681p-", vsizip=T) |>
   read_sf() |> 
-  st_transform(project_crs) |>
+  st_transform(habistat::const_proj_crs()) |>
   janitor::clean_names() |>
   select(huc_8, huc_10, hu_10_name, huc_12, hu_12_type, hu_12_name, hu_12_ds)
 ```
 
-    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/WBD_Subwatershed.zip already exists and will be used...
+    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/WBD_Subwatershed.shp.zip already exists and will be used...
 
 ``` r
 comid_huc_12 <- 
   flowline_geom_proj |> 
-  st_join(wbd_watersheds, left=F) |>
+  st_join(wbd_watersheds, left=F, largest=T) |>
   st_drop_geometry()
 ```
+
+    ## Warning: attribute variables are assumed to be spatially constant throughout
+    ## all geometries
 
 #### NHDPlusV2 tables
 
@@ -675,7 +681,7 @@ geomorph_class <-
   glimpse()
 ```
 
-    ## Rows: 33,193
+    ## Rows: 31,073
     ## Columns: 8
     ## $ comid             <dbl> 7918025, 7918031, 7918595, 7918019, 7918027, 7918039…
     ## $ geomorph_class    <fct> "Partly-confined, low width-to-depth ratio, gravel-c…
@@ -755,7 +761,7 @@ pisces_ranges <- tribble(~sp_id, ~species, ~dataset, ~filename,
   unnest(result) |>
   janitor::clean_names() |>
   st_sf() |> 
-  st_transform(project_crs)
+  st_transform(habistat::const_proj_crs())
 
 # Summarize Ranges
 range_historical <- 
@@ -825,6 +831,29 @@ pisces_ranges_comid <-
     ## $ range_cvchinook_historical <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, F…
     ## $ range_cvchinook_extant     <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, F…
 
+### Range and watershed summary
+
+From watershed_delineation.R
+
+``` r
+cv_mainstems <- readRDS(here::here("data-raw", "results", "cv_mainstems.Rds"))
+
+cv_mainstems_comid <- cv_mainstems |>
+  st_drop_geometry()
+
+cv_watersheds <- readRDS(here::here("data-raw", "results", "cv_watersheds.Rds"))
+
+cv_watersheds_comid <- 
+  habistat::flowline_geom_proj |>
+  st_zm() |>
+  #st_point_on_surface() |>
+  st_join(cv_watersheds, largest=T) |>
+  st_drop_geometry() 
+```
+
+    ## Warning: attribute variables are assumed to be spatially constant throughout
+    ## all geometries
+
 ### Combine all attributes
 
 ``` r
@@ -838,30 +867,31 @@ nu_cgs <- 0.01
 
 flowline_attributes <-
   flowline_table |>
-  left_join(comid_huc_12) |>
-  left_join(flowline_vaattr) |> 
-  left_join(flowline_slopes) |>
+  left_join(comid_huc_12, by=join_by(comid), relationship="one-to-one") |>
+  left_join(flowline_vaattr, by=join_by(comid), relationship="one-to-one") |> 
+  left_join(flowline_slopes, by=join_by(comid), relationship="one-to-one") |>
   mutate(stream_power = slope * da_area_sq_km) |>
-  left_join(precip_annual) |>
-  left_join(loc_precip_annual) |>
-  left_join(vogel_flow) |>
-  left_join(erom_annual) |>
-  left_join(flowline_sinuosity) |>
-  left_join(da_suppl_attrs) |> 
-  left_join(streamcat_data) |>
-  left_join(catchment_ndvi) |> 
-  left_join(aquatic_species_cdfw) |> 
-  left_join(aquatic_species_tnc) |>  
-  left_join(catchment_ndvi) |>
-  left_join(hyd_cls) |>
-  left_join(nf_ffm) |>
-  left_join(peak_flows) |>
-  left_join(width_data) |>
-  left_join(valley_bottoms) |>
-  left_join(levee_confinement) |>
-  left_join(geomorph_class) |>
-  left_join(hqt_cls) |>
-  left_join(pisces_ranges_comid) |>
+  left_join(precip_annual, by=join_by(comid), relationship="one-to-one") |>
+  left_join(loc_precip_annual, by=join_by(comid), relationship="one-to-one") |>
+  left_join(vogel_flow, by=join_by(comid), relationship="one-to-one") |>
+  left_join(erom_annual, by=join_by(comid), relationship="one-to-one") |>
+  left_join(flowline_sinuosity, by=join_by(comid), relationship="one-to-one") |>
+  left_join(da_suppl_attrs, by=join_by(comid), relationship="one-to-one") |> 
+  left_join(streamcat_data, by=join_by(comid), relationship="one-to-one") |>
+  left_join(catchment_ndvi, by=join_by(comid), relationship="one-to-one") |> 
+  left_join(aquatic_species_cdfw, by=join_by(comid), relationship="one-to-one") |> 
+  left_join(aquatic_species_tnc, by=join_by(comid), relationship="one-to-one") |>  
+  left_join(hyd_cls, by=join_by(comid), relationship="one-to-one") |>
+  left_join(nf_ffm, by=join_by(comid), relationship="one-to-one") |>
+  left_join(peak_flows, by=join_by(comid), relationship="one-to-one") |>
+  left_join(width_data, by=join_by(comid), relationship="one-to-one") |>
+  left_join(valley_bottoms, by=join_by(comid), relationship="one-to-one") |>
+  left_join(levee_confinement, by=join_by(comid), relationship="one-to-one") |>
+  left_join(geomorph_class, by=join_by(comid), relationship="one-to-one") |>
+  left_join(hqt_cls, by=join_by(comid), relationship="one-to-one") |>
+  left_join(pisces_ranges_comid, by=join_by(comid), relationship="one-to-one") |>
+  left_join(cv_mainstems_comid, by=join_by(comid), relationship="one-to-one") |>
+  left_join(cv_watersheds_comid, by=join_by(comid), relationship="one-to-one") |>
   # fill in gaps in the RF bankfull estimates with the simple Bieger model
   mutate(bf_width_m = coalesce(bf_width_m, 2.76*da_area_sq_km^0.399),
          bf_depth_m = coalesce(bf_depth_m, 0.23*da_area_sq_km^0.294),
@@ -882,7 +912,7 @@ flowline_attributes <-
          grain_size_suspended_ndim = sqrt(5832 * settling_velocity_ndim),
          grain_size_suspended_mm = 10 * grain_size_suspended_ndim * rho_cgs * nu_cgs^2 /
                          ((rho_s_cgs - rho_cgs) * g_cgs)^(1/3)) |>
-  left_join(attr_mtpi) |>
+  left_join(attr_mtpi, by=join_by(comid), relationship="one-to-one") |>
   mutate(#confined_topo = if_else(is.na(vb_width_transect),1,0),
          #confined_levee = if_else(frac_leveed_longitudinal>=0.5,1,0),
          vb_width_transect = pmax(coalesce(vb_width_transect, chan_width_m), chan_width_m),
@@ -890,7 +920,8 @@ flowline_attributes <-
          vb_width_transect = if_else(frac_leveed_longitudinal>=0.5,
                                      coalesce(lateral_levee_confinement_ft*0.3048, vb_width_transect),
                                      vb_width_transect),
-         vb_bf_w_ratio = vb_width_transect / chan_width_m,) 
+         vb_bf_w_ratio = vb_width_transect / chan_width_m,) |>
+  mutate(da_scalar_maf = (da_area_sq_km * 247.1053815) * (da_ppt_mean_mm / 304.8) / 1E6)
 
 flowline_attributes |> saveRDS(here::here("data-raw", "results", "flowline_attributes.Rds"))
 
@@ -907,7 +938,7 @@ flowlines <-
   inner_join(flowline_attributes) |>
   filter(huc_8 %in% selected_huc_8) |>
   arrange(hydro_seq) |>
-  st_transform(project_crs)
+  st_transform(habistat::const_proj_crs())
 ```
 
     ## Joining with `by = join_by(comid)`
@@ -923,14 +954,10 @@ waterbodies <-
          rc_huc_12 = substr(reachcode, 1, 12)) |>
   filter(rc_huc_8 %in% selected_huc_8) |>
   arrange(comid) |>
-  st_transform(project_crs)
+  st_transform(habistat::const_proj_crs())
 ```
 
     ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/NHDWaterbody.zip already exists and will be used...
-
-``` r
-# TODO: HUCs derived from the reachcode may not align with WBD HUC definitions
-```
 
 ## Maps of attribute data (exploratory)
 
@@ -1336,10 +1363,10 @@ catchments <-
   mutate(comid = as.numeric(featureid)) |>
   inner_join(flowlines |> st_drop_geometry() |> select(comid)) |>
   arrange(comid) |>
-  st_transform(project_crs) 
+  st_transform(habistat::const_proj_crs()) 
 ```
 
-    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/Catchment.zip already exists and will be used...
+    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/Catchment.shp.zip already exists and will be used...
 
     ## Joining with `by = join_by(comid)`
 

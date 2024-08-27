@@ -1,0 +1,801 @@
+---
+title: "Statistical Modeling to Predict Flow-to-Suitable-Area Curves"
+author: "[Skyler Lewis](mailto:slewis@flowwest.com)"
+date: "`r Sys.Date()`"
+output: 
+  github_document:
+    toc: true
+    toc_depth: 3
+    number_sections: false
+    math_method:
+      engine: webtex
+      url: https://latex.codecogs.com/svg.image?
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(sf)
+library(stars)
+library(tidymodels)
+
+library(habistat) 
+
+knitr::opts_chunk$set(eval=TRUE, fig.width=6.5, fig.height=4, dpi=300)
+theme_set(theme_minimal())
+
+palette_dsmhabitat_comparison <- 
+  c("habistat prediction" = "#ffae34", 
+    "DSMhabitat instream" = "#6388b4",
+    "DSMhabitat floodplain" = "#8cc2ca")
+
+palette_hqt_gradient_class <- 
+  c("Valley Lowland"  = "#6388b4", #hex_color_blend("#6388b4","#55ad89"),
+    "Valley Foothill" = "#55ad89", #hex_color_blend("#55ad89","#c3bc3f"),
+    "Bedrock"         = "#bb7693") #hex_color_blend("#c3bc3f","#ffae34"))
+```
+
+## Import Training Data
+
+```{r import-training-data, message=FALSE, warning=FALSE}
+wua_hydraulic_rearing_raw <- 
+  bind_rows(.id = "dataset",
+    # VECTOR SRH-2D MODELS
+    "Lower Yuba River" = 
+      readRDS(here::here("data-raw", "results", "fsa_yuba.Rds")) |> select(-reach),
+    "Stanislaus River" = 
+      readRDS(here::here("data-raw", "results", "fsa_stan.Rds")),
+    # RASTER HEC-RAS 2D MODELS
+    "Deer Creek" = 
+      readRDS(here::here("data-raw", "results", "fsa_deer.Rds")),
+    "Tuolumne River (Basso-La Grange)" = 
+      readRDS(here::here("data-raw", "results", "fsa_basso.Rds")),
+    ) 
+
+wua_hydraulic_rearing_raw |> saveRDS(here::here("data-raw", "results", "fsa_combined.Rds"))
+
+wua_hydraulic_rearing_bfc_removed <- 
+  bind_rows(.id = "dataset",
+    # VECTOR SRH-2D MODELS
+    "Lower Yuba River" = 
+      readRDS(here::here("data-raw", "results", "fsa_yuba_nbfc.Rds")) |> select(-reach),
+    "Stanislaus River" = 
+      readRDS(here::here("data-raw", "results", "fsa_stan_nbfc.Rds")),
+    # RASTER HEC-RAS 2D MODELS
+    "Deer Creek" = 
+      readRDS(here::here("data-raw", "results", "fsa_deer_nbfc.Rds")),
+    "Tuolumne River (Basso-La Grange)" = 
+      readRDS(here::here("data-raw", "results", "fsa_basso_nbfc.Rds")),
+    )
+
+wua_hydraulic_rearing_bfc_removed |> saveRDS(here::here("data-raw", "results", "fsa_combined_nbfc.Rds"))
+
+wua_hydraulic_spawning <- 
+  bind_rows(.id = "dataset",
+    # VECTOR SRH-2D MODELS
+    "Lower Yuba River" = 
+      readRDS(here::here("data-raw", "results", "fsa_yuba_spawning.Rds")) |> select(-reach),
+    "Stanislaus River" = 
+      readRDS(here::here("data-raw", "results", "fsa_stan_spawning.Rds")),
+    # RASTER HEC-RAS 2D MODELS
+    "Deer Creek" = 
+      readRDS(here::here("data-raw", "results", "fsa_deer_spawning.Rds")),
+    "Tuolumne River (Basso-La Grange)" = 
+      readRDS(here::here("data-raw", "results", "fsa_basso_spawning.Rds")),
+    )
+
+wua_hydraulic_spawning |> saveRDS(here::here("data-raw", "results", "fsa_combined_spawning.Rds"))
+
+# bfc attribute indicates whether the data *has* the baseflow channel
+wua_hydraulic <- 
+  bind_rows(wua_hydraulic_rearing_raw |> mutate(bfc = TRUE, habitat = "rearing"), 
+            wua_hydraulic_rearing_bfc_removed |> mutate(bfc = FALSE, habitat = "rearing"),
+            wua_hydraulic_spawning |> mutate(bfc = TRUE, habitat = "spawning")) |>
+  mutate(habitat = as_factor(habitat))
+
+# ensure no duplicates
+wua_hydraulic <- 
+  wua_hydraulic |> 
+  group_by(comid, flow_cfs, bfc, habitat) |> 
+    filter(row_number() == 1) |>
+    ungroup()
+
+wua_hydraulic |> usethis::use_data(overwrite = TRUE)
+```
+
+## Preprocess Training Data
+
+Limit to a specified flow range and interpolate gaps
+
+```{r preprocess-interpolate}
+interp_flows <- seq(300,15000,100)
+#interp_flows <- c(oom_range(100, 10000), 15000)
+
+flow_to_suitable_area <- 
+  wua_hydraulic |>
+  group_by(habitat, bfc, dataset, comid, length_ft) |>
+  complete(flow_cfs = interp_flows) |>
+  arrange(habitat, bfc, dataset, comid, flow_cfs, length_ft) |>
+  mutate(across(c(area_tot, area_wua, area_pct, wua_per_lf, ind_per_lf), 
+                function(var) zoo::na.approx(var, x = flow_cfs, na.rm=F))) |>
+  filter(flow_cfs %in% interp_flows) |>
+  filter(!is.na(area_pct)) |>
+  ungroup()
+
+wua_hydraulic_interp <- flow_to_suitable_area
+usethis::use_data(wua_hydraulic_interp, overwrite=T)
+```
+
+Join predictor variables to habitat training data
+
+```{r combine-training-dataset}
+filter_variable_ranges <- function(data) {
+  data |>
+    filter(da_area_sq_km > 100) # 1000 may have better model performance, 100 encompasses all streams we want to predict
+}
+
+model_data <- habistat::flowline_attr |>
+  filter(comid %in% habistat::flowline_geom$comid) |>
+  inner_join(flow_to_suitable_area, by=join_by("comid"), relationship="one-to-many") |>
+  mutate(case_wt = hardhat::importance_weights(length_ft)) |>
+  transmute(dataset, comid, length_ft, case_wt, flow_cfs, wua_per_lf,
+            flow_norm_cfs = flow_cfs / da_scalar_maf, # flow as a percent of mean annual flow
+            ihs_wua_per_lf = semiIHS00(wua_per_lf), # inverse hyperbolic sine as alternative to log that can handle zeros
+            wua_per_lf_norm = wua_per_lf / da_scalar_maf,
+            ihs_wua_per_lf_norm = semiIHS00(wua_per_lf_norm), # transect-wise habitat area per linear foot
+            tot_area_per_lf = area_tot / length_ft,
+            ihs_tot_area_per_lf = semiIHS00(tot_area_per_lf),
+            strata = paste(hyd_cls, dataset),
+            # predictors of flow (as would be found in a regional regression)
+            slope, da_area_sq_km, da_elev_mean, da_ppt_mean_mm, 
+            # flow and channel characteristics, hydrologically predicted
+            bf_depth_m, bf_w_d_ratio, # erom_v_ma_fps,
+            # misc characteristics of the catchment
+            da_avg_slope, da_k_erodibility, mean_ndvi,
+            # misc characteristics of the locality
+            loc_bfi, loc_pct_clay, loc_pct_sand, loc_permeability, loc_bedrock_depth, loc_ppt_mean_mm,
+            # channel confinement characteristics
+            mtpi30_min, vb_width_transect, vb_bf_w_ratio, frac_leveed_longitudinal,
+            # channel sinuosity
+            sinuosity,
+            # fixed effects
+            hqt_gradient_class=droplevels(hqt_gradient_class), hyd_cls=droplevels(hyd_cls),
+            # auxiliary
+            da_scalar_maf, model_bfc = bfc, model_hab = habitat) |> 
+  filter_variable_ranges() |> 
+  drop_na() |>
+  # CREATE NESTED TRAINING DATASET DATA FRAMES ---------------------------------
+  nest(.by = c(model_bfc, model_hab), .key = "td") |> # NOW NEED TO ADD HABITAT EVERY TIME WE GROUP BY BFC
+  # SPLIT TRAINING AND TESTING DATA --------------------------------------------
+  mutate(tts = map(td, function(x) {
+         set.seed(47)
+         tts <- group_initial_split(x, strata=strata, group=comid)
+         return(list(in_ids = tts$in_id, training = training(tts), testing = testing(tts)))
+         }),
+         td = pmap(list(td, tts), function(x, y) x |> mutate(training_sample = row_number() %in% y$in_ids))) |>
+  unnest_wider(tts) |>
+  # EXPAND TO COVER EACH COMBINATION OF SPECS AND MODEL TYPES ------------------
+  expand_grid("model_variant" = c("SD0", "SD1", "SD2", "SN0", "SN1", "SN2"),
+              "model_type" = c("LM", "RF")) |>
+              #"model_type" = c("LM", "RF", "ML")) |>
+  mutate(model_name = substr(model_variant, 1, 2)) |> # SD or SN
+  mutate(across(c(model_variant, model_type, model_name), as_factor)) # for storage efficiency
+```
+
+## Define and Run Models
+
+via pipeline:
+
+```{r}
+model_result <- 
+  model_data |>
+  # DEFINE MODEL FORMULAS ------------------------------------------------------
+  mutate(model_formula = map(model_variant, 
+                             function(x) {
+    if(x == "SD0") { # bare version
+      ihs_wua_per_lf + case_wt + comid ~ 
+      flow_cfs + slope + da_area_sq_km + da_elev_mean + da_ppt_mean_mm 
+    } else 
+    if(x == "SD1") { # simplified version
+      ihs_wua_per_lf + case_wt + comid ~ 
+      flow_cfs + slope + sinuosity + 
+      da_area_sq_km + da_elev_mean + da_ppt_mean_mm + 
+      da_k_erodibility + da_avg_slope + 
+      loc_bfi + loc_permeability + loc_bedrock_depth +
+      mtpi30_min + vb_width_transect
+    } else 
+    if(x == "SD2") { # full version
+      ihs_wua_per_lf + case_wt + comid ~ 
+      flow_cfs + 
+      slope + sinuosity + 
+      da_area_sq_km + da_elev_mean + da_ppt_mean_mm + 
+      bf_depth_m + bf_w_d_ratio + 
+      da_k_erodibility + da_avg_slope + mean_ndvi +
+      loc_bfi + loc_pct_clay + loc_pct_sand + loc_permeability + loc_bedrock_depth + loc_ppt_mean_mm +
+      mtpi30_min + vb_bf_w_ratio + frac_leveed_longitudinal + vb_width_transect
+    } else 
+    if(x == "SN0") { # bare version
+      ihs_wua_per_lf_norm + case_wt + comid + da_scalar_maf + flow_cfs ~ 
+      flow_norm_cfs + slope + da_elev_mean + da_ppt_mean_mm
+    } else 
+    if(x == "SN1") { # simplified version
+      ihs_wua_per_lf_norm + case_wt + comid + da_scalar_maf + flow_cfs ~ 
+      flow_norm_cfs + slope + sinuosity + 
+      da_k_erodibility + da_avg_slope + 
+      loc_bfi + loc_permeability + loc_bedrock_depth +
+      mtpi30_min + vb_bf_w_ratio
+    } else
+    if(x == "SN2") { # full version
+      ihs_wua_per_lf_norm + case_wt + comid + da_scalar_maf + flow_cfs ~ 
+      flow_norm_cfs + 
+      slope + sinuosity + 
+      bf_w_d_ratio + 
+      da_k_erodibility + da_avg_slope + mean_ndvi +
+      loc_bfi + loc_pct_clay + loc_pct_sand + loc_permeability + loc_bedrock_depth + loc_ppt_mean_mm +
+      mtpi30_min + vb_bf_w_ratio + frac_leveed_longitudinal
+    }
+  })) |>
+  # DEFINE MODEL TRANSFORMATIONS AND INTERACTIONS ------------------------------
+  mutate(model_recipe = pmap(list(training, model_name, model_formula), 
+                             function(d, x, f) {
+    if(x == "SD") {
+      recipe(data = d, formula = f) |>
+      update_role(comid, new_role = "identifier") |>
+      step_mutate_at(all_numeric_predictors(), fn = semiIHS00) |>
+      step_interact(terms = ~ slope:da_area_sq_km) |>
+      step_interact(terms = ~ flow_cfs:all_predictors()) |>
+      step_naomit(all_predictors()) |>
+      step_zv(all_predictors()) |>
+      step_normalize(all_numeric_predictors()) 
+    } else if(x == "SN") {
+      recipe(data = d, formula = f) |>
+      update_role(c(comid, flow_cfs), new_role = "identifier") |>
+      update_role(da_scalar_maf, new_role = "scalar") |>
+      step_mutate_at(all_numeric_predictors(), fn = semiIHS00) |>
+      step_interact(terms = ~ flow_norm_cfs:all_predictors()) |>
+      step_naomit(all_predictors()) |>
+      step_zv(all_predictors()) |>
+      step_normalize(all_numeric_predictors()) 
+    }
+  })) |>
+#  # DEFINE MODEL SPECS: LINEAR OR RANDOM FOREST --------------------------------
+#  mutate(model_spec = pmap(list(model_type, model_recipe), function(x, rec) {
+#    if (x == "LM") {
+#      linear_reg()
+#    } else if(x == "RF") {
+#      mtry <- floor((length(rec$var_info$variable) - 2) / 3)
+#      rand_forest(mode = "regression", trees = 2^8, mtry = mtry, min_n = 10) |>
+#        set_engine("ranger", num.threads = 4)
+#    } else if(x == "ML") {
+#        mlp(mode = "regression",
+#            hidden_units = c(8, 8, 8), # number of nodes in each hidden layer
+#            penalty = 0.0, # L1 lasso penalty
+#            dropout = 0.1, # both penalty and dropout should not be used
+#            epochs = 100,
+#            learn_rate = 0.01,
+#            activation = "relu") |>
+#        set_engine("brulee")
+#    }
+#  })) |>
+    # FIT MODEL WITH VALIDATION: LINEAR OR RANDOM FOREST -----------------------
+  mutate(model_wkfl = pmap(list(training, model_recipe, model_type), 
+                               function(d, rec, typ) {
+    if (typ == "LM") {
+      
+      spec <- linear_reg()
+      
+      workflow() |>
+        add_recipe(rec) |>
+        add_model(spec) |>
+        add_case_weights(case_wt) 
+    
+    } else if(typ == "RF") {
+      
+      cv_grid <- expand_grid(mtry = c(floor((length(rec$var_info$variable) - 2) / 4),
+                                      floor((length(rec$var_info$variable) - 2) / 3),
+                                      floor((length(rec$var_info$variable) - 2) / 2)),
+                             trees = 2^c(7, 8, 9),
+                             min_n = 2^c(2, 3, 4))
+
+      spec <- rand_forest(mode = "regression", 
+                  trees = tune(), 
+                  mtry = tune(), 
+                  min_n = tune()) |>
+        set_engine("ranger", num.threads = 8)
+      
+      wkfl <- workflow() |>
+        add_recipe(rec) |>
+        add_model(spec) |>
+        add_case_weights(case_wt) 
+      
+      set.seed(47)
+      tngr <- wkfl |> tune_grid(
+        resamples = vfold_cv(d, v = 10),
+        grid = cv_grid)
+      
+      wkfl |>
+        finalize_workflow(tngr |> 
+                            select_best(metric = "rmse") |> 
+                            as.list())
+      
+#     } else if(x == "ML") {
+#         mlp(mode = "regression",
+#             hidden_units = c(8, 8, 8), # number of nodes in each hidden layer
+#             penalty = 0.0, # L1 lasso penalty
+#             dropout = 0.1, # both penalty and dropout should not be used
+#             epochs = 100,
+#             learn_rate = 0.01,
+#             activation = "relu") |>
+#         set_engine("brulee")
+    }
+  })) |>
+  mutate(model_fit = pmap(list(training, model_wkfl, model_type), 
+                               function(d, wkfl, typ) {
+                                 wkfl |> fit(data = d)
+                               })) |>
+#  # FIT MODELS -----------------------------------------------------------------
+#  mutate(model_fit = pmap(list(training, model_recipe, model_spec, model_type), 
+#                               function(d, rec, spec, typ) {
+#    if(typ == "ML") {
+#      workflow() |>
+#        add_recipe(rec) |>
+#        add_model(spec) |>
+#        fit(data = d)
+#    } else {
+#      workflow() |>
+#        add_recipe(rec) |>
+#        add_model(spec) |>
+#        add_case_weights(case_wt) |>
+#        fit(data = d)
+#    }
+#  })) |>
+  # PREDICT FOR TRAINING AND TESTING DATASET -----------------------------------
+  mutate(model_res = pmap(list(td, model_name, model_fit),
+                             function(d, x, m) {
+      if(x == "SD") { 
+        d |>
+        transmute(comid, flow_cfs, training_sample,
+                  # actuals
+                  ihs_wua_per_lf,
+                  wua_per_lf = wua_per_lf_norm * da_scalar_maf,
+                  # predicted
+                  ihs_wua_per_lf_pred = predict(m, d)[[".pred"]],
+                  wua_per_lf_pred = semiIHS00_inv(ihs_wua_per_lf_pred))
+      } else if(x == "SN") {
+        d |>
+        transmute(comid, flow_cfs, flow_norm_cfs, da_scalar_maf, training_sample,
+                  # actuals
+                  ihs_wua_per_lf_norm,
+                  wua_per_lf_norm = semiIHS00_inv(ihs_wua_per_lf_norm), 
+                  wua_per_lf = wua_per_lf_norm * da_scalar_maf,
+                  # predicted
+                  ihs_wua_per_lf_norm_pred = predict(m, d)[[".pred"]],
+                  wua_per_lf_norm_pred = semiIHS00_inv(ihs_wua_per_lf_norm_pred),
+                  wua_per_lf_pred = wua_per_lf_norm_pred * da_scalar_maf)
+      }}))
+  
+model_result
+```
+
+## Validation
+
+```{r}
+model_val <- 
+  model_result |>
+  select(model_hab, model_bfc, model_name, model_variant, model_type, model_res) |>
+  unnest(model_res) |>
+  select(model_hab, model_bfc, model_name, model_variant, model_type, training_sample, comid, flow_cfs, wua_per_lf, wua_per_lf_pred) |>
+  mutate(delta = wua_per_lf_pred - wua_per_lf,
+         train_test = if_else(training_sample, "train", "test"))
+
+model_val |>
+  filter(model_type=="RF" & model_bfc & model_hab=="rearing") |>
+  group_by(train_test, model_hab, model_bfc, model_name, model_variant, model_type, flow_cfs) |>
+  summarize(rmse = sqrt(mean((wua_per_lf_pred - wua_per_lf)^2))) |>
+  ggplot(aes(x = flow_cfs, y = rmse)) + geom_line(aes(linetype = train_test, color = model_variant)) +
+  scale_y_continuous(limits = c(0,100)) + scale_x_log10()
+
+model_val |>
+  filter(model_variant=="SD2") |>
+  group_by(train_test, model_hab, model_bfc, model_name, model_variant, model_type, flow_cfs) |>
+  summarize(rmse = sqrt(mean((wua_per_lf_pred - wua_per_lf)^2))) |>
+  ggplot(aes(x = flow_cfs, y = rmse)) + geom_line(aes(linetype = train_test, color = paste(model_type, model_bfc, model_hab))) +
+  scale_y_continuous(limits = c(0,100)) + scale_x_log10()
+```
+
+```{r}
+model_val_rmse <- 
+  model_val |>
+  group_by(train_test, model_hab, model_bfc, model_name, model_variant, model_type) |>
+  summarize(rmse = sqrt(mean((wua_per_lf_pred - wua_per_lf)^2))) |>
+  pivot_wider(names_from = train_test, values_from = rmse, names_glue = "{.value}_{train_test}") |>
+  mutate(rmse_infl = (rmse_test / rmse_train))
+
+model_val_rmse |>
+  filter(model_type=="RF") |>
+  knitr::kable()
+```
+
+
+## Predictions
+
+```{r}
+pd_attr <- habistat::flowline_attr |> 
+  filter_variable_ranges() |> #stream_level<=4 & !is.na(gnis_name) 
+  filter(substr(reachcode,1, 4) %in% c("1802", "1803", "1804")) 
+
+#interp_flows_pred <- c(oom_range(100, 10000), 15000)
+
+pd <- pd_attr |>
+  expand_grid(flow_cfs = interp_flows) |>
+  mutate(flow_norm_cfs = coalesce(flow_cfs / da_scalar_maf, 0)) |> 
+  arrange(comid, flow_cfs)
+
+```
+
+```{r}
+model_predicted <- 
+  model_result |>
+  #select(model_bfc, model_variant, model_type, model_name, model_recipe, model_fit, training) |>
+  mutate(predicted = pmap(list(training, model_name, model_recipe, model_fit),
+                               function(training_df, x, rec, m) {
+      # pd_prepped <- 
+      #   rec |> 
+      #   prep(training_df) |>
+      #   bake(pd) |>
+      #   drop_na()
+      
+      pd_prepped <-
+        pd |> 
+        select(rec$var_info$variable[which(rec$var_info$role %in% c("identifier", "predictor", "scalar"))]) |>
+        drop_na()
+      
+      if(x == "SD") { 
+        
+        pd_prepped |>
+        transmute(comid, flow_cfs, 
+                  # predicted
+                  ihs_wua_per_lf_pred = predict(m, new_data=pd_prepped)[[".pred"]],
+                  #ihs_wua_per_lf_pred = predict(m$fit$fit, new_data=pd_prepped)[[".pred"]],
+                  wua_per_lf_pred = semiIHS00_inv(ihs_wua_per_lf_pred))
+        
+      } else if(x == "SN") {
+        
+        pd_prepped |>
+        transmute(comid, flow_cfs, flow_norm_cfs, da_scalar_maf, 
+                  # predicted
+                  ihs_wua_per_lf_norm_pred = predict(m, new_data=pd_prepped)[[".pred"]],
+                  #ihs_wua_per_lf_norm_pred = predict(m$fit$fit, new_data=pd_prepped)[[".pred"]],
+                  wua_per_lf_norm_pred = semiIHS00_inv(ihs_wua_per_lf_norm_pred),
+                  wua_per_lf_pred = wua_per_lf_norm_pred * da_scalar_maf)
+      }
+    })) |>
+  select(model_hab, model_bfc, model_variant, model_type, model_name, predicted) |>
+  unnest(predicted)
+
+model_predicted |> saveRDS(here::here("data-raw", "results", "model_predicted.Rds"))
+```
+
+### Rearing
+
+```{r fig.height=8}
+flowlines_pred <-
+  habistat::flowline_geom_proj |>
+  left_join(habistat::flowline_attr, by=join_by(comid)) |>
+  # filter for just the Sacramento and San Joaquin Basins
+  filter(watershed_level_1 %in% c("Sacramento River", "San Joaquin River")) |>
+  # filter for just known extant spawning habitat
+  #filter((range_pisces == "extant") | (comid %in% ms$comid)) |>
+  # filter based on size of the stream
+  # filter((stream_order >= 4) | (da_area_sq_km >= 100) | (comid %in% habistat::cv_mainstems$comid)) #|>
+  filter((((stream_order >= 4) & (da_area_sq_km > 1)) | ((stream_order >= 3) & (da_area_sq_km >= 50))) | 
+           (comid %in% habistat::cv_mainstems$comid))
+  #filter((stream_order >= 4) | (comid %in% ms$comid)) |>
+  #filter((da_area_sq_km >= 100) | (comid %in% ms$comid)) |>
+
+flowlines_pred |> 
+  ggplot() + 
+  geom_sf(data=habistat::cv_watersheds,#  |> filter(range_pisces == "extant"), 
+          aes(fill=watershed_level_3), color=NA) + 
+  geom_sf() +
+  geom_sf(data=habistat::cv_mainstems, color="red")
+
+model_predicted_filtered <- 
+  model_predicted |> 
+  filter(comid %in% flowlines_pred$comid) |>
+  left_join(habistat::flowline_attr |>
+              select(comid, river_cvpia, starts_with("watershed_"), reach_length_ft), by=join_by(comid)) |>
+  # select just the desired rows and columns for saving and reporting
+  # pick the best variant of SD and SN models
+  filter((model_type == "RF") & (model_variant %in% c("SD2", "SN2")) & (model_hab == "rearing")) |>
+  transmute(comid, model_bfc, model_name, flow_cfs, wua_per_lf_pred, 
+         river_cvpia = as.factor(river_cvpia),
+         watershed_level_3 = as.factor(watershed_level_3),
+         reach_length_ft) |>
+  glimpse()
+
+model_predicted_filtered |> saveRDS(here::here("data-raw", "results", "model_predicted_filtered.Rds"))
+#model_predicted_filtered <- readRDS(here::here("data-raw", "results", "model_predicted_filtered.Rds"))
+```
+
+### Spawning
+
+```{r}
+spawning_context <- readRDS(here::here("data-raw", "results", "spawning_context.Rds"))
+
+flowlines_pred_spawning <- 
+  habistat::flowline_geom_proj |>
+  left_join(spawning_context, by=join_by(comid)) |>
+  filter(spawning_geographic_context)
+  
+flowlines_pred_spawning |> 
+  ggplot() + 
+  geom_sf(data=habistat::cv_watersheds,#  |> filter(range_pisces == "extant"), 
+          aes(fill=watershed_level_3), color=NA) + 
+  geom_sf()
+
+model_predicted_spawning <- 
+  model_predicted |> 
+  filter(comid %in% flowlines_pred_spawning$comid) |>
+  left_join(habistat::flowline_attr |>
+              select(comid, river_cvpia, starts_with("watershed_"), reach_length_ft), by=join_by(comid)) |>
+  # select just the desired rows and columns for saving and reporting
+  # pick the best variant of SD and SN models
+  filter((model_type == "RF") & (model_variant %in% c("SD2", "SN2")) & (model_hab == "spawning")) |>
+  transmute(comid, model_bfc, model_name, flow_cfs, wua_per_lf_pred, 
+         river_cvpia = as.factor(river_cvpia),
+         watershed_level_3 = as.factor(watershed_level_3),
+         reach_length_ft) |>
+  glimpse()
+
+model_predicted_spawning |> saveRDS(here::here("data-raw", "results", "model_predicted_spawning.Rds"))
+```
+
+## DSMHabitat comparison
+
+```{r dsmhabitat-prep, fig.width=6.5, fig.height=6.5, dpi=300}
+mainstems_comid <- 
+  read_sf(file.path("/vsizip", here::here("data-raw", "source", "rearing_spatial_data", "nhdplusv2_comid_habitat_xw.shp.zip"))) |>
+  janitor::clean_names() |>
+  st_zm() |>
+  st_transform(st_crs(habistat::flowline_geom_proj)) |>
+  mutate(length_ft = st_length(geometry) |> units::set_units("ft") |> units::drop_units()) |>
+  filter(str_detect(habitat, "rearing")) |>
+  left_join(habistat::flowline_attr |> select(comid, hqt_gradient_class), by=join_by(comid)) |>
+  filter(!(river %in% c("Sacramento River", "San Joaquin River")))
+
+mainstems <-
+  mainstems_comid |>
+  group_by(river, hqt_gradient_class) |>
+  summarize() 
+
+mainstems_comid |> 
+  ggplot() + 
+  geom_sf(aes(group=river, color=hqt_gradient_class)) + 
+  theme(legend.key.height = unit(12, "point"))
+```
+
+```{r dsmhabitat-join, fig.width=6.5, fig.height=6.5, dpi=300}
+#remotes::install_github("CVPIA-OSC/DSMhabitat")
+watersheds <- mainstems |> pull(river) |> unique()
+watershed_name <- tolower(gsub(pattern = "-| ", replacement = "_", x = watersheds))
+watershed_rda_name <- paste(watershed_name, "floodplain", sep = "_")
+
+dsm_habitat_floodplain <- map_df(watershed_rda_name, function(watershed) {
+  df <- as.data.frame(do.call(`::`, list(pkg = "DSMhabitat", name = watershed)))
+}) |> 
+  transmute(river = watershed,
+            flow_cfs,
+            FR_floodplain_m2 = FR_floodplain_acres * 4046.86,
+            FR_floodplain_m2_suitable = DSMhabitat::apply_suitability(FR_floodplain_m2),
+            FR_floodplain_acres_suitable = FR_floodplain_m2_suitable / 4046.86)
+
+dsm_habitat_instream <- map_df(paste(watershed_name, "instream", sep = "_"), 
+                               possibly(function(watershed) {
+                                 df <- as.data.frame(do.call(`::`, list(pkg = "DSMhabitat", name = watershed)))
+                                 }, otherwise = NULL)) |> 
+  transmute(river = watershed,
+            flow_cfs,
+            FR_juv_wua) 
+
+dsm_flows <- bind_rows(dsm_habitat_floodplain, dsm_habitat_instream) |>
+  group_by(river, flow_cfs) |>
+  summarize() |>
+  ungroup() |>
+  arrange(river, flow_cfs)
+
+dsm_flow_ranges <- 
+  dsm_flows |> 
+  group_by(river) |> 
+  summarize(min_flow_cfs = min(flow_cfs), max_flow_cfs = max(flow_cfs))
+
+mainstems_comid |> 
+  st_zm() |> 
+  filter(comid %in% mainstems_comid$comid) |>
+  ggplot() + 
+  geom_sf(aes(color=river)) + 
+  theme(legend.key.height = unit(12, "point"))
+
+# combining both floodplain and instream rearing acreages/WUAs for comparison
+dsm_habitat_combined <- mainstems |> 
+  mutate(length_ft = st_length(geometry) |> units::set_units("ft") |> units::drop_units()) |>
+  group_by(river) |> 
+  summarize(length_ft = sum(length_ft)) |>
+  st_drop_geometry() |>
+  inner_join(full_join(dsm_habitat_instream, dsm_habitat_floodplain, by=join_by(river, flow_cfs)), by=join_by(river)) |>
+  group_by(river) |>
+  arrange(river, flow_cfs) |>
+  mutate(FR_juv_wua = zoo::na.approx(FR_juv_wua, flow_cfs, na.rm=F),
+         FR_floodplain_acres_suitable = zoo::na.approx(FR_floodplain_acres_suitable, flow_cfs, na.rm=F)) |>
+  transmute(river, flow_cfs, 
+            instream_wua_per_lf = coalesce(FR_juv_wua/1000,0),
+            instream_suitable_ac = coalesce(FR_juv_wua/1000,0)*length_ft/43560,
+            floodplain_wua_per_lf = coalesce(FR_floodplain_acres_suitable,0)*43560/length_ft,
+            floodplain_suitable_ac = coalesce(FR_floodplain_acres_suitable,0),
+            combined_wua_per_lf = instream_wua_per_lf + floodplain_wua_per_lf,
+            combined_suitable_ac =  instream_suitable_ac + floodplain_suitable_ac) |>
+  ungroup()
+
+dsm_habitat_wua_per_lf <- dsm_habitat_combined |>
+  select(river, flow_cfs, instream_wua_per_lf, floodplain_wua_per_lf) |>
+#  mutate(combined_wua_per_lf = pmax(instream_wua_per_lf, floodplain_wua_per_lf)) |>
+  pivot_longer(cols=c(instream_wua_per_lf, floodplain_wua_per_lf)) |>
+  mutate(name = paste("DSMhabitat", str_replace(name, "_wua_per_lf", "")),
+         value = if_else(value>0, value, NA))
+
+dsm_habitat_suitable_ac <- dsm_habitat_combined |>
+  select(river, flow_cfs, instream_suitable_ac, floodplain_suitable_ac) |>
+#  mutate(combined_suitable_ac = pmax(instream_suitable_ac, floodplain_suitable_ac)) |>
+  pivot_longer(cols=c(instream_suitable_ac, floodplain_suitable_ac)) |>
+  mutate(value = if_else(value>0, value, NA)) |>
+  mutate(name = paste("DSMhabitat", str_replace(name, "_suitable_ac", "")),
+         value = if_else(value>0, value, NA))
+```
+
+```{r fig.width=6.5, fig.height=6.5, dpi=300}
+model_predicted_filtered |>
+  filter(!is.na(river_cvpia)) |>
+  filter(flow_cfs <= 15000) |>
+  #filter(model_type == "RF") |>
+  #group_by(model_bfc, model_variant, river_cvpia, flow_cfs) |>
+  group_by(model_bfc, model_name, river_cvpia, flow_cfs) |>
+  summarize(wua_per_lf_pred = sum(wua_per_lf_pred * reach_length_ft) / sum(reach_length_ft)) |>
+  ggplot(aes(x = flow_cfs)) + 
+  geom_line(aes(y = wua_per_lf_pred, 
+                color = case_when(model_name=="SD" ~ "Scale-Dependent", 
+                                  model_name=="SN" ~ "Scale-Normalized"), 
+                linetype = if_else(model_bfc, "Post-Model BFC Removal", "Prior BFC Removal"))) +
+  geom_line(data=dsm_habitat_wua_per_lf |> 
+              rename(river_cvpia = river), 
+            aes(x = flow_cfs, y = value, color = name)) +
+  facet_wrap(~river_cvpia, scales = "free_y") +
+  scale_x_continuous(limits = c(0,15000)) +
+  #scale_y_log10() + scale_x_log10()  +
+  scale_color_discrete(name = "Model Type") + 
+  scale_linetype_discrete(name = "Baseflow Method") + 
+  theme(panel.grid.minor = element_blank(), legend.position = "top", legend.box="vertical", axis.text.x = element_text(angle=90)) 
+
+# ggsave(here::here("vignettes", "figures", "model_comparison_raw.png"))
+```
+
+## Apply the baseflow correction for the non-baseflow runs
+
+```{r}
+baseflows_by_comid <- 
+  habistat::flowline_attr |>
+  transmute(comid, baseflow_cfs = nf_bfl_dry_cfs) |>
+  filter(!is.na(baseflow_cfs)) |>
+  filter(baseflow_cfs > 1E-7)
+
+baseflows_by_comid |> 
+  ggplot() + 
+  geom_histogram(aes(x = baseflow_cfs)) + 
+  scale_x_log10()
+```
+
+```{r}
+model_predicted_bfc_rm <-
+  model_predicted_filtered |>
+    filter(model_bfc) |> # select only the model runs that still have the baseflow channel included
+    inner_join(baseflows_by_comid, by = join_by(comid)) |> 
+    flow_threshold_remove_baseflow_apply(.flow_threshold_var = baseflow_cfs,
+                                         .flow_var = flow_cfs,
+                                         .habitat_var = wua_per_lf_pred)
+```
+
+Combine the outputs
+
+```{r}
+model_predicted_final <- bind_rows(
+  # bring in the main rearing results where the baseflow was removed before
+  model_predicted_filtered |> 
+    filter((!model_bfc) & (comid %in% baseflows_by_comid$comid)) |>
+    mutate(habitat = "rearing"),
+  # now bring in the rearing model that included post-hoc baseflow channel removal
+  model_predicted_bfc_rm |>
+    select(-wua_per_lf_pred) |>
+    rename(wua_per_lf_pred = wua_per_lf_pred_nbfc) |>
+    select(-flow_cfs_nbfc, -baseflow_cfs) |>
+    mutate(habitat = "rearing"),
+  # bring in the main spawning results
+  model_predicted_spawning |> 
+    filter((comid %in% baseflows_by_comid$comid)) |>
+    mutate(habitat = "spawning")
+  ) #|>
+ # # join hydraulic modelled results for comparison
+ # # left_join(wua_hydraulic |>
+ # #             filter(habitat == "rearing"), 
+ # #           by = join_by(comid, flow_cfs, model_bfc == bfc))
+ # left_join(wua_hydraulic |>
+ #             filter((habitat == "rearing") & !bfc), # always compare against the training data with BFC removed 
+ #           by = join_by(comid, flow_cfs)) 
+
+model_predicted_final |>
+  saveRDS(here::here("data-raw", "results", "model_predicted_final.Rds"))
+
+wua_predicted <- model_predicted_final
+usethis::use_data(wua_predicted, overwrite = TRUE)
+```
+
+```{r}
+wua_predicted_cv_watersheds <- 
+  wua_predicted |>
+  filter(!is.na(watershed_level_3)) |>
+  group_by(habitat, model_bfc, model_name, watershed_level_3, flow_cfs) |>
+  summarize(wua_per_lf_pred = sum(wua_per_lf_pred * reach_length_ft) / sum(reach_length_ft)) 
+usethis::use_data(wua_predicted_cv_watersheds, overwrite = TRUE)
+
+wua_predicted_cv_mainstems <- 
+  wua_predicted |>
+  filter(!is.na(river_cvpia)) |>
+  group_by(habitat, model_bfc, model_name, river_cvpia, flow_cfs) |>
+  summarize(wua_per_lf_pred = sum(wua_per_lf_pred * reach_length_ft) / sum(reach_length_ft))
+usethis::use_data(wua_predicted_cv_mainstems, overwrite = TRUE)
+```
+
+```{r fig.width=6.5, fig.height=6.5, dpi=300}
+wua_predicted_cv_mainstems |>
+  filter(habitat == "rearing") |>
+  filter(flow_cfs <= 15000) |>
+  ggplot(aes(x = flow_cfs)) + 
+  geom_line(aes(y = wua_per_lf_pred, 
+                color = case_when(model_name=="SD" ~ "Scale-Dependent", 
+                                  model_name=="SN" ~ "Scale-Normalized"), 
+                linetype = if_else(model_bfc, "Post-Model BFC Removal", "Prior BFC Removal"))) +
+  #geom_line(data=dsm_habitat_suitable_ac |> 
+  #            rename(river_cvpia = river), 
+  #          aes(x = flow_cfs, y = value, color = name)) +
+  facet_wrap(~river_cvpia, scales = "free_y") +
+  scale_x_continuous(limits = c(0,15000)) +
+  #scale_y_log10() + scale_x_log10()  +
+  scale_color_discrete(name = "Model Type") + 
+  scale_linetype_discrete(name = "Baseflow Method") + 
+  theme(panel.grid.minor = element_blank(), legend.position = "top", legend.box="vertical", axis.text.x = element_text(angle=90)) 
+
+# ggsave(here::here("vignettes", "figures", "model_comparison.png"))
+```
+
+```{r fig.width=6.5, fig.height=6.5, dpi=300}
+wua_predicted_cv_mainstems |>
+  filter(habitat == "spawning") |>
+  filter(flow_cfs <= 15000) |>
+  ggplot(aes(x = flow_cfs)) + 
+  geom_line(aes(y = wua_per_lf_pred, 
+                color = case_when(model_name=="SD" ~ "Scale-Dependent", 
+                                  model_name=="SN" ~ "Scale-Normalized"), 
+                linetype = "BFC Not Removed")) +
+  facet_wrap(~river_cvpia, scales = "free_y") +
+  scale_x_continuous(limits = c(0,15000)) +
+  #scale_y_log10() + scale_x_log10()  +
+  scale_color_discrete(name = "Model Type") + 
+  scale_linetype_discrete(name = "Baseflow Method") + 
+  theme(panel.grid.minor = element_blank(), legend.position = "top", legend.box="vertical", axis.text.x = element_text(angle=90)) 
+
+# ggsave(here::here("vignettes", "figures", "model_comparison.png"))
+```
+
+
+
+```{r}
+# install.packages(c("brulee", "torch"))
+
+```

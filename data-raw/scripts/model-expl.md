@@ -1,7 +1,7 @@
 Statistical Modeling to Predict Flow-to-Suitable-Area Curves
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-05-10
+2024-06-03
 
 - [Import and Preprocess Training
   Data](#import-and-preprocess-training-data)
@@ -15,8 +15,8 @@ Statistical Modeling to Predict Flow-to-Suitable-Area Curves
   - [Scale Independent Model: %HSI versus flow (normalized by
     MAF)](#scale-independent-model-hsi-versus-flow-normalized-by-maf)
   - [Scale Independent Model 2: WUA-per-linear-ft (normalized by
-    da_scalar) versus flow (normalized by
-    da_scalar)](#scale-independent-model-2-wua-per-linear-ft-normalized-by-da_scalar-versus-flow-normalized-by-da_scalar)
+    da_scalar_maf) versus flow (normalized by
+    da_scalar_maf)](#scale-independent-model-2-wua-per-linear-ft-normalized-by-da_scalar_maf-versus-flow-normalized-by-da_scalar_maf)
 - [Prediction and Validation](#prediction-and-validation)
   - [One-step model, scale-dependent: WUA/LF vs
     flow](#one-step-model-scale-dependent-wualf-vs-flow)
@@ -43,33 +43,11 @@ library(tidymodels)
 library(broom.mixed) # tidy output of mixed model results
 library(dotwhisker) # visualize regression results
 
+library(habistat) 
+
 knitr::opts_chunk$set(eval=TRUE, fig.width=6.5, fig.height=6.5, dpi=300)
 
 theme_set(theme_minimal())
-
-ihs <- trans_new("ihs", 
-                 transform = function(x) asinh(x), 
-                 inverse = function(y) sinh(y), 
-                 breaks = function(i) scales::breaks_log(n=5, base=10)(pmax(i,0.01)), 
-                 #minor_breaks = scales::minor_breaks_n(n = 0),
-                 domain=c(0, Inf),
-                 format = scales::label_comma())
-
-oom_range <- function(from, to) {
-  from_mag <- floor(log10(if (from > 0) from else 1))
-  to_mag <- ceiling(log10(to))
-  magnitudes <- seq(from_mag, to_mag + 1, 1)
-  expanded <- as.vector(t(10^seq(magnitudes) %o% seq(1,9,1)))
-  result <- expanded[which(expanded>=signif(from,1) & expanded<=signif(to,1))]
-  return(if (from == 0) c(0, result) else result)
-}
-
-hex_color_blend <- function(x, y){
-  hex_r <- as.character.hexmode((strtoi(substr(x,2,3), base=16L) + strtoi(substr(y,2,3), base=16L)) / 2)
-  hex_g <- as.character.hexmode((strtoi(substr(x,4,5), base=16L) + strtoi(substr(y,4,5), base=16L)) / 2)
-  hex_b <- as.character.hexmode((strtoi(substr(x,6,7), base=16L) + strtoi(substr(y,6,7), base=16L)) / 2)
-  return(paste0("#", hex_r, hex_g, hex_b))
-}
 
 palette_dsmhabitat_comparison <- 
   c("habistat prediction" = "#ffae34", 
@@ -85,17 +63,48 @@ palette_hqt_gradient_class <-
 ## Import and Preprocess Training Data
 
 ``` r
-# flowline geometries
-flowlines <- readRDS(here::here("data-raw", "results", "flowline_geometries_proj.Rds"))
-
-# predictor variables by ComID
-flowline_attributes <- readRDS(here::here("data-raw", "results", "flowline_attributes.Rds")) |>
-  mutate(da_scalar = (da_area_sq_km*247.1053815) * (da_ppt_mean_mm*0.0393701) / 1E6) |># 1 million acre-inches
-  mutate(length_ft = reach_length_km * 1000 / 0.3048) 
-# this is reach length based on NHD but should update for training data
-
 # response variables by ComID and Flow 
-flow_to_suitable_area <- readRDS(here::here("data-raw", "results", "fsa_combined.Rds"))
+#flow_to_suitable_area <- readRDS(here::here("data-raw", "results", "fsa_combined.Rds"))
+wua_hydraulic <- 
+  bind_rows(.id = "dataset",
+    # VECTOR SRH-2D MODELS
+    "Lower Yuba River" = 
+      readRDS(here::here("data-raw", "results", "fsa_yuba.Rds")) |> select(-reach),
+    "Stanislaus River" = 
+      readRDS(here::here("data-raw", "results", "fsa_stan.Rds")),
+    # RASTER HEC-RAS 2D MODELS
+    "Deer Creek" = 
+      readRDS(here::here("data-raw", "results", "fsa_deer.Rds")),
+    "Tuolumne River (Basso-La Grange)" = 
+      readRDS(here::here("data-raw", "results", "fsa_basso.Rds")),
+    ) #|>
+  #rename(area_tot = area_tot, area_wua = area_wua, area_pct = area_pct)
+
+wua_hydraulic |> saveRDS(here::here("data-raw", "results", "fsa_combined.Rds"))
+wua_hydraulic |> usethis::use_data(overwrite = TRUE)
+
+###
+# VERSION WITH BASEFLOW CHANNEL PRE-REMOVED (for testing)
+
+wua_hydraulic_nbfc <- 
+  bind_rows(.id = "dataset",
+    # VECTOR SRH-2D MODELS
+    "Lower Yuba River" = 
+      readRDS(here::here("data-raw", "results", "fsa_yuba_nbfc.Rds")) |> select(-reach),
+    "Stanislaus River" = 
+      readRDS(here::here("data-raw", "results", "fsa_stan_nbfc.Rds")),
+    # RASTER HEC-RAS 2D MODELS
+    "Deer Creek" = 
+      readRDS(here::here("data-raw", "results", "fsa_deer_nbfc.Rds")),
+    "Tuolumne River (Basso-La Grange)" = 
+      readRDS(here::here("data-raw", "results", "fsa_basso_nbfc.Rds")),
+    ) #|>
+  #rename(area_tot = area_tot, area_wua = area_wua, area_pct = area_pct)
+
+wua_hydraulic_nbfc |> saveRDS(here::here("data-raw", "results", "fsa_combined_nbfc.Rds"))
+
+### FOR TEMPORARY/TESTING PURPOSES ONLY
+# wua_hydraulic <- wua_hydraulic_nbfc
 ```
 
 ``` r
@@ -107,28 +116,51 @@ interp_flows <- seq(300,15000,100)
 # Use this alternative to bring in flows alll the way up to 85000 cfs
 #interp_flows <- c(seq(300,950,50), seq(1000,9500,500), seq(10000,85000,5000))
 
+# flow_to_suitable_area <- 
+#   readRDS(here::here("data-raw", "results", "fsa_combined.Rds")) |>
+#   group_by(dataset, comid) |>
+#   complete(flow_cfs = interp_flows) |>
+#   arrange(dataset, comid, flow_cfs, length_ft) |>
+#   mutate(across(c(area_tot, area_wua, area_pct, wua_per_lf), function(var) zoo::na.approx(var, x = # flow_cfs, na.rm=F))) |>
+#   filter(flow_cfs %in% interp_flows) |>
+#   filter(!is.na(area_pct))
+
 flow_to_suitable_area <- 
-  flow_to_suitable_area |>
+#  fsa_combined |>
+#  group_by(dataset, comid, length_ft) |>
+#  complete(flow_cfs = interp_flows) |>
+#  arrange(dataset, comid, flow_cfs) |>
+#  mutate(across(c(area_tot, area_wua, area_pct, ind_per_lf, wua_per_lf), 
+#                function(var) zoo::na.approx(var, x = flow_cfs, na.rm=F))) |>
+  wua_hydraulic |>
   group_by(dataset, comid) |>
   complete(flow_cfs = interp_flows) |>
-  arrange(dataset, comid, flow_cfs) |>
-  mutate(across(c(area_tot_ft2, area_wua_ft2, hsi_frac), function(var) zoo::na.approx(var, x = flow_cfs, na.rm=F))) |>
+  arrange(dataset, comid, flow_cfs, length_ft) |>
+  mutate(across(c(area_tot, area_wua, area_pct, wua_per_lf), function(var) zoo::na.approx(var, x = flow_cfs, na.rm=F))) |>
   filter(flow_cfs %in% interp_flows) |>
-  filter(!is.na(hsi_frac))
+  filter(!is.na(area_pct)) |>
+  ungroup()
 
-train_data <- flowlines |> st_drop_geometry() |>
-  left_join(flowline_attributes, by=join_by("comid"), relationship="one-to-one") |>
+train_data <- habistat::flowline_attr |>
+  filter(comid %in% habistat::flowline_geom$comid) |>
   inner_join(flow_to_suitable_area, by=join_by("comid"), relationship="one-to-many") |>
-# TODO: reconcile length_ft from flow_to_suitable_area and from flowline_attributes
   mutate(case_wt = hardhat::importance_weights(length_ft)) |>
+  # drainage area scalar: million acre feet gross annual water input
+  #mutate(da_scalar_maf = (da_area_sq_km * 247.1053815) * (da_ppt_mean_mm / 304.8) / 1E6) |> 
   #filter(hqt_gradient_class != "Valley Lowland") |>
   # # eliminate reaches with near zero mean annual flow
   # filter(erom_q_ma_cfs>10) |>
   glimpse()
 ```
 
-    ## Rows: 20,236
-    ## Columns: 125
+    ## Rows: 21,486
+    ## Columns: 153
+
+    ## Warning in grepl(",", levels(x), fixed = TRUE): input string 1 is invalid in
+    ## this locale
+
+    ## Warning in grepl(",", levels(x), fixed = TRUE): input string 2 is invalid in
+    ## this locale
 
     ## Warning in grepl(",", levels(x), fixed = TRUE): input string 3 is invalid in
     ## this locale
@@ -146,10 +178,17 @@ train_data <- flowlines |> st_drop_geometry() |>
     ## $ lengthkm                     <dbl> 0.036, 0.036, 0.036, 0.036, 0.036, 0.036,…
     ## $ ftype                        <fct> StreamRiver, StreamRiver, StreamRiver, St…
     ## $ fcode                        <int> 46006, 46006, 46006, 46006, 46006, 46006,…
-    ## $ huc_8                        <chr> "18020125", "18020125", "18020125", "1802…
-    ## $ huc_10                       <chr> "1802012500", "1802012500", "1802012500",…
-    ## $ huc_12                       <chr> "180201250000", "180201250000", "18020125…
+    ## $ rc_huc_8                     <chr> "18020125", "18020125", "18020125", "1802…
+    ## $ rc_huc_10                    <chr> "1802012500", "1802012500", "1802012500",…
+    ## $ rc_huc_12                    <chr> "180201250000", "180201250000", "18020125…
     ## $ ftype_desc                   <chr> "Stream/River", "Stream/River", "Stream/R…
+    ## $ huc_8                        <chr> "18020125", "18020125", "18020125", "1802…
+    ## $ huc_10                       <chr> "1802012510", "1802012510", "1802012510",…
+    ## $ hu_10_name                   <chr> "Yuba River", "Yuba River", "Yuba River",…
+    ## $ huc_12                       <chr> "180201251002", "180201251002", "18020125…
+    ## $ hu_12_type                   <chr> "S", "S", "S", "S", "S", "S", "S", "S", "…
+    ## $ hu_12_name                   <chr> "Woods Creek-Yuba River", "Woods Creek-Yu…
+    ## $ hu_12_ds                     <chr> "180201251003", "180201251003", "18020125…
     ## $ hydro_seq                    <dbl> 10007863, 10007863, 10007863, 10007863, 1…
     ## $ reach_code                   <fct> 18020125000002, 18020125000002, 180201250…
     ## $ stream_level                 <dbl> 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,…
@@ -158,6 +197,7 @@ train_data <- flowlines |> st_drop_geometry() |>
     ## $ ds_length_km                 <dbl> 202.394, 202.394, 202.394, 202.394, 202.3…
     ## $ da_area_sq_km                <dbl> 3110.287, 3110.287, 3110.287, 3110.287, 3…
     ## $ reach_length_km              <dbl> 0.036, 0.036, 0.036, 0.036, 0.036, 0.036,…
+    ## $ reach_length_ft              <dbl> 118.1102, 118.1102, 118.1102, 118.1102, 1…
     ## $ slope                        <dbl> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, N…
     ## $ elev_min                     <dbl> 71.39, 71.39, 71.39, 71.39, 71.39, 71.39,…
     ## $ elev_max                     <dbl> 71.39, 71.39, 71.39, 71.39, 71.39, 71.39,…
@@ -242,7 +282,25 @@ train_data <- flowlines |> st_drop_geometry() |>
     ## $ frac_leveed_longitudinal     <dbl> 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,…
     ## $ lateral_levee_confinement_ft <dbl> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, N…
     ## $ geomorph_class               <fct> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, N…
+    ## $ geomorph_confined            <fct> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, N…
+    ## $ geomorph_uniform             <lgl> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, N…
+    ## $ geomorph_steppool            <lgl> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, N…
+    ## $ geomorph_riffles             <lgl> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, N…
+    ## $ geomorph_gravel              <lgl> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, N…
+    ## $ geomorph_spawning            <lgl> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, N…
     ## $ hqt_gradient_class           <fct> Bedrock, Bedrock, Bedrock, Bedrock, Bedro…
+    ## $ range_FR_Extant              <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE,…
+    ## $ range_FR_Historical          <lgl> TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE,…
+    ## $ range_LFR_Extant             <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE,…
+    ## $ range_LFR_Historical         <lgl> TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE,…
+    ## $ range_SR_Extant              <lgl> TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE,…
+    ## $ range_SR_Historical          <lgl> TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE,…
+    ## $ range_SR_Observed            <lgl> TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE,…
+    ## $ range_WR_Extant              <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE,…
+    ## $ range_WR_Historical          <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE,…
+    ## $ range_WR_Observed            <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE,…
+    ## $ range_cvchinook_historical   <lgl> TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE,…
+    ## $ range_cvchinook_extant       <lgl> TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE,…
     ## $ bf_xarea_m                   <dbl> 167.1659, 167.1659, 167.1659, 167.1659, 1…
     ## $ chan_width_m                 <dbl> 34.86407, 34.86407, 34.86407, 34.86407, 3…
     ## $ velocity_m_s                 <dbl> 5.601476, 5.601476, 5.601476, 5.601476, 5…
@@ -256,20 +314,23 @@ train_data <- flowlines |> st_drop_geometry() |>
     ## $ grain_size_suspended_mm      <dbl> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, N…
     ## $ mtpi30_min                   <dbl> -33, -33, -33, -33, -33, -33, -33, -33, -…
     ## $ vb_bf_w_ratio                <dbl> 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,…
-    ## $ da_scalar                    <dbl> 50.71088, 50.71088, 50.71088, 50.71088, 5…
-    ## $ length_ft                    <dbl> 118.1102, 118.1102, 118.1102, 118.1102, 1…
+    ## $ da_scalar_maf                <dbl> 4.225905, 4.225905, 4.225905, 4.225905, 4…
     ## $ dataset                      <chr> "Lower Yuba River", "Lower Yuba River", "…
     ## $ flow_cfs                     <dbl> 300, 400, 500, 600, 700, 800, 900, 1000, …
-    ## $ area_tot_ft2                 <dbl> 19593.81, 20488.41, 21314.99, 22077.41, 2…
-    ## $ area_wua_ft2                 <dbl> 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0…
-    ## $ hsi_frac                     <dbl> 0.000000000, 0.000000000, 0.000000000, 0.…
-    ## $ case_wt                      <imp_wts> 118.1102, 118.1102, 118.1102, 118.110…
+    ## $ area_tot                     <dbl> 19584.29, 20464.75, 21281.66, 22043.93, 2…
+    ## $ area_wua                     <dbl> 2584.542, 2614.989, 2679.709, 2736.891, 2…
+    ## $ area_pct                     <dbl> 0.13197016, 0.12778015, 0.12594477, 0.124…
+    ## $ length_ft                    <dbl> 116.047, 116.047, NA, 116.047, 116.047, 1…
+    ## $ ind_per_lf                   <dbl> 168.7618, 176.3489, NA, 189.9570, 197.788…
+    ## $ wua_per_lf                   <dbl> 22.27152, 22.53388, 23.09159, 23.58434, 2…
+    ## $ case_wt                      <imp_wts> 116.047, 116.047, NA, 116.047, 116.04…
 
 ``` r
-flowlines_gcs <- readRDS(here::here("data-raw", "results", "flowline_geometries.Rds"))
-train_flowlines <- flowlines_gcs |>
+train_flowlines <- habistat::flowline_geom |>
   filter(comid %in% unique(flow_to_suitable_area$comid)) |>
-  left_join(flowline_attributes, by=join_by("comid"), relationship="one-to-one") 
+  left_join(habistat::flowline_attr |> select(comid, gnis_name, hqt_gradient_class), 
+            by=join_by("comid"), 
+            relationship="one-to-one") 
 
 training_reach_labels <- train_flowlines |>
   group_by(gnis_name) |>
@@ -300,8 +361,8 @@ central_valley <- st_read(file.path("/vsizip",here::here("data-raw", "source", "
 ggplot() + 
   geom_sf(data=central_valley, aes(fill="Valley Foothill"), color=NA) +
   geom_sf(data=hqt_poly, aes(fill="Valley Lowland"), color=NA) +
-  geom_sf(data = flowlines_gcs |> 
-            inner_join(flowline_attributes |> 
+  geom_sf(data = habistat::flowline_geom |> 
+            inner_join(habistat::flowline_attr |> 
                          filter(da_area_sq_km>100) |>
                          filter(substr(reachcode,1, 4) %in% c("1802", "1803", "1804"))), color="black", alpha=0.1, linewidth=0.5) +
   geom_sf(data = train_flowlines, aes(color = hqt_gradient_class), linewidth=1) + 
@@ -321,7 +382,7 @@ ggplot() +
 ### Exploration and PCA
 
 ``` r
-df <- flowline_attributes |>
+df <- habistat::flowline_attr |>
   select(
          # predictors of flow (as would be found in a regional regression)
          slope, da_area_sq_km, da_elev_mean, da_ppt_mean_mm, 
@@ -393,7 +454,7 @@ factoextra::fviz_pca_var(pca, axes=c(2,3), col.var = "cos2", repel = TRUE)
 # pick variable to use for normalization
 # norm_var <- sym("erom_q_ma_cfs")
 #norm_var <- sym("da_area_sq_km")
-norm_var <- sym("da_scalar")
+norm_var <- sym("da_scalar_maf")
 
 filter_variable_ranges <- function(data) {
   data |>
@@ -402,19 +463,19 @@ filter_variable_ranges <- function(data) {
 
 td <- train_data |>
   mutate(flow_norm_cfs = flow_cfs / !!norm_var) |> # flow as a percent of mean annual flow
-  mutate(wua_per_lf = area_wua_ft2 / length_ft,
+  mutate(#wua_per_lf = area_wua / length_ft,
          #log_wua_per_lf = log(wua_per_lf), # transect-wise habitat area per linear foot
-         ihs_wua_per_lf = asinh(wua_per_lf), # inverse hyperbolic sine as alternative to log that can handle zeros
+         ihs_wua_per_lf = semiIHS00(wua_per_lf), # inverse hyperbolic sine as alternative to log that can handle zeros
          wua_per_lf_norm = wua_per_lf / !!norm_var,
          #log_wua_per_lf_norm = log(wua_per_lf_norm), # transect-wise habitat area per linear foot
-         ihs_wua_per_lf_norm = asinh(wua_per_lf_norm), # transect-wise habitat area per linear foot
-         tot_area_per_lf = area_tot_ft2 / length_ft,
+         ihs_wua_per_lf_norm = semiIHS00(wua_per_lf_norm), # transect-wise habitat area per linear foot
+         tot_area_per_lf = area_tot / length_ft,
          #log_tot_area_per_lf = log(tot_area_per_lf),
-         ihs_tot_area_per_lf = asinh(tot_area_per_lf)
+         ihs_tot_area_per_lf = semiIHS00(tot_area_per_lf)
          ) |> 
   transmute(dataset, comid, length_ft, case_wt,
          # suitable habitat area normalized by reach length
-         hsi_frac, wua_per_lf, ihs_wua_per_lf, wua_per_lf_norm, ihs_wua_per_lf_norm, tot_area_per_lf, ihs_tot_area_per_lf,
+         area_pct, wua_per_lf, ihs_wua_per_lf, wua_per_lf_norm, ihs_wua_per_lf_norm, tot_area_per_lf, ihs_tot_area_per_lf,
          # flow cfs normalized by mean annual flow
          flow_cfs, flow_norm_cfs,
          # predictors of flow (as would be found in a regional regression)
@@ -436,7 +497,7 @@ td <- train_data |>
          # fixed effects
          hqt_gradient_class=droplevels(hqt_gradient_class), hyd_cls=droplevels(hyd_cls),
          # scalar for normalizing
-         da_scalar
+         da_scalar_maf
          ) |> 
   #mutate(nf_bfl_dry_cfs_norm = nf_bfl_dry_cfs/!!norm_var, 
   #       nf_bfl_wet_cfs_norm = nf_bfl_wet_cfs/!!norm_var) |>
@@ -445,44 +506,44 @@ td <- train_data |>
   glimpse()
 ```
 
-    ## Rows: 18,164
+    ## Rows: 2,200
     ## Columns: 36
     ## $ dataset                  <chr> "Lower Yuba River", "Lower Yuba River", "Lowe…
     ## $ comid                    <dbl> 8062583, 8062583, 8062583, 8062583, 8062583, …
-    ## $ length_ft                <dbl> 82.021, 82.021, 82.021, 82.021, 82.021, 82.02…
-    ## $ case_wt                  <imp_wts> 82.021, 82.021, 82.021, 82.021, 82.021, 8…
-    ## $ hsi_frac                 <dbl> 0.000000000, 0.000000000, 0.000000000, 0.0000…
-    ## $ wua_per_lf               <dbl> 0.0000000, 0.0000000, 0.0000000, 0.0000000, 0…
-    ## $ ihs_wua_per_lf           <dbl> 0.0000000, 0.0000000, 0.0000000, 0.0000000, 0…
-    ## $ wua_per_lf_norm          <dbl> 0.000000000, 0.000000000, 0.000000000, 0.0000…
-    ## $ ihs_wua_per_lf_norm      <dbl> 0.000000000, 0.000000000, 0.000000000, 0.0000…
-    ## $ tot_area_per_lf          <dbl> 57.92315, 60.38506, 62.98109, 65.20196, 67.15…
-    ## $ ihs_tot_area_per_lf      <dbl> 4.752339, 4.793957, 4.836045, 4.870695, 4.900…
-    ## $ flow_cfs                 <dbl> 300, 400, 500, 600, 700, 800, 900, 1000, 1100…
-    ## $ flow_norm_cfs            <dbl> 5.915888, 7.887851, 9.859814, 11.831776, 13.8…
-    ## $ slope                    <dbl> 0.008, 0.008, 0.008, 0.008, 0.008, 0.008, 0.0…
+    ## $ length_ft                <dbl> 83.03531, 83.03531, 83.03531, 83.03531, 83.03…
+    ## $ case_wt                  <imp_wts> 83.03531, 83.03531, 83.03531, 83.03531, 8…
+    ## $ area_pct                 <dbl> 0.23734222, 0.20505208, 0.17057992, 0.1605998…
+    ## $ wua_per_lf               <dbl> 13.486187, 12.178903, 10.962499, 10.636151, 1…
+    ## $ ihs_wua_per_lf           <dbl> 7.206837, 7.104876, 6.999651, 6.969430, 6.959…
+    ## $ wua_per_lf_norm          <dbl> 3.191313, 2.881963, 2.594118, 2.516893, 2.491…
+    ## $ ihs_wua_per_lf_norm      <dbl> 5.765612, 5.663654, 5.558432, 5.528211, 5.517…
+    ## $ tot_area_per_lf          <dbl> 56.82170, 59.39419, 64.26606, 66.22766, 68.38…
+    ## $ ihs_tot_area_per_lf      <dbl> 8.645088, 8.689367, 8.768202, 8.798268, 8.830…
+    ## $ flow_cfs                 <dbl> 300, 400, 600, 700, 800, 1000, 1300, 1500, 17…
+    ## $ flow_norm_cfs            <dbl> 70.99070, 94.65426, 141.98139, 165.64496, 189…
+    ## $ slope                    <dbl> 0.00800000, 0.00800000, 0.00800000, 0.0080000…
     ## $ da_area_sq_km            <dbl> 3110.288, 3110.288, 3110.288, 3110.288, 3110.…
     ## $ da_elev_mean             <dbl> 1379.63, 1379.63, 1379.63, 1379.63, 1379.63, …
     ## $ da_ppt_mean_mm           <dbl> 1675.915, 1675.915, 1675.915, 1675.915, 1675.…
     ## $ bf_depth_m               <dbl> 2.83, 2.83, 2.83, 2.83, 2.83, 2.83, 2.83, 2.8…
     ## $ bf_w_d_ratio             <dbl> 24.80565, 24.80565, 24.80565, 24.80565, 24.80…
-    ## $ da_avg_slope             <dbl> 29.4, 29.4, 29.4, 29.4, 29.4, 29.4, 29.4, 29.…
+    ## $ da_avg_slope             <dbl> 29.40, 29.40, 29.40, 29.40, 29.40, 29.40, 29.…
     ## $ da_k_erodibility         <dbl> 0.2423, 0.2423, 0.2423, 0.2423, 0.2423, 0.242…
     ## $ mean_ndvi                <dbl> 0.4897366, 0.4897366, 0.4897366, 0.4897366, 0…
-    ## $ loc_bfi                  <dbl> 38, 38, 38, 38, 38, 38, 38, 38, 38, 38, 38, 3…
+    ## $ loc_bfi                  <dbl> 38.0000, 38.0000, 38.0000, 38.0000, 38.0000, …
     ## $ loc_pct_clay             <dbl> 21.08, 21.08, 21.08, 21.08, 21.08, 21.08, 21.…
     ## $ loc_pct_sand             <dbl> 23.42, 23.42, 23.42, 23.42, 23.42, 23.42, 23.…
     ## $ loc_permeability         <dbl> 3.11, 3.11, 3.11, 3.11, 3.11, 3.11, 3.11, 3.1…
     ## $ loc_bedrock_depth        <dbl> 59.89, 59.89, 59.89, 59.89, 59.89, 59.89, 59.…
     ## $ loc_ppt_mean_mm          <dbl> 767.475, 767.475, 767.475, 767.475, 767.475, …
     ## $ mtpi30_min               <dbl> -33, -33, -33, -33, -33, -33, -33, -33, -33, …
-    ## $ vb_width_transect        <dbl> 70.2, 70.2, 70.2, 70.2, 70.2, 70.2, 70.2, 70.…
-    ## $ vb_bf_w_ratio            <dbl> 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, …
+    ## $ vb_width_transect        <dbl> 70.2000, 70.2000, 70.2000, 70.2000, 70.2000, …
+    ## $ vb_bf_w_ratio            <dbl> 1.000000, 1.000000, 1.000000, 1.000000, 1.000…
     ## $ frac_leveed_longitudinal <dbl> 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, …
     ## $ sinuosity                <dbl> 1.01, 1.01, 1.01, 1.01, 1.01, 1.01, 1.01, 1.0…
     ## $ hqt_gradient_class       <fct> Bedrock, Bedrock, Bedrock, Bedrock, Bedrock, …
     ## $ hyd_cls                  <fct> High-volume snowmelt and rain, High-volume sn…
-    ## $ da_scalar                <dbl> 50.7109, 50.7109, 50.7109, 50.7109, 50.7109, …
+    ## $ da_scalar_maf            <dbl> 4.225906, 4.225906, 4.225906, 4.225906, 4.225…
 
 ``` r
 td |> ggplot() +
@@ -498,7 +559,11 @@ td |> ggplot() +
 
     ## `geom_smooth()` using formula = 'y ~ s(x, bs = "cs")'
 
-    ## Warning: Removed 828 rows containing non-finite values (`stat_smooth()`).
+    ## Warning: Removed 6 rows containing non-finite values (`stat_smooth()`).
+
+    ## Warning: Computation failed in `stat_smooth()`
+    ## Caused by error in `smooth.construct.cr.smooth.spec()`:
+    ## ! x has insufficient unique values to support 10 knots: reduce k.
 
 ![](model-expl_files/figure-gfm/td-summary-1.png)<!-- -->
 
@@ -508,13 +573,13 @@ Calculate the ranges of the predictor variables
 # td |> 
 #   group_by(dataset) |>
 #   select_if(is.numeric) |>
-#   pivot_longer(cols = hsi_frac:last_col()) |>
+#   pivot_longer(cols = area_pct:last_col()) |>
 #   group_by(dataset, name) |>
 #   summarize(min = min(value), max=max(value))
 
 domain <- td |> 
   select_if(is.numeric) |>
-  pivot_longer(cols = hsi_frac:last_col()) |>
+  pivot_longer(cols = area_pct:last_col()) |>
   group_by(name) |>
   summarize(min=min(value), max=max(value)) |>
   mutate(value = map2(min, max, function(x, y) list(min=x, max=y))) |>
@@ -550,7 +615,7 @@ td |>
   ggplot(aes(x = value)) + 
   geom_histogram(aes(y = after_stat(count / sum(count)))) +
   facet_wrap(~name, scales = "free_x") +
-  scale_x_continuous(trans = ihs) + theme(panel.grid.minor = element_blank())
+  scale_x_continuous(trans = trans_semiIHS) + theme(panel.grid.minor = element_blank())
 ```
 
     ## `stat_bin()` using `bins = 30`. Pick better value with `binwidth`.
@@ -590,7 +655,26 @@ td |>
 
     ## `geom_smooth()` using method = 'gam' and formula = 'y ~ s(x, bs = "cs")'
 
-    ## Warning: Removed 16560 rows containing non-finite values (`stat_smooth()`).
+    ## Warning: Removed 120 rows containing non-finite values (`stat_smooth()`).
+
+    ## Warning: Computation failed in `stat_smooth()`
+    ## Computation failed in `stat_smooth()`
+    ## Computation failed in `stat_smooth()`
+    ## Computation failed in `stat_smooth()`
+    ## Computation failed in `stat_smooth()`
+    ## Computation failed in `stat_smooth()`
+    ## Computation failed in `stat_smooth()`
+    ## Computation failed in `stat_smooth()`
+    ## Computation failed in `stat_smooth()`
+    ## Computation failed in `stat_smooth()`
+    ## Computation failed in `stat_smooth()`
+    ## Computation failed in `stat_smooth()`
+    ## Computation failed in `stat_smooth()`
+    ## Computation failed in `stat_smooth()`
+    ## Computation failed in `stat_smooth()`
+    ## Computation failed in `stat_smooth()`
+    ## Caused by error in `smooth.construct.cr.smooth.spec()`:
+    ## ! x has insufficient unique values to support 10 knots: reduce k.
 
 ![](model-expl_files/figure-gfm/td-flow-predictor-curves-2.png)<!-- -->
 
@@ -643,7 +727,7 @@ sd_rec <- recipe(data=training(td_split),
         # hqt_gradient_class + hyd_cls
         ) |>
  #step_log(all_numeric_predictors(), -mtpi30_min, -mean_ndvi, -vb_bf_w_ratio, -frac_leveed_longitudinal) |>
-  step_mutate_at(all_numeric_predictors(), fn = asinh) |>
+  step_mutate_at(all_numeric_predictors(), fn = semiIHS00) |>
   step_interact(terms = ~ slope:da_area_sq_km) |>
   #step_dummy(hqt_gradient_class) |>
   #step_dummy(hyd_cls) |>
@@ -668,9 +752,9 @@ lm_sd |> glance()
 ```
 
     ## # A tibble: 1 × 12
-    ##   r.squared adj.r.squared sigma statistic p.value    df  logLik    AIC    BIC
-    ##       <dbl>         <dbl> <dbl>     <dbl>   <dbl> <dbl>   <dbl>  <dbl>  <dbl>
-    ## 1     0.684         0.683  31.7      742.       0    43 -21683. 43456. 43798.
+    ##   r.squared adj.r.squared sigma statistic   p.value    df logLik   AIC   BIC
+    ##       <dbl>         <dbl> <dbl>     <dbl>     <dbl> <dbl>  <dbl> <dbl> <dbl>
+    ## 1     0.432         0.418  31.0      32.2 2.26e-190    43 -2610. 5309. 5558.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
@@ -678,18 +762,18 @@ lm_sd |> tidy()
 ```
 
     ## # A tibble: 44 × 5
-    ##    term             estimate std.error statistic  p.value
-    ##    <chr>               <dbl>     <dbl>     <dbl>    <dbl>
-    ##  1 (Intercept)          3.41   0.00931    366.   0       
-    ##  2 flow_cfs           357.    71.0          5.02 5.23e- 7
-    ##  3 slope              118.    18.9          6.22 5.13e-10
-    ##  4 da_area_sq_km        7.37   3.90         1.89 5.87e- 2
-    ##  5 da_elev_mean        17.1    5.68         3.01 2.62e- 3
-    ##  6 da_ppt_mean_mm       8.72   3.65         2.39 1.69e- 2
-    ##  7 bf_depth_m           9.66   0.745       13.0  3.38e-38
-    ##  8 bf_w_d_ratio         2.97   0.339        8.74 2.62e-18
-    ##  9 da_k_erodibility    27.0    6.40         4.22 2.43e- 5
-    ## 10 da_avg_slope        -7.06   3.44        -2.05 4.02e- 2
+    ##    term             estimate std.error statistic p.value
+    ##    <chr>               <dbl>     <dbl>     <dbl>   <dbl>
+    ##  1 (Intercept)         7.68     0.0240   320.     0     
+    ##  2 flow_cfs           73.9     52.6        1.40   0.160 
+    ##  3 slope              43.5     21.3        2.04   0.0417
+    ##  4 da_area_sq_km       1.15     2.44       0.472  0.637 
+    ##  5 da_elev_mean        0.886    6.47       0.137  0.891 
+    ##  6 da_ppt_mean_mm      3.76     6.47       0.581  0.561 
+    ##  7 bf_depth_m          1.59     1.83       0.868  0.385 
+    ##  8 bf_w_d_ratio        0.531    0.879      0.604  0.546 
+    ##  9 da_k_erodibility    2.65     2.92       0.907  0.364 
+    ## 10 da_avg_slope        1.03     4.57       0.226  0.821 
     ## # ℹ 34 more rows
 
 ``` r
@@ -697,23 +781,23 @@ lm_sd_res <- testing(td_split) |>
   transmute(comid, flow_cfs,
             # actuals
             ihs_wua_per_lf, 
-            wua_per_lf = sinh(ihs_wua_per_lf),
+            wua_per_lf = semiIHS00_inv(ihs_wua_per_lf),
             # predicted
             ihs_wua_per_lf_pred = predict(lm_sd, testing(td_split))[[".pred"]],
-            wua_per_lf_pred=sinh(ihs_wua_per_lf_pred))
+            wua_per_lf_pred=semiIHS00_inv(ihs_wua_per_lf_pred))
 
 lm_sd_res |>
   arrange(comid, flow_cfs) |>
   ggplot() + geom_path(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs, group=comid), linewidth=2) + 
   #scale_y_log10(limits=c(1,NA)) + scale_x_log10(limits=c(1,NA)) + 
-  scale_y_continuous(trans=ihs, limits=c(1,NA), labels=scales::label_comma()) + 
-  scale_x_continuous(trans=ihs, limits=c(1,NA), labels=scales::label_comma()) +
+  scale_y_continuous(trans = trans_semiIHS, limits=c(1,NA), labels=scales::label_comma()) + 
+  scale_x_continuous(trans = trans_semiIHS, limits=c(1,NA), labels=scales::label_comma()) +
   coord_fixed() + geom_abline() + scale_color_viridis_c(name="Flow (cfs)") + 
   ggtitle("Scale-dependent model, linear regression") +
   xlab("Suitable Habitat Area (ft2) per LF (Actual)") + ylab("Suitable Habitat Area (ft2) per LF (Predicted)")
 ```
 
-    ## Warning: Removed 274 rows containing missing values (`geom_path()`).
+    ## Warning: Removed 4 rows containing missing values (`geom_path()`).
 
 ![](model-expl_files/figure-gfm/lm-sd-1.png)<!-- -->
 
@@ -723,14 +807,14 @@ lm_sd_res |>
   ggplot() + geom_point(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs)) + 
   facet_wrap(~flow_cfs, ncol = 4) +
   #scale_y_log10(limits=c(1,NA)) + scale_x_log10(limits=c(1,NA)) + 
-  scale_y_continuous(trans=ihs, limits=c(1,NA), labels=scales::label_comma()) + 
-  scale_x_continuous(trans=ihs, limits=c(1,NA), labels=scales::label_comma()) +
+  scale_y_continuous(trans = trans_semiIHS, limits=c(1,NA), labels=scales::label_comma()) + 
+  scale_x_continuous(trans = trans_semiIHS, limits=c(1,NA), labels=scales::label_comma()) +
   coord_fixed() + geom_abline() + scale_color_viridis_c(name="Flow (cfs)") + 
   ggtitle("Scale-dependent model, linear regression") +
   xlab("Suitable Habitat Area (ft2) per LF (Actual)") + ylab("Suitable Habitat Area (ft2) per LF (Predicted)")
 ```
 
-    ## Warning: Removed 83 rows containing missing values (`geom_point()`).
+    ## Warning: Removed 5 rows containing missing values (`geom_point()`).
 
 ![](model-expl_files/figure-gfm/lm-sd-2.png)<!-- -->
 
@@ -738,7 +822,7 @@ lm_sd_res |>
 lm_sd_res |> filter(comid %in% test_comids) |>
   ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
-  scale_y_continuous(trans = ihs, limits = c(0, NA)) +
+  scale_y_continuous(trans = trans_semiIHS, limits = c(0, NA)) +
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area per LF Channel (ft)")  +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), panel.grid.minor=element_blank()) +
   scale_x_continuous(labels = scales::label_comma())
@@ -803,37 +887,37 @@ rfr_sd$fit$fit |> print()
     ## 
     ## Type:                             Regression 
     ## Number of trees:                  256 
-    ## Sample size:                      14758 
+    ## Sample size:                      1868 
     ## Number of independent variables:  43 
     ## Mtry:                             7 
     ## Target node size:                 10 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.09533618 
-    ## R squared (OOB):                  0.9521032
+    ## OOB prediction error (MSE):       0.4823758 
+    ## R squared (OOB):                  0.5430685
 
 ``` r
 rfr_sd_res <- testing(td_split) |>
   transmute(comid, flow_cfs,
             # actuals
             ihs_wua_per_lf, 
-            wua_per_lf = sinh(ihs_wua_per_lf),
+            wua_per_lf = semiIHS00_inv(ihs_wua_per_lf),
             # predicted
             ihs_wua_per_lf_pred = predict(rfr_sd, testing(td_split))[[".pred"]],
-            wua_per_lf_pred=sinh(ihs_wua_per_lf_pred))
+            wua_per_lf_pred=semiIHS00_inv(ihs_wua_per_lf_pred))
 
 rfr_sd_res |>
   arrange(comid, flow_cfs) |>
   ggplot() + geom_path(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs, group=comid), linewidth=2) + 
   #scale_y_log10(limits=c(1,NA)) + scale_x_log10(limits=c(1,NA)) + 
-  scale_y_continuous(trans=ihs, limits=c(1,NA), labels=scales::label_comma()) + 
-  scale_x_continuous(trans=ihs, limits=c(1,NA), labels=scales::label_comma()) +
+  scale_y_continuous(trans = trans_semiIHS, limits=c(1,NA), labels=scales::label_comma()) + 
+  scale_x_continuous(trans = trans_semiIHS, limits=c(1,NA), labels=scales::label_comma()) +
   coord_fixed() + geom_abline() + scale_color_viridis_c(name="Flow (cfs)")   + 
   ggtitle("Scale-dependent model, random forest regression") +
   xlab("Suitable Habitat Area (ft2) per LF (Actual)") + ylab("Suitable Habitat Area (ft2) per LF (Predicted)")
 ```
 
-    ## Warning: Removed 302 rows containing missing values (`geom_path()`).
+    ## Warning: Removed 4 rows containing missing values (`geom_path()`).
 
 ![](model-expl_files/figure-gfm/rfr-sd-1.png)<!-- -->
 
@@ -843,14 +927,14 @@ rfr_sd_res |>
   ggplot() + geom_point(aes(x=wua_per_lf, y=wua_per_lf_pred, color=flow_cfs)) + 
   facet_wrap(~flow_cfs, ncol = 4) +
   #scale_y_log10(limits=c(1,NA)) + scale_x_log10(limits=c(1,NA)) + 
-  scale_y_continuous(trans=ihs, limits=c(1,NA), labels=scales::label_comma()) + 
-  scale_x_continuous(trans=ihs, limits=c(1,NA), labels=scales::label_comma()) +
+  scale_y_continuous(trans = trans_semiIHS, limits=c(1,NA), labels=scales::label_comma()) + 
+  scale_x_continuous(trans = trans_semiIHS, limits=c(1,NA), labels=scales::label_comma()) +
   coord_fixed() + geom_abline() + scale_color_viridis_c(name="Flow (cfs)") + 
   ggtitle("Scale-dependent model, random forest regression") +
   xlab("Suitable Habitat Area (ft2) per LF (Actual)") + ylab("Suitable Habitat Area (ft2) per LF (Predicted)")
 ```
 
-    ## Warning: Removed 91 rows containing missing values (`geom_point()`).
+    ## Warning: Removed 5 rows containing missing values (`geom_point()`).
 
 ![](model-expl_files/figure-gfm/rfr-sd-2.png)<!-- -->
 
@@ -858,7 +942,7 @@ rfr_sd_res |>
 rfr_sd_res |> filter(comid %in% test_comids) |>
   ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
-  scale_y_continuous(trans = ihs, limits = c(0, NA)) + 
+  scale_y_continuous(trans = trans_semiIHS, limits = c(0, NA)) + 
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area per LF Channel (ft)")  +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), panel.grid.minor=element_blank()) +
   scale_x_continuous(labels = scales::label_comma())
@@ -881,7 +965,7 @@ residuals <- sd_rec |>
             train_test,
             flow_cfs = flow_cfs_orig, 
             ihs_wua_per_lf_pred,
-            wua_per_lf_pred = sinh(ihs_wua_per_lf_pred),
+            wua_per_lf_pred = semiIHS00_inv(ihs_wua_per_lf_pred),
             resid = wua_per_lf_pred - wua_per_lf)
 residuals |> 
   group_by(train_test) |>
@@ -890,7 +974,7 @@ residuals |>
 ```
 
     ##      Test     Train 
-    ## -7.205008 -2.202128
+    ## -4.576854 -7.262763
 
 ``` r
 residuals |>
@@ -930,7 +1014,7 @@ sd2_rec <- recipe(data=training(td_split),
         # hqt_gradient_class + hyd_cls
         ) |>
   #step_log(all_numeric_predictors(), -mtpi30_min, -vb_bf_w_ratio, -frac_leveed_longitudinal) |>
-  step_mutate_at(all_numeric_predictors(), fn = asinh) |>
+  step_mutate_at(all_numeric_predictors(), fn = semiIHS00) |>
   step_interact(terms = ~ slope:da_area_sq_km) |>
   # step_dummy(hqt_gradient_class) |>
   # step_dummy(hyd_cls) |>
@@ -956,9 +1040,9 @@ lm_sd2 |> glance()
 ```
 
     ## # A tibble: 1 × 12
-    ##   r.squared adj.r.squared sigma statistic p.value    df  logLik    AIC    BIC
-    ##       <dbl>         <dbl> <dbl>     <dbl>   <dbl> <dbl>   <dbl>  <dbl>  <dbl>
-    ## 1     0.767         0.767  15.3     1183.       0    41 -10928. 21942. 22269.
+    ##   r.squared adj.r.squared sigma statistic p.value    df logLik   AIC   BIC
+    ##       <dbl>         <dbl> <dbl>     <dbl>   <dbl> <dbl>  <dbl> <dbl> <dbl>
+    ## 1     0.742         0.736  13.5      128.       0    41 -1061. 2207. 2445.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
@@ -966,18 +1050,18 @@ lm_sd2 |> tidy()
 ```
 
     ## # A tibble: 42 × 5
-    ##    term             estimate std.error statistic  p.value
-    ##    <chr>               <dbl>     <dbl>     <dbl>    <dbl>
-    ##  1 (Intercept)          6.34   0.00448   1415.   0       
-    ##  2 flow_cfs           179.    34.1          5.24 1.64e- 7
-    ##  3 slope              -24.5    8.84        -2.78 5.49e- 3
-    ##  4 da_area_sq_km        5.18   1.87         2.76 5.70e- 3
-    ##  5 da_elev_mean        11.6    2.73         4.26 2.09e- 5
-    ##  6 da_ppt_mean_mm       1.98   1.74         1.14 2.56e- 1
-    ##  7 bf_depth_m           6.53   0.357       18.3  8.23e-74
-    ##  8 bf_w_d_ratio         2.44   0.163       14.9  4.34e-50
-    ##  9 da_k_erodibility    19.4    3.07         6.32 2.70e-10
-    ## 10 da_avg_slope        -3.15   1.65        -1.91 5.59e- 2
+    ##    term             estimate std.error statistic     p.value
+    ##    <chr>               <dbl>     <dbl>     <dbl>       <dbl>
+    ##  1 (Intercept)         9.97     0.0104   954.    0          
+    ##  2 flow_cfs           78.4     22.4        3.50  0.000474   
+    ##  3 slope             -17.8      9.17      -1.94  0.0523     
+    ##  4 da_area_sq_km      -2.41     1.06      -2.27  0.0231     
+    ##  5 da_elev_mean        2.75     2.81       0.982 0.326      
+    ##  6 da_ppt_mean_mm      1.30     2.81       0.462 0.644      
+    ##  7 bf_depth_m          2.46     0.798      3.08  0.00207    
+    ##  8 bf_w_d_ratio        0.805    0.383      2.10  0.0356     
+    ##  9 da_k_erodibility    5.78     1.13       5.11  0.000000348
+    ## 10 da_avg_slope        2.20     1.98       1.11  0.267      
     ## # ℹ 32 more rows
 
 ``` r
@@ -985,10 +1069,10 @@ lm_sd2_res <- testing(td_split) |>
   transmute(comid, flow_cfs,
             # actuals
             ihs_tot_area_per_lf, 
-            tot_area_per_lf = sinh(ihs_tot_area_per_lf),
+            tot_area_per_lf = semiIHS00_inv(ihs_tot_area_per_lf),
             # predicted
             ihs_tot_area_per_lf_pred = predict(lm_sd2, testing(td_split))[[".pred"]],
-            tot_area_per_lf_pred=sinh(ihs_tot_area_per_lf_pred))
+            tot_area_per_lf_pred=semiIHS00_inv(ihs_tot_area_per_lf_pred))
 
 lm_sd2_res |>
   arrange(comid, flow_cfs) |>
@@ -1017,7 +1101,7 @@ lm_sd2_res |>
 lm_sd2_res |> filter(comid %in% test_comids) |>
   ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=tot_area_per_lf_pred, color="predicted", group=1)) + geom_line(aes(y=tot_area_per_lf, color="actual", group=1)) + 
-  scale_y_continuous(trans = ihs) + 
+  scale_y_continuous(trans = trans_semiIHS) + 
   xlab("Flow (cfs)") + ylab("Total Inundated Area per LF Channel (ft)")  +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), panel.grid.minor=element_blank()) +
   scale_x_continuous(labels = scales::label_comma())
@@ -1081,24 +1165,24 @@ rfr_sd2$fit$fit |> print()
     ## 
     ## Type:                             Regression 
     ## Number of trees:                  256 
-    ## Sample size:                      14758 
+    ## Sample size:                      1868 
     ## Number of independent variables:  41 
     ## Mtry:                             6 
     ## Target node size:                 10 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.01019373 
-    ## R squared (OOB):                  0.9781552
+    ## OOB prediction error (MSE):       0.07688173 
+    ## R squared (OOB):                  0.7624391
 
 ``` r
 rfr_sd2_res <- testing(td_split) |>
   transmute(comid, flow_cfs,
             # actuals
             ihs_tot_area_per_lf, 
-            tot_area_per_lf = sinh(ihs_tot_area_per_lf),
+            tot_area_per_lf = semiIHS00_inv(ihs_tot_area_per_lf),
             # predicted
             ihs_tot_area_per_lf_pred = predict(rfr_sd2, testing(td_split))[[".pred"]],
-            tot_area_per_lf_pred=sinh(ihs_tot_area_per_lf_pred))
+            tot_area_per_lf_pred=semiIHS00_inv(ihs_tot_area_per_lf_pred))
 
 rfr_sd2_res |>
   arrange(comid, flow_cfs) |>
@@ -1126,7 +1210,7 @@ rfr_sd2_res |>
 rfr_sd2_res |> filter(comid %in% test_comids) |>
   ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=tot_area_per_lf_pred, color="predicted", group=1)) + geom_line(aes(y=tot_area_per_lf, color="actual", group=1)) + 
-  scale_y_continuous(trans = ihs) +
+  scale_y_continuous(trans = trans_semiIHS) +
   xlab("Flow (cfs)") + ylab("Total Inundated Area per LF Channel (ft)")  +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), panel.grid.minor=element_blank()) +
   scale_x_continuous(labels = scales::label_comma())
@@ -1149,7 +1233,7 @@ via the betareg package.
 
 ``` r
 si_rec <- recipe(data=training(td_split), 
-      formula=hsi_frac + case_wt ~ 
+      formula=area_pct + case_wt ~ 
         # flow as percent of mean annual flow
         flow_norm_cfs + 
         # channel characteristics: gradient and sinuosity
@@ -1171,7 +1255,7 @@ si_rec <- recipe(data=training(td_split),
         #hqt_gradient_class + hyd_cls
         ) |>
   #step_log(all_numeric_predictors(), -mtpi30_min, -mean_ndvi, -bio_aq_rank_sw, -vb_bf_w_ratio, -frac_leveed_longitudinal) |>
-  step_mutate_at(all_numeric_predictors(), fn = asinh) |>
+  step_mutate_at(all_numeric_predictors(), fn = semiIHS00) |>
   #step_dummy(hqt_gradient_class) |>
   #step_dummy(hyd_cls) |>
   step_interact(terms = ~ flow_norm_cfs:all_predictors()) |>
@@ -1195,9 +1279,9 @@ lm_si |> glance()
 ```
 
     ## # A tibble: 1 × 12
-    ##   r.squared adj.r.squared sigma statistic p.value    df logLik     AIC     BIC
-    ##       <dbl>         <dbl> <dbl>     <dbl>   <dbl> <dbl>  <dbl>   <dbl>   <dbl>
-    ## 1     0.503         0.502  1.72      452.       0    33 21312. -42554. -42288.
+    ##   r.squared adj.r.squared sigma statistic   p.value    df logLik    AIC    BIC
+    ##       <dbl>         <dbl> <dbl>     <dbl>     <dbl> <dbl>  <dbl>  <dbl>  <dbl>
+    ## 1     0.452         0.442  3.26      45.9 1.49e-212    33  1587. -3104. -2910.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
@@ -1205,30 +1289,30 @@ lm_si |> tidy()
 ```
 
     ## # A tibble: 34 × 5
-    ##    term              estimate std.error statistic  p.value
-    ##    <chr>                <dbl>     <dbl>     <dbl>    <dbl>
-    ##  1 (Intercept)       0.0743    0.000497  150.     0       
-    ##  2 flow_norm_cfs     2.59      0.190      13.6    6.65e-42
-    ##  3 slope             0.0430    0.00880     4.88   1.08e- 6
-    ##  4 sinuosity        -0.00771   0.00207    -3.72   1.97e- 4
-    ##  5 bf_depth_m        0.184     0.0128     14.3    3.02e-46
-    ##  6 bf_w_d_ratio      0.0595    0.00630     9.45   3.88e-21
-    ##  7 da_k_erodibility  0.222     0.0166     13.4    1.32e-40
-    ##  8 da_avg_slope      0.0499    0.0126      3.95   7.99e- 5
-    ##  9 mean_ndvi         0.000183  0.00486     0.0378 9.70e- 1
-    ## 10 loc_bfi           0.108     0.00603    17.9    6.71e-71
+    ##    term             estimate std.error statistic  p.value
+    ##    <chr>               <dbl>     <dbl>     <dbl>    <dbl>
+    ##  1 (Intercept)        0.138    0.00238    57.7   0       
+    ##  2 flow_norm_cfs     -0.703    2.53       -0.277 0.782   
+    ##  3 slope              0.108    0.0570      1.90  0.0576  
+    ##  4 sinuosity          0.0299   0.0143      2.09  0.0369  
+    ##  5 bf_depth_m         0.130    0.0596      2.18  0.0297  
+    ##  6 bf_w_d_ratio       0.0601   0.0382      1.58  0.115   
+    ##  7 da_k_erodibility  -0.347    0.171      -2.02  0.0432  
+    ##  8 da_avg_slope      -0.168    0.102      -1.65  0.0986  
+    ##  9 mean_ndvi          0.0664   0.0341      1.95  0.0513  
+    ## 10 loc_bfi           -0.140    0.0421     -3.33  0.000886
     ## # ℹ 24 more rows
 
 ``` r
 lm_si_res <- testing(td_split) |>
-  transmute(comid, flow_cfs, flow_norm_cfs, !!norm_var, hsi_frac,
-            hsi_frac_pred = predict(lm_si, testing(td_split))[[".pred"]]) |>
+  transmute(comid, flow_cfs, flow_norm_cfs, !!norm_var, area_pct,
+            area_pct_pred = predict(lm_si, testing(td_split))[[".pred"]]) |>
   # crude constraint to between 0 and 1; better to use betareg
-  mutate(hsi_frac_pred=pmax(pmin(hsi_frac_pred,1),0))
+  mutate(area_pct_pred=pmax(pmin(area_pct_pred,1),0))
 
 lm_si_res |>
   arrange(comid, flow_norm_cfs) |>
-  ggplot() + geom_path(aes(x=hsi_frac, y=hsi_frac_pred, color=flow_norm_cfs, group=comid), linewidth=2) + 
+  ggplot() + geom_path(aes(x=area_pct, y=area_pct_pred, color=flow_norm_cfs, group=comid), linewidth=2) + 
   coord_fixed() + geom_abline() + scale_color_viridis_c(trans="log10", name="Frac. of MAF") + 
   ggtitle("Scale-independent model, linear regression") +
   xlab("HSI (Frac. of Channel Area) (Actual)") + ylab("HSI (Frac. of Channel Area) (Predicted)")
@@ -1239,7 +1323,7 @@ lm_si_res |>
 ``` r
 lm_si_res |> 
   filter(flow_cfs %in% c(300,500,1000,1500,3000,5000,10000,15000)) |>
-  ggplot() + geom_point(aes(x=hsi_frac, y=hsi_frac_pred, color=flow_cfs)) + 
+  ggplot() + geom_point(aes(x=area_pct, y=area_pct_pred, color=flow_cfs)) + 
   facet_wrap(~flow_cfs, ncol = 4) +
   coord_fixed() + geom_abline() + scale_color_viridis_c(name = "Flow (cfs)") + 
   ggtitle("Scale-independent model, linear regression") +
@@ -1251,7 +1335,7 @@ lm_si_res |>
 ``` r
 lm_si_res |> filter(comid %in% test_comids) |>
   ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
-  geom_line(aes(y=hsi_frac_pred*100, color="predicted", group=1)) + geom_line(aes(y=hsi_frac*100, color="actual", group=1)) + 
+  geom_line(aes(y=area_pct_pred*100, color="predicted", group=1)) + geom_line(aes(y=area_pct*100, color="actual", group=1)) + 
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (% of Total Area)") +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), panel.grid.minor=element_blank()) +
   scale_x_continuous(labels = scales::label_comma())
@@ -1342,25 +1426,25 @@ rfr_si$fit$fit |> print()
     ## 
     ## Type:                             Regression 
     ## Number of trees:                  256 
-    ## Sample size:                      14758 
+    ## Sample size:                      1868 
     ## Number of independent variables:  33 
     ## Mtry:                             5 
     ## Target node size:                 10 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.0004767478 
-    ## R squared (OOB):                  0.8952908
+    ## OOB prediction error (MSE):       0.007417362 
+    ## R squared (OOB):                  0.462963
 
 ``` r
 rfr_si_res <- testing(td_split) |>
-  transmute(comid, flow_cfs, flow_norm_cfs, !!norm_var, hsi_frac,
-            hsi_frac_pred = predict(rfr_si, testing(td_split))[[".pred"]]) |>
+  transmute(comid, flow_cfs, flow_norm_cfs, !!norm_var, area_pct,
+            area_pct_pred = predict(rfr_si, testing(td_split))[[".pred"]]) |>
   # crude constraint to between 0 and 1; better to use betareg
-  mutate(hsi_frac_pred=pmax(pmin(hsi_frac_pred,1),0))
+  mutate(area_pct_pred=pmax(pmin(area_pct_pred,1),0))
 
 rfr_si_res |>
   arrange(comid, flow_norm_cfs) |>
-  ggplot() + geom_path(aes(x=hsi_frac, y=hsi_frac_pred, color=flow_norm_cfs, group=comid), linewidth=2) + 
+  ggplot() + geom_path(aes(x=area_pct, y=area_pct_pred, color=flow_norm_cfs, group=comid), linewidth=2) + 
   coord_fixed() + geom_abline() + scale_color_viridis_c(trans="log10", name="Frac. of MAF") + 
   ggtitle("Scale-independent model, random forest regression") +
   xlab("HSI (Frac. of Channel Area) (Actual)") + ylab("HSI (Frac. of Channel Area) (Predicted)")
@@ -1371,7 +1455,7 @@ rfr_si_res |>
 ``` r
 rfr_si_res |> 
   filter(flow_cfs %in% c(300,500,1000,1500,3000,5000,10000,15000)) |>
-  ggplot() + geom_point(aes(x=hsi_frac, y=hsi_frac_pred, color=flow_cfs)) + 
+  ggplot() + geom_point(aes(x=area_pct, y=area_pct_pred, color=flow_cfs)) + 
   facet_wrap(~flow_cfs, ncol = 4) +
   coord_fixed() + geom_abline() + scale_color_viridis_c(name = "Flow (cfs)") + 
   ggtitle("Scale-independent model, random forest regression") +
@@ -1383,7 +1467,7 @@ rfr_si_res |>
 ``` r
 rfr_si_res |> filter(comid %in% test_comids) |>
   ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
-  geom_line(aes(y=hsi_frac_pred*100, color="predicted", group=1)) + geom_line(aes(y=hsi_frac*100, color="actual", group=1)) + 
+  geom_line(aes(y=area_pct_pred*100, color="predicted", group=1)) + geom_line(aes(y=area_pct*100, color="actual", group=1)) + 
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (% of Total Area)") +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), panel.grid.minor=element_blank()) +
   scale_x_continuous(labels = scales::label_comma())
@@ -1391,10 +1475,10 @@ rfr_si_res |> filter(comid %in% test_comids) |>
 
 ![](model-expl_files/figure-gfm/rfr-si-3.png)<!-- -->
 
-### Scale Independent Model 2: WUA-per-linear-ft (normalized by da_scalar) versus flow (normalized by da_scalar)
+### Scale Independent Model 2: WUA-per-linear-ft (normalized by da_scalar_maf) versus flow (normalized by da_scalar_maf)
 
 A potential compromise between the previous two models that scales the
-results by da_scalar, then unscales them after prediction.
+results by da_scalar_maf, then unscales them after prediction.
 
 ``` r
 si2_rec <- recipe(data=training(td_split), 
@@ -1420,7 +1504,7 @@ si2_rec <- recipe(data=training(td_split),
         # hqt_gradient_class + hyd_cls
         ) |>
   #step_log(all_numeric_predictors(), -mtpi30_min, -mean_ndvi, -bio_aq_rank_sw, -vb_bf_w_ratio, -frac_leveed_longitudinal) |>
-  step_mutate_at(all_numeric_predictors(), fn = asinh) |>
+  step_mutate_at(all_numeric_predictors(), fn = semiIHS00) |>
   # step_dummy(hqt_gradient_class) |>
   # step_dummy(hyd_cls) |>
   step_interact(terms = ~ flow_norm_cfs:all_predictors()) |>
@@ -1444,9 +1528,9 @@ lm_si2 |> glance()
 ```
 
     ## # A tibble: 1 × 12
-    ##   r.squared adj.r.squared sigma statistic p.value    df  logLik    AIC    BIC
-    ##       <dbl>         <dbl> <dbl>     <dbl>   <dbl> <dbl>   <dbl>  <dbl>  <dbl>
-    ## 1     0.811         0.810  18.1     2035.       0    31 -13438. 26943. 27194.
+    ##   r.squared adj.r.squared sigma statistic   p.value    df logLik   AIC   BIC
+    ##       <dbl>         <dbl> <dbl>     <dbl>     <dbl> <dbl>  <dbl> <dbl> <dbl>
+    ## 1     0.475         0.466  33.9      53.6 1.04e-230    31 -2787. 5640. 5823.
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 ``` r
@@ -1454,18 +1538,18 @@ lm_si2 |> tidy()
 ```
 
     ## # A tibble: 32 × 5
-    ##    term             estimate std.error statistic   p.value
-    ##    <chr>               <dbl>     <dbl>     <dbl>     <dbl>
-    ##  1 (Intercept)        0.693    0.00520   133.    0        
-    ##  2 flow_norm_cfs     60.4      2.00       30.2   1.98e-194
-    ##  3 slope              0.249    0.0919      2.71  6.72e-  3
-    ##  4 sinuosity          0.332    0.0217     15.3   1.56e- 52
-    ##  5 bf_w_d_ratio       0.369    0.0383      9.63  6.65e- 22
-    ##  6 da_k_erodibility  -0.0840   0.136      -0.618 5.36e-  1
-    ##  7 da_avg_slope       1.82     0.128      14.3   8.65e- 46
-    ##  8 mean_ndvi          0.112    0.0489      2.29  2.21e-  2
-    ##  9 loc_bfi            0.603    0.0494     12.2   4.79e- 34
-    ## 10 loc_pct_clay       0.516    0.0662      7.79  7.03e- 15
+    ##    term             estimate std.error statistic  p.value
+    ##    <chr>               <dbl>     <dbl>     <dbl>    <dbl>
+    ##  1 (Intercept)         6.61     0.0246   269.    0       
+    ##  2 flow_norm_cfs      71.7     26.2        2.73  6.34e- 3
+    ##  3 slope               0.830    0.535      1.55  1.21e- 1
+    ##  4 sinuosity           0.716    0.149      4.81  1.63e- 6
+    ##  5 bf_w_d_ratio        0.585    0.359      1.63  1.03e- 1
+    ##  6 da_k_erodibility   -1.10     1.70      -0.645 5.19e- 1
+    ##  7 da_avg_slope        1.68     1.06       1.59  1.13e- 1
+    ##  8 mean_ndvi           0.908    0.352      2.58  9.93e- 3
+    ##  9 loc_bfi            -1.83     0.369     -4.95  8.08e- 7
+    ## 10 loc_pct_clay        3.22     0.482      6.68  3.14e-11
     ## # ℹ 22 more rows
 
 ``` r
@@ -1473,11 +1557,11 @@ lm_si2_res <- testing(td_split) |>
   transmute(comid, flow_norm_cfs, flow_cfs, !!norm_var,
             # actuals
             ihs_wua_per_lf_norm,
-            wua_per_lf_norm = sinh(ihs_wua_per_lf_norm), 
+            wua_per_lf_norm = semiIHS00_inv(ihs_wua_per_lf_norm), 
             wua_per_lf = wua_per_lf_norm * !!norm_var,
             # predicted
             ihs_wua_per_lf_norm_pred = predict(lm_si2, testing(td_split))[[".pred"]],
-            wua_per_lf_norm_pred = sinh(ihs_wua_per_lf_norm_pred),
+            wua_per_lf_norm_pred = semiIHS00_inv(ihs_wua_per_lf_norm_pred),
             wua_per_lf_pred = wua_per_lf_norm_pred * !!norm_var)
 
 lm_si2_res |>
@@ -1507,7 +1591,7 @@ lm_si2_res |> filter(comid %in% test_comids) |>
   ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + 
   geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
-  scale_y_continuous(trans = ihs, limits = c(0, NA)) + 
+  scale_y_continuous(trans = trans_semiIHS, limits = c(0, NA)) + 
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2) per LF") +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), panel.grid.minor=element_blank()) +
   scale_x_continuous(labels = scales::label_comma())
@@ -1571,25 +1655,25 @@ rfr_si2$fit$fit |> print()
     ## 
     ## Type:                             Regression 
     ## Number of trees:                  256 
-    ## Sample size:                      14758 
+    ## Sample size:                      1868 
     ## Number of independent variables:  31 
     ## Mtry:                             5 
     ## Target node size:                 10 
     ## Variable importance mode:         none 
     ## Splitrule:                        variance 
-    ## OOB prediction error (MSE):       0.01231636 
-    ## R squared (OOB):                  0.9858106
+    ## OOB prediction error (MSE):       0.5228471 
+    ## R squared (OOB):                  0.6111357
 
 ``` r
 rfr_si2_res <- testing(td_split) |>
   transmute(comid, flow_norm_cfs, flow_cfs, !!norm_var,
             # actuals
             ihs_wua_per_lf_norm,
-            wua_per_lf_norm = sinh(ihs_wua_per_lf_norm), 
+            wua_per_lf_norm = semiIHS00_inv(ihs_wua_per_lf_norm), 
             wua_per_lf = wua_per_lf_norm * !!norm_var,
             # predicted
             ihs_wua_per_lf_norm_pred = predict(rfr_si2, testing(td_split))[[".pred"]],
-            wua_per_lf_norm_pred = sinh(ihs_wua_per_lf_norm_pred),
+            wua_per_lf_norm_pred = semiIHS00_inv(ihs_wua_per_lf_norm_pred),
             wua_per_lf_pred = wua_per_lf_norm_pred * !!norm_var)
 
 rfr_si2_res |>
@@ -1619,7 +1703,7 @@ rfr_si2_res |> filter(comid %in% test_comids) |>
   ggplot(aes(x=flow_cfs, group=1)) + facet_wrap(~comid) + 
   geom_line(aes(y=wua_per_lf_pred, color="predicted", group=1)) + 
   geom_line(aes(y=wua_per_lf, color="actual", group=1)) + 
-  scale_y_continuous(trans = ihs, limits = c(0, NA)) + 
+  scale_y_continuous(trans = trans_semiIHS, limits = c(0, NA)) + 
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2) per LF")  +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), panel.grid.minor=element_blank()) +
   scale_x_continuous(labels = scales::label_comma())
@@ -1631,7 +1715,7 @@ rfr_si2_res |> filter(comid %in% test_comids) |>
 
 ``` r
 # assemble prediction dataset
-pd_attr <- flowline_attributes |> 
+pd_attr <- habistat::flowline_attr |> 
   # select just major streams
   filter_variable_ranges() |> #stream_level<=4 & !is.na(gnis_name) 
       filter(substr(reachcode,1, 4) %in% c("1802", "1803", "1804")) |> # Central Valley basin only
@@ -1681,14 +1765,14 @@ pd <- pd_attr |>
     ## $ frac_leveed_longitudinal <dbl> 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, …
     ## $ vb_width_transect        <dbl> 17.32, 17.32, 17.32, 17.32, 17.32, 17.32, 17.…
     ## $ sinuosity                <dbl> 1.31, 1.31, 1.31, 1.31, 1.31, 1.31, 1.31, 1.3…
-    ## $ da_scalar                <dbl> 1.364322, 1.364322, 1.364322, 1.364322, 1.364…
+    ## $ da_scalar_maf            <dbl> 0.1136935, 0.1136935, 0.1136935, 0.1136935, 0…
     ## $ hyd_cls                  <fct> "Low-volume snowmelt and rain", "Low-volume s…
     ## $ hqt_gradient_class       <fct> Bedrock, Bedrock, Bedrock, Bedrock, Bedrock, …
     ## $ flow_cfs                 <dbl> 100, 200, 300, 400, 500, 600, 700, 800, 900, …
-    ## $ flow_norm_cfs            <dbl> 73.29645, 146.59291, 219.88936, 293.18582, 36…
+    ## $ flow_norm_cfs            <dbl> 879.5579, 1759.1159, 2638.6738, 3518.2317, 43…
 
 ``` r
-flowlines_gcs |>
+habistat::flowline_geom |>
   inner_join(pd_attr, by=join_by(comid)) |>
   ggplot() + geom_sf(aes(color = da_area_sq_km)) + 
   scale_color_viridis_c(name = "Drainage area (km2)", trans="sqrt", breaks = scales::breaks_log(6), direction = -1)
@@ -1697,7 +1781,7 @@ flowlines_gcs |>
 ![](model-expl_files/figure-gfm/prediction-data-1.png)<!-- -->
 
 ``` r
-flowlines_gcs |>
+habistat::flowline_geom |>
   inner_join(pd_attr, by=join_by(comid)) |>
   ggplot() + geom_sf(aes(color = hyd_cls)) +
   scale_color_manual(name = "eFlows hydrologic class",
@@ -1729,7 +1813,7 @@ sd_pred <-
   transmute(comid, 
             flow_cfs = flow_cfs_orig, 
             ihs_wua_per_lf_pred,
-            wua_per_lf_pred = sinh(ihs_wua_per_lf_pred)) |>
+            wua_per_lf_pred = semiIHS00_inv(ihs_wua_per_lf_pred)) |>
   glimpse()
 ```
 
@@ -1737,11 +1821,11 @@ sd_pred <-
     ## Columns: 4
     ## $ comid               <dbl> 342517, 342517, 342517, 342517, 342517, 342517, 34…
     ## $ flow_cfs            <dbl> 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000,…
-    ## $ ihs_wua_per_lf_pred <dbl> 1.614572, 1.647879, 1.743528, 1.810171, 1.982560, …
-    ## $ wua_per_lf_pred     <dbl> 2.413380, 2.501745, 2.771288, 2.973932, 3.561797, …
+    ## $ ihs_wua_per_lf_pred <dbl> 6.828541, 6.834207, 6.824346, 6.815414, 6.773289, …
+    ## $ wua_per_lf_pred     <dbl> 9.238409, 9.290900, 9.199731, 9.117928, 8.741808, …
 
 ``` r
-flowlines_gcs |>
+habistat::flowline_geom |>
   inner_join(sd_pred |> filter(round(flow_cfs)==800), by=join_by(comid)) |>
   mutate(wua_per_lf_pred = if_else(wua_per_lf_pred <1, 1, wua_per_lf_pred)) |> # for visualization only
   ggplot() + geom_sf(aes(color = wua_per_lf_pred)) + 
@@ -1753,7 +1837,7 @@ flowlines_gcs |>
 ``` r
 n_breaks <- 10
 sd_pred |>
-  inner_join(flowline_attributes, by=join_by(comid), relationship="many-to-one") |>
+  inner_join(habistat::flowline_attr, by=join_by(comid), relationship="many-to-one") |>
   select(comid, wua_per_lf_pred, any_of(sd_rec$var_info$variable[which(sd_rec$var_info$role=="predictor")])) |>
   mutate(across(-(1:3), function(x) cut(x, breaks=n_breaks, labels=seq(1,n_breaks)/n_breaks))) |>
   pivot_longer(cols = -(1:3)) |>
@@ -1764,11 +1848,7 @@ sd_pred |>
   scale_x_log10() + scale_y_log10() + theme(panel.grid.minor = element_blank())
 ```
 
-    ## Warning: Transformation introduced infinite values in continuous y-axis
-
     ## `geom_smooth()` using method = 'gam' and formula = 'y ~ s(x, bs = "cs")'
-
-    ## Warning: Removed 180 rows containing non-finite values (`stat_smooth()`).
 
 ![](model-expl_files/figure-gfm/prediction-output-sd-2.png)<!-- -->
 
@@ -1791,7 +1871,7 @@ si2_pred <-
             flow_norm_cfs = flow_norm_cfs_orig, 
             "{norm_var}" := !!sym(glue::glue("{norm_var}_orig")),
             ihs_wua_per_lf_norm_pred) |>
-  mutate(wua_per_lf_norm_pred = sinh(ihs_wua_per_lf_norm_pred),
+  mutate(wua_per_lf_norm_pred = semiIHS00_inv(ihs_wua_per_lf_norm_pred),
          wua_per_lf_pred = wua_per_lf_norm_pred * !!norm_var) |>
   glimpse()
 ```
@@ -1800,14 +1880,14 @@ si2_pred <-
     ## Columns: 7
     ## $ comid                    <dbl> 342517, 342517, 342517, 342517, 342517, 34251…
     ## $ flow_cfs                 <dbl> 100, 200, 300, 400, 500, 600, 700, 800, 900, …
-    ## $ flow_norm_cfs            <dbl> 73.29645, 146.59291, 219.88936, 293.18582, 36…
-    ## $ da_scalar                <dbl> 1.364322, 1.364322, 1.364322, 1.364322, 1.364…
-    ## $ ihs_wua_per_lf_norm_pred <dbl> 0.8182393, 0.9924823, 1.2271212, 1.2432881, 1…
-    ## $ wua_per_lf_norm_pred     <dbl> 0.9126490, 1.1636338, 1.5591297, 1.5892801, 1…
-    ## $ wua_per_lf_pred          <dbl> 1.245148, 1.587572, 2.127156, 2.168291, 2.264…
+    ## $ flow_norm_cfs            <dbl> 879.5579, 1759.1159, 2638.6738, 3518.2317, 43…
+    ## $ da_scalar_maf            <dbl> 0.1136935, 0.1136935, 0.1136935, 0.1136935, 0…
+    ## $ ihs_wua_per_lf_norm_pred <dbl> 6.646186, 6.900303, 7.045682, 7.076969, 7.110…
+    ## $ wua_per_lf_norm_pred     <dbl> 7.698409, 9.925744, 11.478902, 11.843725, 12.…
+    ## $ wua_per_lf_pred          <dbl> 0.8752589, 1.1284924, 1.3050763, 1.3465543, 1…
 
 ``` r
-flowlines_gcs |>
+habistat::flowline_geom |>
   inner_join(si2_pred |> filter(round(flow_cfs)==800), by=join_by(comid)) |>
   mutate(wua_per_lf_pred = if_else(wua_per_lf_pred <1, 1, wua_per_lf_pred)) |> # for visualization only
   ggplot() + geom_sf(aes(color = wua_per_lf_pred)) + 
@@ -1819,7 +1899,7 @@ flowlines_gcs |>
 ``` r
 n_breaks <- 10
 si2_pred |>
-  inner_join(flowline_attributes, by=join_by(comid), relationship="many-to-one") |>
+  inner_join(habistat::flowline_attr, by=join_by(comid), relationship="many-to-one") |>
   select(comid, wua_per_lf_pred, flow_cfs, any_of(si2_rec$var_info$variable[which(si2_rec$var_info$role=="predictor")]), -flow_norm_cfs) |>
   mutate(across(-(1:3), function(x) cut(x, breaks=n_breaks, labels=seq(1,n_breaks)/n_breaks))) |>
   pivot_longer(cols = -(1:3)) |>
@@ -1830,11 +1910,7 @@ si2_pred |>
   scale_x_log10() + scale_y_log10() + theme(panel.grid.minor = element_blank())
 ```
 
-    ## Warning: Transformation introduced infinite values in continuous y-axis
-
     ## `geom_smooth()` using method = 'gam' and formula = 'y ~ s(x, bs = "cs")'
-
-    ## Warning: Removed 105 rows containing non-finite values (`stat_smooth()`).
 
 ![](model-expl_files/figure-gfm/prediction-output-si2-2.png)<!-- -->
 
@@ -1852,7 +1928,7 @@ sd2_pred <-
   transmute(comid, 
             flow_cfs = flow_cfs_orig, 
             ihs_tot_area_per_lf_pred,
-            tot_area_per_lf_pred = sinh(ihs_tot_area_per_lf_pred)) |>
+            tot_area_per_lf_pred = semiIHS00_inv(ihs_tot_area_per_lf_pred)) |>
   glimpse()
 ```
 
@@ -1860,8 +1936,8 @@ sd2_pred <-
     ## Columns: 4
     ## $ comid                    <dbl> 342517, 342517, 342517, 342517, 342517, 34251…
     ## $ flow_cfs                 <dbl> 100, 200, 300, 400, 500, 600, 700, 800, 900, …
-    ## $ ihs_tot_area_per_lf_pred <dbl> 5.300860, 5.307262, 5.308987, 5.347177, 5.367…
-    ## $ tot_area_per_lf_pred     <dbl> 100.2521, 100.8960, 101.0702, 105.0049, 107.2…
+    ## $ ihs_tot_area_per_lf_pred <dbl> 9.162068, 9.165967, 9.183320, 9.227510, 9.264…
+    ## $ tot_area_per_lf_pred     <dbl> 95.28743, 95.65971, 97.33413, 101.73177, 105.…
 
 ``` r
 sd2si_pred <- 
@@ -1873,15 +1949,15 @@ sd2si_pred <-
                             flow_norm_cfs_orig = flow_norm_cfs,
                             "{norm_var}_orig" := !!norm_var)) |>
   drop_na() %>% # need to use magrittr pipe for this purpose
-  mutate(hsi_frac_pred = predict(rfr_si$fit$fit, new_data=.)[[".pred"]]) |>
+  mutate(area_pct_pred = predict(rfr_si$fit$fit, new_data=.)[[".pred"]]) |>
   transmute(comid, 
             flow_cfs = flow_cfs_orig, 
             flow_norm_cfs = flow_norm_cfs_orig, 
-            hsi_frac_pred) |>
-  #left_join(flowline_attributes |> transmute(comid, bf_width_ft = bf_width_m/0.3048), by=join_by(comid)) |>
-  #mutate(wua_per_lf_pred = hsi_frac_pred * bf_width_ft) |>
+            area_pct_pred) |>
+  #left_join(habistat::flowline_attr |> transmute(comid, bf_width_ft = bf_width_m/0.3048), by=join_by(comid)) |>
+  #mutate(wua_per_lf_pred = area_pct_pred * bf_width_ft) |>
   left_join(sd2_pred, by=join_by(comid, flow_cfs)) |>
-  mutate(wua_per_lf_pred = hsi_frac_pred * tot_area_per_lf_pred) |>
+  mutate(wua_per_lf_pred = area_pct_pred * tot_area_per_lf_pred) |>
   glimpse()
 ```
 
@@ -1889,14 +1965,14 @@ sd2si_pred <-
     ## Columns: 7
     ## $ comid                    <dbl> 342517, 342517, 342517, 342517, 342517, 34251…
     ## $ flow_cfs                 <dbl> 100, 200, 300, 400, 500, 600, 700, 800, 900, …
-    ## $ flow_norm_cfs            <dbl> 73.29645, 146.59291, 219.88936, 293.18582, 36…
-    ## $ hsi_frac_pred            <dbl> 0.08570038, 0.10434659, 0.11280539, 0.1106276…
-    ## $ ihs_tot_area_per_lf_pred <dbl> 5.300860, 5.307262, 5.308987, 5.347177, 5.367…
-    ## $ tot_area_per_lf_pred     <dbl> 100.2521, 100.8960, 101.0702, 105.0049, 107.2…
-    ## $ wua_per_lf_pred          <dbl> 8.591647, 10.528150, 11.401262, 11.616442, 11…
+    ## $ flow_norm_cfs            <dbl> 879.5579, 1759.1159, 2638.6738, 3518.2317, 43…
+    ## $ area_pct_pred            <dbl> 0.13024781, 0.12712803, 0.12270132, 0.1158212…
+    ## $ ihs_tot_area_per_lf_pred <dbl> 9.162068, 9.165967, 9.183320, 9.227510, 9.264…
+    ## $ tot_area_per_lf_pred     <dbl> 95.28743, 95.65971, 97.33413, 101.73177, 105.…
+    ## $ wua_per_lf_pred          <dbl> 12.41098, 12.16103, 11.94303, 11.78270, 12.09…
 
 ``` r
-flowlines_gcs |>
+habistat::flowline_geom |>
   inner_join(sd2si_pred |> filter(round(flow_cfs)==800), by=join_by(comid)) |>
   mutate(wua_per_lf_pred = if_else(wua_per_lf_pred <1, 1, wua_per_lf_pred)) |> # for visualization only
   ggplot() + geom_sf(aes(color = wua_per_lf_pred)) + 
@@ -1916,11 +1992,12 @@ prediction_flows <- readRDS(here::here("data-raw", "results", "watershed_flow_su
   mutate(flow_cfs = map2(min_cfs, max_cfs, function(x, y) oom_range(x, y))) |>
   select(watershed, flow_cfs) |>
   unnest(flow_cfs) |>
-  filter(flow_cfs >= min(interp_flows) & flow_cfs <= max(interp_flows)) |>
+  #instead of filtering here, filter later
+  #filter(flow_cfs >= min(interp_flows) & flow_cfs <= max(interp_flows)) |>
   glimpse()
 ```
 
-    ## Rows: 336
+    ## Rows: 587
     ## Columns: 2
     ## $ watershed <chr> "American River", "American River", "American River", "Ameri…
     ## $ flow_cfs  <dbl> 500, 600, 700, 800, 900, 1000, 2000, 3000, 4000, 5000, 6000,…
@@ -1931,28 +2008,15 @@ prediction_flows <- readRDS(here::here("data-raw", "results", "watershed_flow_su
 
 ``` r
 mainstems_comid <- 
-  st_read(file.path("/vsizip", here::here("data-raw", "source", "rearing_spatial_data", "nhdplusv2_comid_habitat_xw.shp.zip")), as_tibble=T) |>
+  read_sf(file.path("/vsizip", here::here("data-raw", "source", "rearing_spatial_data", "nhdplusv2_comid_habitat_xw.shp.zip"))) |>
   janitor::clean_names() |>
   st_zm() |>
-  st_transform(st_crs(flowlines)) |>
+  st_transform(st_crs(habistat::flowline_geom_proj)) |>
   mutate(length_ft = st_length(geometry) |> units::set_units("ft") |> units::drop_units()) |>
-  filter(habitat=="rearing") |>
-  left_join(flowline_attributes |> select(comid, hqt_gradient_class), by=join_by(comid)) |>
+  filter(str_detect(habitat, "rearing")) |>
+  left_join(habistat::flowline_attr |> select(comid, hqt_gradient_class), by=join_by(comid)) |>
   filter(!(river %in% c("Sacramento River", "San Joaquin River")))
-```
 
-    ## Reading layer `nhdplusv2_comid_habitat_xw' from data source 
-    ##   `/vsizip/C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/source/rearing_spatial_data/nhdplusv2_comid_habitat_xw.shp.zip' 
-    ##   using driver `ESRI Shapefile'
-    ## Simple feature collection with 2657 features and 16 fields
-    ## Geometry type: LINESTRING
-    ## Dimension:     XYZM
-    ## Bounding box:  xmin: -123.0351 ymin: 36.76305 xmax: -119.1836 ymax: 41.32689
-    ## z_range:       zmin: 0 zmax: 0
-    ## m_range:       mmin: 0 mmax: 100
-    ## Geodetic CRS:  NAD83
-
-``` r
 mainstems <-
   mainstems_comid |>
   group_by(river, hqt_gradient_class) |>
@@ -2051,13 +2115,15 @@ dsm_habitat_combined <- mainstems |>
 ``` r
 dsm_habitat_wua_per_lf <- dsm_habitat_combined |>
   select(river, flow_cfs, instream_wua_per_lf, floodplain_wua_per_lf) |>
+#  mutate(combined_wua_per_lf = pmax(instream_wua_per_lf, floodplain_wua_per_lf)) |>
   pivot_longer(cols=c(instream_wua_per_lf, floodplain_wua_per_lf)) |>
   mutate(name = paste("DSMhabitat", str_replace(name, "_wua_per_lf", "")),
          value = if_else(value>0, value, NA))
 
 dsm_habitat_suitable_ac <- dsm_habitat_combined |>
   select(river, flow_cfs, instream_suitable_ac, floodplain_suitable_ac) |>
-  pivot_longer(cols=c(instream_suitable_ac, floodplain_suitable_ac))  |>
+#  mutate(combined_suitable_ac = pmax(instream_suitable_ac, floodplain_suitable_ac)) |>
+  pivot_longer(cols=c(instream_suitable_ac, floodplain_suitable_ac)) |>
   mutate(value = if_else(value>0, value, NA)) |>
   mutate(name = paste("DSMhabitat", str_replace(name, "_suitable_ac", "")),
          value = if_else(value>0, value, NA))
@@ -2066,7 +2132,7 @@ dsm_habitat_suitable_ac <- dsm_habitat_combined |>
 ### One-step model, scale-dependent: WUA/LF vs flow
 
 ``` r
-pd_sd <- flowline_attributes |> 
+pd_sd <- habistat::flowline_attr |> 
   select(comid, any_of(sd_rec$var_info$variable)) |> 
   inner_join(select(mainstems_comid, comid, river), by=join_by(comid)) |>
   #expand_grid(flow_cfs = interp_flows) |>
@@ -2083,9 +2149,20 @@ pd_sd_dsmhabitat_pred <-
   drop_na() %>% # need to use magrittr pipe for this purpose
   mutate(ihs_wua_per_lf_pred = predict(rfr_sd$fit$fit, new_data=.)[[".pred"]]) |>
   transmute(comid, flow_cfs=flow_cfs_orig, ihs_wua_per_lf_pred) |>
-  mutate(wua_per_lf_pred = sinh(ihs_wua_per_lf_pred)) |>
+  mutate(wua_per_lf_pred = semiIHS00_inv(ihs_wua_per_lf_pred)) |>
+  # now eliminate baseflow
   select(comid, 
-         flow_cfs, wua_per_lf_pred)
+         flow_cfs, wua_per_lf_pred) |>
+  left_join(habistat::flowline_attr |> 
+              select(comid, baseflow_cfs = nf_bfl_dry_cfs), 
+            by=join_by(comid), 
+            relationship = "many-to-one") |>
+  filter(!is.na(baseflow_cfs)) |>
+  flow_threshold_remove_baseflow_apply(.flow_threshold_var = baseflow_cfs,
+                                       .flow_var = flow_cfs,
+                                       .habitat_var = wua_per_lf_pred) |>
+  rename(wua_per_lf_pred_orig = wua_per_lf_pred) |>
+  rename(wua_per_lf_pred = wua_per_lf_pred_nbfc)
 
 pd_rf_by_mainstem <-
   mainstems_comid |> 
@@ -2113,7 +2190,8 @@ pd_rf_by_mainstem |>
   geom_line(aes(y = wua_per_lf_pred, group = comid, color = hqt_gradient_class), alpha=0.5) + 
   geom_line(data=pd_rf_by_mainstem_summary, aes(y = avg_wua_ft2_per_lf), linewidth=1.0) + #geom_smooth(method="loess", se=F, color="black") +
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="top", 
         panel.grid.minor = element_blank(),
@@ -2122,6 +2200,13 @@ pd_rf_by_mainstem |>
   scale_color_manual(values = palette_hqt_gradient_class)
 ```
 
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+    ## Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 9228 rows containing missing values (`geom_line()`).
+
+    ## Warning: Removed 12 rows containing missing values (`geom_line()`).
+
 ![](model-expl_files/figure-gfm/dsmhabitat-sd-val-1.png)<!-- -->
 
 ``` r
@@ -2129,13 +2214,18 @@ pd_rf_by_mainstem_summary |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = tot_wua_ac, color = river)) + #, color=species, linetype=habitat)) + 
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="none", 
         panel.grid.minor = element_blank(),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   xlab("Flow (cfs)") + ylab("Total WUA (ac)")
 ```
+
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 203 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-sd-val-2.png)<!-- -->
 
@@ -2144,13 +2234,17 @@ pd_rf_by_mainstem_summary |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color = river)) + #, color=species, linetype=habitat)) + 
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="none", 
         panel.grid.minor = element_blank(),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
 ```
+
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+    ## Removed 203 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-sd-val-3.png)<!-- -->
 
@@ -2162,7 +2256,8 @@ pd_rf_by_mainstem_summary |>
   geom_line(aes(x = flow_cfs, y = tot_wua_ac, color="habistat prediction")) + 
   geom_line(data=dsm_habitat_suitable_ac, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   theme(legend.position="top", legend.title=element_blank(),
         panel.grid.minor = element_blank(),
@@ -2173,7 +2268,13 @@ pd_rf_by_mainstem_summary |>
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
 
-    ## Warning: Removed 25 rows containing missing values (`geom_line()`).
+    ## Warning: Transformation introduced infinite values in continuous y-axis
+
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 12 rows containing missing values (`geom_line()`).
+
+    ## Warning: Removed 26 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-sd-val-4.png)<!-- -->
 
@@ -2184,7 +2285,8 @@ pd_rf_by_mainstem_summary |>
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color="habistat prediction")) + 
   geom_line(data=dsm_habitat_wua_per_lf, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   theme(legend.position="top", legend.title=element_blank(),
         panel.grid.minor = element_blank(),
@@ -2194,7 +2296,14 @@ pd_rf_by_mainstem_summary |>
 ```
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
-    ## Removed 25 rows containing missing values (`geom_line()`).
+
+    ## Warning: Transformation introduced infinite values in continuous y-axis
+
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 12 rows containing missing values (`geom_line()`).
+
+    ## Warning: Removed 26 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-sd-val-5.png)<!-- -->
 
@@ -2216,6 +2325,8 @@ pd_rf_by_mainstem_summary |> filter(flow_cfs>=min(interp_flows)) |>
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
 
+    ## Warning: Removed 1 row containing missing values (`geom_line()`).
+
     ## Warning: Removed 26 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-sd-val-6.png)<!-- -->
@@ -2223,7 +2334,7 @@ pd_rf_by_mainstem_summary |> filter(flow_cfs>=min(interp_flows)) |>
 ### One-step model, scale-independent: WUA/LF vs normalized flow
 
 ``` r
-pd_si2 <- flowline_attributes |> 
+pd_si2 <- habistat::flowline_attr |> 
   select(comid, any_of(si2_rec$var_info$variable), !!norm_var) |> #erom_q_ma_cfs, nf_bfl_dry_cfs, nf_bfl_wet_cfs) |> 
   inner_join(select(mainstems_comid, comid, river), by=join_by(comid)) |>
   #expand_grid(flow_cfs = interp_flows) |>
@@ -2242,8 +2353,20 @@ pd_si2_dsmhabitat_pred <-
   bind_cols(select(pd_si2, comid, flow_cfs_actual=flow_cfs, !!norm_var)) |>
   drop_na() %>% # need to use magrittr pipe for this purpose
   mutate(ihs_wua_per_lf_norm_pred = predict(rfr_si2$fit$fit, new_data=.)[[".pred"]]) |>
-  mutate(wua_per_lf_pred = sinh(ihs_wua_per_lf_norm_pred) * !!norm_var) |> 
-  select(comid, flow_norm_cfs, wua_per_lf_pred, flow_cfs=flow_cfs_actual, wua_per_lf_pred)
+  mutate(wua_per_lf_pred = semiIHS00_inv(ihs_wua_per_lf_norm_pred) * !!norm_var) |> 
+  select(comid, flow_norm_cfs, wua_per_lf_pred, flow_cfs=flow_cfs_actual, wua_per_lf_pred)  |>
+  # now eliminate baseflow
+  select(comid, flow_cfs, wua_per_lf_pred) |>
+  left_join(habistat::flowline_attr |> 
+              select(comid, baseflow_cfs = nf_bfl_dry_cfs), 
+            by=join_by(comid), 
+            relationship = "many-to-one") |>
+  filter(!is.na(baseflow_cfs)) |>
+  flow_threshold_remove_baseflow_apply(.flow_threshold_var = baseflow_cfs,
+                                       .flow_var = flow_cfs,
+                                       .habitat_var = wua_per_lf_pred) |>
+  rename(wua_per_lf_pred_orig = wua_per_lf_pred) |>
+  rename(wua_per_lf_pred = wua_per_lf_pred_nbfc)
 
 pd_rf_by_mainstem <-
   mainstems_comid |> 
@@ -2271,7 +2394,8 @@ pd_rf_by_mainstem |>
   geom_line(aes(y = wua_per_lf_pred, group = comid, color = hqt_gradient_class), alpha=0.5) + 
   geom_line(data=pd_rf_by_mainstem_summary, aes(y = avg_wua_ft2_per_lf), linewidth=1.0) + #geom_smooth(method="loess", se=F, color="black") +
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="top", 
         panel.grid.minor = element_blank(),
@@ -2280,6 +2404,13 @@ pd_rf_by_mainstem |>
   scale_color_manual(values = palette_hqt_gradient_class)
 ```
 
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+    ## Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 9228 rows containing missing values (`geom_line()`).
+
+    ## Warning: Removed 12 rows containing missing values (`geom_line()`).
+
 ![](model-expl_files/figure-gfm/dsmhabitat-si2-val-1.png)<!-- -->
 
 ``` r
@@ -2287,13 +2418,18 @@ pd_rf_by_mainstem_summary |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = tot_wua_ac, color = river)) + #, color=species, linetype=habitat)) + 
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="none", 
         panel.grid.minor = element_blank(),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   xlab("Flow (cfs)") + ylab("Total WUA (ac)")
 ```
+
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 203 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si2-val-2.png)<!-- -->
 
@@ -2302,13 +2438,17 @@ pd_rf_by_mainstem_summary |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color = river)) + #, color=species, linetype=habitat)) + 
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="none", 
         panel.grid.minor = element_blank(),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
 ```
+
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+    ## Removed 203 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si2-val-3.png)<!-- -->
 
@@ -2320,7 +2460,8 @@ pd_rf_by_mainstem_summary |>
   geom_line(aes(x = flow_cfs, y = tot_wua_ac, color="habistat prediction")) + 
   geom_line(data=dsm_habitat_suitable_ac, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   theme(legend.position="top", legend.title=element_blank(),
         panel.grid.minor = element_blank(),
@@ -2331,7 +2472,13 @@ pd_rf_by_mainstem_summary |>
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
 
-    ## Warning: Removed 25 rows containing missing values (`geom_line()`).
+    ## Warning: Transformation introduced infinite values in continuous y-axis
+
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 12 rows containing missing values (`geom_line()`).
+
+    ## Warning: Removed 26 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si2-val-4.png)<!-- -->
 
@@ -2342,7 +2489,8 @@ pd_rf_by_mainstem_summary |>
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color="habistat prediction")) + 
   geom_line(data=dsm_habitat_wua_per_lf, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   theme(legend.position="top", legend.title=element_blank(),
         panel.grid.minor = element_blank(),
@@ -2352,7 +2500,14 @@ pd_rf_by_mainstem_summary |>
 ```
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
-    ## Removed 25 rows containing missing values (`geom_line()`).
+
+    ## Warning: Transformation introduced infinite values in continuous y-axis
+
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 12 rows containing missing values (`geom_line()`).
+
+    ## Warning: Removed 26 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si2-val-5.png)<!-- -->
 
@@ -2374,6 +2529,8 @@ pd_rf_by_mainstem_summary |> filter(flow_cfs>=min(interp_flows)) |>
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
 
+    ## Warning: Removed 1 row containing missing values (`geom_line()`).
+
     ## Warning: Removed 26 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si2-val-6.png)<!-- -->
@@ -2381,7 +2538,7 @@ pd_rf_by_mainstem_summary |> filter(flow_cfs>=min(interp_flows)) |>
 ### Two-step model: (%HSI vs normalized flow) \* (Total Area/LF vs flow)
 
 ``` r
-pd_sd2 <- flowline_attributes |> 
+pd_sd2 <- habistat::flowline_attr |> 
   select(comid, any_of(sd2_rec$var_info$variable)) |> 
   inner_join(select(mainstems_comid, comid, river), by=join_by(comid)) |>
   #expand_grid(flow_cfs = interp_flows) |>
@@ -2397,10 +2554,10 @@ pd_sd2_dsmhabitat_pred <-
   bind_cols(select(pd_sd2, comid, flow_cfs_orig=flow_cfs)) |>
   drop_na() %>% # need to use magrittr pipe for this purpose
   mutate(ihs_tot_area_per_lf_pred = predict(rfr_sd2$fit$fit, new_data=.)[[".pred"]]) |>
-  mutate(tot_area_per_lf_pred = sinh(ihs_tot_area_per_lf_pred) ) |> 
+  mutate(tot_area_per_lf_pred = semiIHS00_inv(ihs_tot_area_per_lf_pred) ) |> 
   select(comid, flow_cfs=flow_cfs_orig, tot_area_per_lf_pred)
 
-pd_si <- flowline_attributes |> 
+pd_si <- habistat::flowline_attr |> 
   select(comid, any_of(si_rec$var_info$variable), !!norm_var) |> #, erom_q_ma_cfs, nf_bfl_dry_cfs, nf_bfl_wet_cfs) |> 
   inner_join(select(mainstems_comid, comid, river), by=join_by(comid)) |>
   #expand_grid(flow_cfs = interp_flows) |>
@@ -2419,11 +2576,23 @@ pd_si_dsmhabitat_pred <-
   bind_cols(select(pd_si, comid, flow_cfs)) |>
   drop_na() %>% # need to use magrittr pipe for this purpose
   mutate(hsi_pred = predict(rfr_si$fit$fit, new_data=.)[[".pred"]]) |>
-  #inner_join(flowline_attributes |> transmute(comid, length_ft = reach_length_km * 3280.84, width_ft = bf_width_m/3.2808), by=join_by(comid)) |>   
+  #inner_join(habistat::flowline_attr |> transmute(comid, length_ft = reach_length_km * 3280.84, width_ft = bf_width_m/3.2808), by=join_by(comid)) |>   
   #mutate(wua_per_lf_pred = hsi_pred * width_ft * length_ft / length_ft ) |> 
   left_join(pd_sd2_dsmhabitat_pred, by=join_by(comid, flow_cfs)) |>
   mutate(wua_per_lf_pred = hsi_pred * tot_area_per_lf_pred) |>
-  select(comid, flow_norm_cfs, flow_cfs, hsi_pred, tot_area_per_lf_pred, wua_per_lf_pred)
+  select(comid, flow_norm_cfs, flow_cfs, hsi_pred, tot_area_per_lf_pred, wua_per_lf_pred) |>
+    # now eliminate baseflow
+  select(comid, flow_cfs, wua_per_lf_pred) |>
+  left_join(habistat::flowline_attr |> 
+              select(comid, baseflow_cfs = nf_bfl_dry_cfs), 
+            by=join_by(comid), 
+            relationship = "many-to-one") |>
+  filter(!is.na(baseflow_cfs)) |>
+  flow_threshold_remove_baseflow_apply(.flow_threshold_var = baseflow_cfs,
+                                       .flow_var = flow_cfs,
+                                       .habitat_var = wua_per_lf_pred) |>
+  rename(wua_per_lf_pred_orig = wua_per_lf_pred) |>
+  rename(wua_per_lf_pred = wua_per_lf_pred_nbfc)
 
 pd_rf_by_mainstem <-
   mainstems_comid |> 
@@ -2451,7 +2620,8 @@ pd_rf_by_mainstem |>
   geom_line(aes(y = wua_per_lf_pred, group = comid, color = hqt_gradient_class), alpha=0.5) + 
   geom_line(data=pd_rf_by_mainstem_summary, aes(y = avg_wua_ft2_per_lf), linewidth=1.0) + #geom_smooth(method="loess", se=F, color="black") +
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="top", 
         panel.grid.minor = element_blank(),
@@ -2460,6 +2630,13 @@ pd_rf_by_mainstem |>
   scale_color_manual(values = palette_hqt_gradient_class)
 ```
 
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+    ## Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 9228 rows containing missing values (`geom_line()`).
+
+    ## Warning: Removed 12 rows containing missing values (`geom_line()`).
+
 ![](model-expl_files/figure-gfm/dsmhabitat-si-val-1.png)<!-- -->
 
 ``` r
@@ -2467,13 +2644,18 @@ pd_rf_by_mainstem_summary |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = tot_wua_ac, color = river)) + #, color=species, linetype=habitat)) + 
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="none", 
         panel.grid.minor = element_blank(),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   xlab("Flow (cfs)") + ylab("Total WUA (ac)")
 ```
+
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 203 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si-val-2.png)<!-- -->
 
@@ -2482,13 +2664,17 @@ pd_rf_by_mainstem_summary |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color = river)) + #, color=species, linetype=habitat)) + 
   facet_wrap(~river, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_continuous() + 
   theme(legend.position="none", 
         panel.grid.minor = element_blank(),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   xlab("Flow (cfs)") + ylab("Suitable Habitat Area (ft2 per linear ft)")
 ```
+
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+    ## Removed 203 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si-val-3.png)<!-- -->
 
@@ -2500,7 +2686,8 @@ pd_rf_by_mainstem_summary |>
   geom_line(aes(x = flow_cfs, y = tot_wua_ac, color="habistat prediction")) + 
   geom_line(data=dsm_habitat_suitable_ac, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   theme(legend.position="top", legend.title=element_blank(),
         panel.grid.minor = element_blank(),
@@ -2511,7 +2698,13 @@ pd_rf_by_mainstem_summary |>
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
 
-    ## Warning: Removed 25 rows containing missing values (`geom_line()`).
+    ## Warning: Transformation introduced infinite values in continuous y-axis
+
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 12 rows containing missing values (`geom_line()`).
+
+    ## Warning: Removed 26 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si-val-4.png)<!-- -->
 
@@ -2522,7 +2715,8 @@ pd_rf_by_mainstem_summary |>
   geom_line(aes(x = flow_cfs, y = avg_wua_ft2_per_lf, color="habistat prediction")) + 
   geom_line(data=dsm_habitat_wua_per_lf, aes(x = flow_cfs, y = value, color = name)) +  
   facet_wrap(~river) + #, scales="free_y") + 
-  scale_x_log10(labels=scales::comma_format(), expand=c(0,0)) + 
+  scale_x_log10(labels=scales::comma_format(), expand=c(0,0), 
+                limits=c(min(interp_flows),max(interp_flows))) + 
   scale_y_log10(labels=scales::comma_format(), expand=c(0,0)) + 
   theme(legend.position="top", legend.title=element_blank(),
         panel.grid.minor = element_blank(),
@@ -2532,7 +2726,14 @@ pd_rf_by_mainstem_summary |>
 ```
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
-    ## Removed 25 rows containing missing values (`geom_line()`).
+
+    ## Warning: Transformation introduced infinite values in continuous y-axis
+
+    ## Warning: Transformation introduced infinite values in continuous x-axis
+
+    ## Warning: Removed 12 rows containing missing values (`geom_line()`).
+
+    ## Warning: Removed 26 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si-val-5.png)<!-- -->
 
@@ -2554,6 +2755,8 @@ pd_rf_by_mainstem_summary |> filter(flow_cfs>=min(interp_flows)) |>
 
     ## Warning: Transformation introduced infinite values in continuous x-axis
 
+    ## Warning: Removed 1 row containing missing values (`geom_line()`).
+
     ## Warning: Removed 26 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/dsmhabitat-si-val-6.png)<!-- -->
@@ -2561,21 +2764,24 @@ pd_rf_by_mainstem_summary |> filter(flow_cfs>=min(interp_flows)) |>
 ## Results Export
 
 ``` r
-wua_predicted <- pd |>
+wua_predicted <- 
+  pd |>
   inner_join(sd_pred |> select(comid, flow_cfs, wua_per_lf_pred_sd = wua_per_lf_pred),
              by=join_by(comid, flow_cfs), relationship="one-to-one") |>
   inner_join(si2_pred |> select(comid, flow_cfs, wua_per_lf_pred_si2 = wua_per_lf_pred),
              by=join_by(comid, flow_cfs), relationship="one-to-one") |>
   inner_join(sd2si_pred |> select(comid, flow_cfs, wua_per_lf_pred_sd2si = wua_per_lf_pred),
              by=join_by(comid, flow_cfs), relationship="one-to-one") |>
+  #filter(row_number() == 26143) |>
   left_join(td |> select(comid, flow_cfs, wua_per_lf_actual = wua_per_lf),
             by=join_by(comid, flow_cfs), relationship="one-to-one")
+  
+ # td |> filter(comid==2823726)
 
 wua_predicted |> saveRDS(here::here("data-raw", "results", "predictions_table.Rds"))
 wua_predicted |> usethis::use_data(overwrite = TRUE)
 ```
 
-    ## ✔ Setting active project to 'C:/Users/skylerlewis/Github/swc-habitat-suitability'
     ## ✔ Saving 'wua_predicted' to 'data/wua_predicted.rda'
     ## • Document your data (see 'https://r-pkgs.org/data.html')
 
@@ -2584,7 +2790,25 @@ wua_predicted |> usethis::use_data(overwrite = TRUE)
 
 # hs_predictions <- predictions_export
 # usethis::use_data(hs_predictions, overwrite = T)
+
+td |> filter(str_detect(dataset,"Tuolumne River")) |>
+  select(comid, flow_cfs) |> arrange(comid, flow_cfs)
 ```
+
+    ## # A tibble: 77 × 2
+    ##      comid flow_cfs
+    ##      <dbl>    <dbl>
+    ##  1 2823718      300
+    ##  2 2823718      500
+    ##  3 2823718      600
+    ##  4 2823718      900
+    ##  5 2823718     1100
+    ##  6 2823718     3000
+    ##  7 2823718     3200
+    ##  8 2823718     4500
+    ##  9 2823718     6000
+    ## 10 2823718     7600
+    ## # ℹ 67 more rows
 
 ## Yuba Comparison
 
@@ -2635,7 +2859,7 @@ yuba_wua_predicted <-
   select(comid, flow_cfs, starts_with("wua_per_lf")) |>
   filter(comid %in% filter(mainstems_comid, river=="Yuba River")$comid) |>
   filter(!is.na(wua_per_lf_actual)) |>
-  inner_join(flowline_attributes |> transmute(comid, length_ft = reach_length_km*3280.84), by=join_by(comid))
+  inner_join(habistat::flowline_attr |> transmute(comid, length_ft = reach_length_km*3280.84), by=join_by(comid))
 
 yuba_wua_predicted_summary <- 
   yuba_wua_predicted |> 
@@ -2735,7 +2959,7 @@ yuba_wua_predicted_temporal <-
   filter(dataset == "Lower Yuba River") |>
   filter(water_year %in% unique(lyr_cbec_temporal$water_year)) |>
   select(comid, water_year, flow_cfs = q, wua, durwua) |>
-  inner_join(flowline_attributes |> transmute(comid, length_ft = reach_length_km*3280.84), by=join_by(comid))
+  inner_join(habistat::flowline_attr |> transmute(comid, length_ft = reach_length_km*3280.84), by=join_by(comid))
 
 yuba_wua_predicted_temporal_summary <- 
   yuba_wua_predicted_temporal |> 
@@ -2748,13 +2972,25 @@ yuba_wua_predicted_temporal_summary <-
     ## `.groups` argument.
 
 ``` r
+source(here::here("data-raw", "scripts", "inundation-duration-functions.R"))
+yuba_wua_predicted_summary_bfcremoved <- 
+  yuba_wua_predicted_temporal_summary |> 
+  group_by(flow_cfs, wua) |> 
+  summarize() |> ungroup() |>
+  flow_threshold_remove_baseflow(600, .flow_var=flow_cfs, .habitat_var=wua)
+```
+
+    ## `summarise()` has grouped output by 'flow_cfs'. You can override using the
+    ## `.groups` argument.
+
+``` r
 yuba_wua_predicted_temporal_ts <-
   readRDS(here::here("data-raw", "results", "durhsi_applied_to_comid_ts.Rds")) |>
   ungroup() |>
     filter(river == "Lower Yuba River") |>
   filter(water_year %in% unique(lyr_cbec_temporal$water_year)) |>
   select(comid, water_year, flow_cfs = q, durwua, date) |>
-  inner_join(flowline_attributes |> transmute(comid, length_ft = reach_length_km*3280.84), by=join_by(comid))
+  inner_join(habistat::flowline_attr |> transmute(comid, length_ft = reach_length_km*3280.84), by=join_by(comid))
 
 yuba_wua_predicted_temporal_ts_summary <- 
   yuba_wua_predicted_temporal_ts |> 
@@ -2777,12 +3013,14 @@ ggplot() +
             aes(x = flow_cfs, y = durwua, group = water_year, color = "Habistat Model 1", linetype = "Temporal", linewidth = "Temporal")) +
   geom_line(data = yuba_wua_predicted_temporal_summary,
             aes(x = flow_cfs, y = wua, color = "Habistat Model 1", linetype = "Non-temporal", linewidth = "Non-temporal")) +
+  geom_line(data = yuba_wua_predicted_summary_bfcremoved,
+            aes(x = flow_cfs_nbfc, y = wua_nbfc, color = "Habistat Model 1", linetype = "Non-temporal, no baseflow", linewidth = "Non-temporal, no baseflow")) +
   scale_x_log10(labels = scales::label_comma(), limits = c(NA, 15000)) + 
   scale_y_continuous(limits = c(0, 60), expand = c(0, 0)) +
   xlab("Flow (cfs)") + ylab("Suitable habitat area (ft2) per linear ft") +
   theme(panel.grid.minor = element_blank()) + annotation_logticks(sides = "b") +
-  scale_linewidth_manual(name = "model type", values = c("Non-temporal" = 1, "Temporal" = 0.7)) +
-  scale_linetype_manual(name = "model type", values = c("Non-temporal" = "solid", "Temporal" = "dashed")) + 
+  scale_linewidth_manual(name = "model type", values = c("Non-temporal" = 1, "Temporal" = 0.7, "Non-temporal, no baseflow" = 1)) +
+  scale_linetype_manual(name = "model type", values = c("Non-temporal" = "solid", "Temporal" = "dotted", "Non-temporal, no baseflow" = "dashed")) + 
   ggtitle("Temporal WUA Estimates: HabiStat vs CBEC")  +
   scale_color_manual(name = "dataset", 
                      values = c("CBEC Study (LYR SRH2D)" = "#6388b4",
@@ -2795,5 +3033,7 @@ ggplot() +
 
     ## Warning: Removed 30 rows containing missing values (`geom_line()`).
     ## Removed 30 rows containing missing values (`geom_line()`).
+
+    ## Warning: Removed 5 rows containing missing values (`geom_line()`).
 
 ![](model-expl_files/figure-gfm/yuba-comparison-temporal-1.png)<!-- -->

@@ -1,0 +1,470 @@
+---
+title: "Statistical Modeling to Predict Flow-to-Suitable-Area Curves"
+author: "[Skyler Lewis](mailto:slewis@flowwest.com)"
+date: "`r Sys.Date()`"
+output: 
+  github_document:
+    toc: true
+    toc_depth: 3
+    number_sections: false
+    math_method:
+      engine: webtex
+      url: https://latex.codecogs.com/svg.image?
+---
+
+
+```
+install.packages(c("brulee", "torch"))
+torch::install_torch()
+#'https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-2.0.1%2Bcpu.zip'
+#'https://torch-cdn.mlverse.org/binaries/refs/heads/cran/v0.13.0/latest/lantern-0.13.0+cpu-win64.zip'
+
+dir.create("C:/libtorch/")
+Sys.setenv(TORCH_HOME="C:/libtorch/")
+Sys
+library(torch)
+#`TORCH_URL` and `LANTERN_URL`
+install_torch()
+Sys.setenv(TORCH_INSTALL=1)
+library(torch)
+
+
+```
+
+```{r setup, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(sf)
+library(stars)
+library(tidymodels)
+library(patchwork)
+
+library(habistat) 
+
+knitr::opts_chunk$set(eval=TRUE, fig.width=6.5, fig.height=4, dpi=300)
+theme_set(theme_minimal())
+
+palette_dsmhabitat_comparison <- 
+  c("habistat prediction" = "#ffae34", 
+    "DSMhabitat instream" = "#6388b4",
+    "DSMhabitat floodplain" = "#8cc2ca")
+
+palette_hqt_gradient_class <- 
+  c("Valley Lowland"  = "#6388b4", #hex_color_blend("#6388b4","#55ad89"),
+    "Valley Foothill" = "#55ad89", #hex_color_blend("#55ad89","#c3bc3f"),
+    "Bedrock"         = "#bb7693") #hex_color_blend("#c3bc3f","#ffae34"))
+```
+
+## Import Training Data
+
+```{r import-training-data, message=FALSE, warning=FALSE}
+wua_hydraulic_rearing_raw <- 
+  bind_rows(.id = "dataset",
+    # VECTOR SRH-2D MODELS
+    "Lower Yuba River" = 
+      readRDS(here::here("data-raw", "results", "fsa_yuba.Rds")) |> select(-reach),
+    "Stanislaus River" = 
+      readRDS(here::here("data-raw", "results", "fsa_stan.Rds")),
+    # RASTER HEC-RAS 2D MODELS
+    "Deer Creek" = 
+      readRDS(here::here("data-raw", "results", "fsa_deer.Rds")),
+    "Tuolumne River (Basso-La Grange)" = 
+      readRDS(here::here("data-raw", "results", "fsa_basso.Rds")),
+    ) 
+
+wua_hydraulic_rearing_raw |> saveRDS(here::here("data-raw", "results", "fsa_combined.Rds"))
+
+wua_hydraulic_rearing_bfc_removed <- 
+  bind_rows(.id = "dataset",
+    # VECTOR SRH-2D MODELS
+    "Lower Yuba River" = 
+      readRDS(here::here("data-raw", "results", "fsa_yuba_nbfc.Rds")) |> select(-reach),
+    "Stanislaus River" = 
+      readRDS(here::here("data-raw", "results", "fsa_stan_nbfc.Rds")),
+    # RASTER HEC-RAS 2D MODELS
+    "Deer Creek" = 
+      readRDS(here::here("data-raw", "results", "fsa_deer_nbfc.Rds")),
+    "Tuolumne River (Basso-La Grange)" = 
+      readRDS(here::here("data-raw", "results", "fsa_basso_nbfc.Rds")),
+    )
+
+wua_hydraulic_rearing_bfc_removed |> saveRDS(here::here("data-raw", "results", "fsa_combined_nbfc.Rds"))
+
+wua_hydraulic_spawning <- 
+  bind_rows(.id = "dataset",
+    # VECTOR SRH-2D MODELS
+    "Lower Yuba River" = 
+      readRDS(here::here("data-raw", "results", "fsa_yuba_spawning.Rds")) |> select(-reach),
+    "Stanislaus River" = 
+      readRDS(here::here("data-raw", "results", "fsa_stan_spawning.Rds")),
+    # RASTER HEC-RAS 2D MODELS
+    "Deer Creek" = 
+      readRDS(here::here("data-raw", "results", "fsa_deer_spawning.Rds")),
+    "Tuolumne River (Basso-La Grange)" = 
+      readRDS(here::here("data-raw", "results", "fsa_basso_spawning.Rds")),
+    )
+
+wua_hydraulic_spawning |> saveRDS(here::here("data-raw", "results", "fsa_combined_spawning.Rds"))
+
+# bfc attribute indicates whether the data *has* the baseflow channel
+wua_hydraulic <- 
+  bind_rows(wua_hydraulic_rearing_raw |> mutate(bfc = TRUE, habitat = "rearing"), 
+            wua_hydraulic_rearing_bfc_removed |> mutate(bfc = FALSE, habitat = "rearing"),
+            wua_hydraulic_spawning |> mutate(bfc = TRUE, habitat = "spawning")) |>
+  mutate(habitat = as_factor(habitat))
+
+# ensure no duplicates
+wua_hydraulic <- 
+  wua_hydraulic |> 
+  group_by(comid, flow_cfs, bfc, habitat) |> 
+    filter(row_number() == 1) |>
+    ungroup()
+
+wua_hydraulic |> usethis::use_data(overwrite = TRUE)
+```
+
+## Preprocess Training Data
+
+Limit to a specified flow range and interpolate gaps
+
+```{r preprocess-interpolate}
+interp_flows <- seq(300,15000,100)
+#interp_flows <- c(oom_range(100, 10000), 15000)
+
+# log10 seq
+seq_log10 <- function(from, to, by = 0.1) {
+  10^(seq(log10(from), log10(to), by))
+}
+seq_log10(300, 15000, 0.05)
+
+flow_to_suitable_area <- 
+  wua_hydraulic |>
+  group_by(habitat, bfc, dataset, comid, length_ft) |>
+  complete(flow_cfs = interp_flows) |>
+  arrange(habitat, bfc, dataset, comid, flow_cfs, length_ft) |>
+  mutate(across(c(area_tot, area_wua, area_pct, wua_per_lf, ind_per_lf), 
+                function(var) zoo::na.approx(var, x = flow_cfs, na.rm=F))) |>
+  filter(flow_cfs %in% interp_flows) |>
+  filter(!is.na(area_pct)) |>
+  ungroup()
+
+wua_hydraulic_interp <- flow_to_suitable_area
+usethis::use_data(wua_hydraulic_interp, overwrite=T)
+```
+
+Join predictor variables to habitat training data
+
+```{r combine-training-dataset}
+filter_variable_ranges <- function(data) {
+  data |>
+    filter(da_area_sq_km > 100) # 1000 may have better model performance, 100 encompasses all streams we want to predict
+}
+
+model_data <- habistat::flowline_attr |>
+  filter(comid %in% habistat::flowline_geom$comid) |>
+  inner_join(flow_to_suitable_area, by=join_by("comid"), relationship="one-to-many") |>
+  mutate(case_wt = hardhat::importance_weights(length_ft)) |>
+  transmute(dataset, comid, length_ft, case_wt, flow_cfs, wua_per_lf,
+            flow_norm_cfs = flow_cfs / da_scalar_maf, # flow as a percent of mean annual flow
+            ihs_wua_per_lf = semiIHS00(wua_per_lf), # inverse hyperbolic sine as alternative to log that can handle zeros
+            wua_per_lf_norm = wua_per_lf / da_scalar_maf,
+            ihs_wua_per_lf_norm = semiIHS00(wua_per_lf_norm), # transect-wise habitat area per linear foot
+            tot_area_per_lf = area_tot / length_ft,
+            ihs_tot_area_per_lf = semiIHS00(tot_area_per_lf),
+            strata = paste(hyd_cls, dataset),
+            # predictors of flow (as would be found in a regional regression)
+            slope, da_area_sq_km, da_elev_mean, da_ppt_mean_mm, 
+            # flow and channel characteristics, hydrologically predicted
+            bf_depth_m, bf_w_d_ratio, # erom_v_ma_fps,
+            # misc characteristics of the catchment
+            da_avg_slope, da_k_erodibility, mean_ndvi,
+            # misc characteristics of the locality
+            loc_bfi, loc_pct_clay, loc_pct_sand, loc_permeability, loc_bedrock_depth, loc_ppt_mean_mm,
+            # channel confinement characteristics
+            mtpi30_min, vb_width_transect, vb_bf_w_ratio, frac_leveed_longitudinal,
+            # channel sinuosity
+            sinuosity,
+            # fixed effects
+            hqt_gradient_class=droplevels(hqt_gradient_class), hyd_cls=droplevels(hyd_cls),
+            # auxiliary
+            da_scalar_maf, model_bfc = bfc, model_hab = habitat) |> 
+  filter_variable_ranges() |> 
+  drop_na() |>
+  # CREATE NESTED TRAINING DATASET DATA FRAMES ---------------------------------
+  nest(.by = c(model_bfc, model_hab), .key = "td") |> # NOW NEED TO ADD HABITAT EVERY TIME WE GROUP BY BFC
+  # SPLIT TRAINING AND TESTING DATA --------------------------------------------
+  mutate(tts = map(td, function(x) {
+         set.seed(47)
+         tts <- group_initial_split(x, strata=strata, group=comid)
+         return(list(in_ids = tts$in_id, training = training(tts), testing = testing(tts)))
+         }),
+         td = pmap(list(td, tts), function(x, y) x |> mutate(training_sample = row_number() %in% y$in_ids))) |>
+  unnest_wider(tts)
+```
+
+## MLP test
+
+```{r}
+# DEFINE DATASETS
+train_rearing <- (model_data |> filter(model_hab == "rearing" & !model_bfc) |> pull(training))[[1]]
+train_spawning <- (model_data |> filter(model_hab == "spawning" & model_bfc) |> pull(training))[[1]]
+test_rearing <- (model_data |> filter(model_hab == "rearing" & !model_bfc) |> pull(testing))[[1]]
+test_spawning <- (model_data |> filter(model_hab == "spawning" & model_bfc) |> pull(testing))[[1]]
+
+# DEFINE FORUMAS
+formula_SD2 <-
+      ihs_wua_per_lf + case_wt + comid ~ 
+      flow_cfs + 
+      slope + sinuosity + 
+      da_area_sq_km + da_elev_mean + da_ppt_mean_mm + 
+      bf_depth_m + bf_w_d_ratio + 
+      da_k_erodibility + da_avg_slope + mean_ndvi +
+      loc_bfi + loc_pct_clay + loc_pct_sand + loc_permeability + loc_bedrock_depth + loc_ppt_mean_mm +
+      mtpi30_min + vb_bf_w_ratio + frac_leveed_longitudinal + vb_width_transect
+
+formula_SN2 <-
+      ihs_wua_per_lf_norm + case_wt + comid + da_scalar_maf + flow_cfs ~ 
+      flow_norm_cfs + 
+      slope + sinuosity + 
+      bf_w_d_ratio + 
+      da_k_erodibility + da_avg_slope + mean_ndvi +
+      loc_bfi + loc_pct_clay + loc_pct_sand + loc_permeability + loc_bedrock_depth + loc_ppt_mean_mm +
+      mtpi30_min + vb_bf_w_ratio + frac_leveed_longitudinal
+
+# DEFINE RECIPES (PREPROCESSING STEPS)
+recipe_SN2_rearing <- 
+      recipe(data = train_rearing, formula = formula_SN2) |>
+      update_role(c(comid, flow_cfs), new_role = "identifier") |>
+      update_role(da_scalar_maf, new_role = "scalar") |>
+      step_mutate_at(all_numeric_predictors(), fn = semiIHS00) |>
+      step_interact(terms = ~ flow_norm_cfs:all_predictors()) |>
+      step_naomit(all_predictors()) |>
+      step_zv(all_predictors()) |>
+      step_normalize(all_numeric_predictors()) 
+
+recipe_SN2_spawning <- 
+      recipe(data = train_spawning, formula = formula_SN2) |>
+      update_role(c(comid, flow_cfs), new_role = "identifier") |>
+      update_role(da_scalar_maf, new_role = "scalar") |>
+      step_mutate_at(all_numeric_predictors(), fn = semiIHS00) |>
+      step_interact(terms = ~ flow_norm_cfs:all_predictors()) |>
+      step_naomit(all_predictors()) |>
+      step_zv(all_predictors()) |>
+      step_normalize(all_numeric_predictors()) 
+      
+recipe_SD2_rearing <- 
+      recipe(data = train_rearing, formula = formula_SD2) |>
+      update_role(comid, new_role = "identifier") |>
+      step_mutate_at(all_numeric_predictors(), fn = semiIHS00) |>
+      step_interact(terms = ~ slope:da_area_sq_km) |>
+      step_interact(terms = ~ flow_cfs:all_predictors()) |>
+      step_naomit(all_predictors()) |>
+      step_zv(all_predictors()) |>
+      step_normalize(all_numeric_predictors()) 
+
+recipe_SD2_spawning <- 
+      recipe(data = train_spawning, formula = formula_SD2) |>
+      update_role(comid, new_role = "identifier") |>
+      step_mutate_at(all_numeric_predictors(), fn = semiIHS00) |>
+      step_interact(terms = ~ slope:da_area_sq_km) |>
+      step_interact(terms = ~ flow_cfs:all_predictors()) |>
+      step_naomit(all_predictors()) |>
+      step_zv(all_predictors()) |>
+      step_normalize(all_numeric_predictors()) 
+
+# model_ML_naive <- 
+#   mlp(mode = "regression",
+#             hidden_units = c(32, 16, 8), # number of nodes in each hiddlen layer
+#             penalty = 0.0, # L1 lasso penalty
+#             dropout = 0.2, # both penalty and dropout should not be used
+#             epochs = 100,
+#             learn_rate = 0.01,
+#             activation = "relu") |>
+#         set_engine("brulee")
+# 
+# workflow_ML_SD2_rearing <- workflow() |>
+#     add_recipe(recipe_SD2_rearing) |>
+#     add_model(model_ML_naive)
+# 
+# fit_ML_SD2_rearing <- fit(workflow_ML_SD2_rearing, data = train_rearing)
+# pred_ML_SD2_rearing <- predict(fit_ML_SD2_rearing, test_rearing)
+
+```
+
+```{r}
+model_ML_tune <- 
+  mlp(mode = "regression",
+            hidden_units = tune(),
+            penalty = 0.0, # L1 lasso penalty
+            dropout = tune(),
+            epochs = 100,
+            learn_rate = tune(), #0.01,
+            activation = "relu") |>
+        set_engine("brulee")
+
+cvgrid_ML <-
+  tribble(
+      ~hidden_units,
+      # c(8, 8),
+      # c(8, 8, 8),
+      # c(16, 16),
+      # c(16, 16, 16),
+      # c(32, 32),
+      # c(32, 32, 32),
+      # c(32, 16, 8),
+      # c(32, 16),
+      # c(16, 8)
+      c(128, 128, 128), 
+      c(128, 128),
+      c(64, 64, 64), 
+      c(64, 64),
+      c(32, 32, 32),
+      c(32, 32)) |>
+  expand_grid(#penalty = c(0.01, 0.02, 0.03),
+              dropout = c(0.1, 0.2, 0.3),
+              learn_rate = c(0.01, 0.001),
+              )
+
+# SET UP TUNEABLE WORKFLOWS
+
+workflow_ML_SN2_rearing_tune <- workflow() |>
+    add_recipe(recipe_SN2_rearing) |>
+    add_model(model_ML_tune)
+
+workflow_ML_SN2_spawning_tune <- workflow() |>
+    add_recipe(recipe_SN2_spawning) |>
+    add_model(model_ML_tune)
+
+workflow_ML_SD2_rearing_tune <- workflow() |>
+    add_recipe(recipe_SD2_rearing) |>
+    add_model(model_ML_tune)
+
+workflow_ML_SD2_spawning_tune <- workflow() |>
+    add_recipe(recipe_SD2_spawning) |>
+    add_model(model_ML_tune)
+
+# TUNE PARAMETERS AND UPDATE WORKFLOWS
+
+tune_ML_SN2_rearing <- tune_grid(
+        workflow_ML_SN2_rearing_tune,
+        resamples = vfold_cv(train_rearing, v = 10),
+        grid = cvgrid_ML)
+
+mlp_best <- tune_ML_SN2_rearing |> select_best(metric = "rmse") |> as.list()
+mlp_best$hidden_units <- mlp_best$hidden_units |> unlist()
+workflow_ML_SN2_rearing_final <- workflow_ML_SN2_rearing_tune |> finalize_workflow(mlp_best)
+
+tune_ML_SN2_spawning <- tune_grid(
+        workflow_ML_SN2_spawning_tune,
+        resamples = vfold_cv(train_spawning, v = 10),
+        grid = cvgrid_ML)
+
+mlp_best <- tune_ML_SN2_spawning |> select_best(metric = "rmse") |> as.list()
+mlp_best$hidden_units <- mlp_best$hidden_units |> unlist()
+workflow_ML_SN2_spawning_final <- workflow_ML_SN2_spawning_tune |> finalize_workflow(mlp_best)
+
+tune_ML_SD2_rearing <- tune_grid(
+        workflow_ML_SD2_rearing_tune,
+        resamples = vfold_cv(train_rearing, v = 10),
+        grid = cvgrid_ML)
+
+mlp_best <- tune_ML_SD2_rearing |> select_best(metric = "rmse") |> as.list()
+mlp_best$hidden_units <- mlp_best$hidden_units |> unlist()
+workflow_ML_SD2_rearing_final <- workflow_ML_SD2_rearing_tune |> finalize_workflow(mlp_best)
+
+tune_ML_SD2_spawning <- tune_grid(
+        workflow_ML_SD2_spawning_tune,
+        resamples = vfold_cv(train_spawning, v = 10),
+        grid = cvgrid_ML)
+
+mlp_best <- tune_ML_SD2_spawning |> select_best(metric = "rmse") |> as.list()
+mlp_best$hidden_units <- mlp_best$hidden_units |> unlist()
+workflow_ML_SD2_spawning_final <- workflow_ML_SD2_spawning_tune |> finalize_workflow(mlp_best)
+
+# FIT 
+
+fit_ML_SN2_rearing <- fit(workflow_ML_SN2_rearing_final, data = train_rearing)
+fit_ML_SN2_spawning <- fit(workflow_ML_SN2_spawning_final, data = train_spawning)
+fit_ML_SD2_rearing <- fit(workflow_ML_SD2_rearing_final, data = train_rearing)
+fit_ML_SD2_spawning <- fit(workflow_ML_SD2_spawning_final, data = train_spawning)
+```
+
+```{r}
+out_rearing <- bind_rows("training" = train_rearing, 
+                         "testing" = test_rearing,
+                         .id = "train_test_split")
+
+out_spawning <- bind_rows("training" = train_rearing, 
+                          "testing" = test_rearing,
+                          .id = "train_test_split")
+
+out_ML_SD2_rearing <- 
+  out_rearing %>%
+  mutate(ihs_wua_per_lf_pred = predict(fit_ML_SD2_rearing, .)[[".pred"]],
+         wua_per_lf_pred_SD2 = semiIHS00_inv(ihs_wua_per_lf_pred)) 
+
+p1 <- ggplot() +
+  geom_line(data=filter(out_ML_SD2_rearing), #, train_test_split=="training"), 
+            aes(x = flow_cfs, y = wua_per_lf_pred_SD2, 
+                group=comid, color=dataset)) + 
+  scale_x_log10() + 
+  scale_y_continuous(limits=c(0,100))
+
+out_ML_SD2_spawning <- 
+  out_spawning %>%
+  mutate(ihs_wua_per_lf_pred = predict(fit_ML_SD2_spawning, .)[[".pred"]],
+         wua_per_lf_pred_SD2 = semiIHS00_inv(ihs_wua_per_lf_pred)) 
+
+p2 <- ggplot() +
+  geom_line(data=filter(out_ML_SD2_spawning), #, train_test_split=="training"), 
+            aes(x = flow_cfs, y = wua_per_lf_pred_SD2, 
+                group=comid, color=dataset)) + 
+  scale_x_log10() + 
+  scale_y_continuous(limits=c(0,100))
+
+out_ML_SN2_rearing <- 
+  out_rearing %>%
+  mutate(ihs_wua_per_lf_norm_pred = predict(fit_ML_SN2_rearing, .)[[".pred"]],
+         wua_per_lf_pred_SN2 = semiIHS00_inv(ihs_wua_per_lf_norm_pred) * da_scalar_maf)
+
+p3 <- ggplot() +
+  geom_line(data=filter(out_ML_SN2_rearing), #, train_test_split=="training"), 
+            aes(x = flow_cfs, y = wua_per_lf_pred_SN2, 
+                group=comid, color=dataset)) + 
+  scale_x_log10() + 
+  scale_y_continuous(limits=c(0,100))
+
+out_ML_SN2_spawning <- 
+  out_spawning %>%
+  mutate(ihs_wua_per_lf_norm_pred = predict(fit_ML_SN2_spawning, .)[[".pred"]],
+         wua_per_lf_pred_SN2 = semiIHS00_inv(ihs_wua_per_lf_norm_pred) * da_scalar_maf)
+
+p4 <- ggplot() +
+  geom_line(data=filter(out_ML_SN2_spawning), #, train_test_split=="training"), 
+            aes(x = flow_cfs, y = wua_per_lf_pred_SN2, 
+                group=comid, color=dataset)) + 
+  scale_x_log10() + 
+  scale_y_continuous(limits=c(0,100))
+
+(p1 + p2) / (p3 + p4) + plot_layout(axes = "collect", guides = "collect")
+```
+
+
+## Predictions
+
+```{r}
+pd_attr <- habistat::flowline_attr |> 
+  filter_variable_ranges() |> #stream_level<=4 & !is.na(gnis_name) 
+  filter(substr(reachcode,1, 4) %in% c("1802", "1803", "1804")) 
+
+#interp_flows_pred <- c(oom_range(100, 10000), 15000)
+
+pd <- pd_attr |>
+  expand_grid(flow_cfs = interp_flows) |>
+  mutate(flow_norm_cfs = coalesce(flow_cfs / da_scalar_maf, 0)) |> 
+  arrange(comid, flow_cfs)
+
+```
+
+
+
+

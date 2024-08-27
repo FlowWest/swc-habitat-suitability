@@ -40,7 +40,7 @@ watersheds <-
   read_sf() |> 
   janitor::clean_names() |>
   filter(huc_8 %in% selected_huc_8) |>
-  st_transform(project_crs)
+  st_transform(habistat::const_proj_crs())
 
 watersheds |> ggplot() + geom_sf()
 ```
@@ -62,7 +62,7 @@ flowline_geom |> usethis::use_data(overwrite = T)
 
 # projected version
 flowline_geom_proj <- flowline_geom |> 
-  st_transform(project_crs)
+  st_transform(habistat::const_proj_crs())
 
 flowline_geom_proj |> saveRDS(here::here("data-raw", "results", "flowline_geometries_proj.Rds"))
 
@@ -82,7 +82,7 @@ flowline_geom_proj |> usethis::use_data(overwrite = T)
 
 * [User Guide](https://www.epa.gov/system/files/documents/2023-04/NHDPlusV2_User_Guide.pdf)
 * This is distinct from  [NHDPlusHR](https://pubs.usgs.gov/of/2019/1096/ofr20191096.pdf) which is generated at a higher resolution; more computationally intensive and probably a greater level of detail than we need for this analysis. 
-* If routing is needed, [improved versions](https://www.sciencebase.gov/catalog/item/5b92790be4b0702d0e809fe5) exist for this purpose. R package [`nhdplustools`](https://doi-usgs.github.io/nhdplusTools/) also provides routing functionality.
+* If routing is needed, [improved versions](https://www.sciencebase.gov/catalog/item/5b92790be4b0702d0e809fe5) exist for this purpose. R package [`nhdplusTools`](https://doi-usgs.github.io/nhdplusTools/) also provides routing functionality.
 
 ```{r import-comid, message=FALSE, warning=FALSE}
 fcodes <- 
@@ -116,7 +116,7 @@ flowline_table <-
 wbd_watersheds <- 
   drive_file_by_id("1ncwKAUNoJUNkPLEy6NzrUKCYqVG681p-", vsizip=T) |>
   read_sf() |> 
-  st_transform(project_crs) |>
+  st_transform(habistat::const_proj_crs()) |>
   janitor::clean_names() |>
   select(huc_8, huc_10, hu_10_name, huc_12, hu_12_type, hu_12_name, hu_12_ds)
 
@@ -585,7 +585,7 @@ pisces_ranges <- tribble(~sp_id, ~species, ~dataset, ~filename,
   unnest(result) |>
   janitor::clean_names() |>
   st_sf() |> 
-  st_transform(project_crs)
+  st_transform(habistat::const_proj_crs())
 
 # Summarize Ranges
 range_historical <- 
@@ -632,6 +632,26 @@ pisces_ranges_comid <-
   glimpse()
 ```
 
+### Range and watershed summary
+
+From watershed_delineation.R
+
+```{r import-range-summary}
+cv_mainstems <- readRDS(here::here("data-raw", "results", "cv_mainstems.Rds"))
+
+cv_mainstems_comid <- cv_mainstems |>
+  st_drop_geometry()
+
+cv_watersheds <- readRDS(here::here("data-raw", "results", "cv_watersheds.Rds"))
+
+cv_watersheds_comid <- 
+  habistat::flowline_geom_proj |>
+  st_zm() |>
+  #st_point_on_surface() |>
+  st_join(cv_watersheds, largest=T) |>
+  st_drop_geometry() 
+```
+
 ### Combine all attributes
 
 ```{r combine-all, message=FALSE, warning=FALSE}
@@ -660,7 +680,6 @@ flowline_attributes <-
   left_join(catchment_ndvi, by=join_by(comid), relationship="one-to-one") |> 
   left_join(aquatic_species_cdfw, by=join_by(comid), relationship="one-to-one") |> 
   left_join(aquatic_species_tnc, by=join_by(comid), relationship="one-to-one") |>  
-  left_join(catchment_ndvi, by=join_by(comid), relationship="one-to-one") |>
   left_join(hyd_cls, by=join_by(comid), relationship="one-to-one") |>
   left_join(nf_ffm, by=join_by(comid), relationship="one-to-one") |>
   left_join(peak_flows, by=join_by(comid), relationship="one-to-one") |>
@@ -670,6 +689,8 @@ flowline_attributes <-
   left_join(geomorph_class, by=join_by(comid), relationship="one-to-one") |>
   left_join(hqt_cls, by=join_by(comid), relationship="one-to-one") |>
   left_join(pisces_ranges_comid, by=join_by(comid), relationship="one-to-one") |>
+  left_join(cv_mainstems_comid, by=join_by(comid), relationship="one-to-one") |>
+  left_join(cv_watersheds_comid, by=join_by(comid), relationship="one-to-one") |>
   # fill in gaps in the RF bankfull estimates with the simple Bieger model
   mutate(bf_width_m = coalesce(bf_width_m, 2.76*da_area_sq_km^0.399),
          bf_depth_m = coalesce(bf_depth_m, 0.23*da_area_sq_km^0.294),
@@ -698,7 +719,8 @@ flowline_attributes <-
          vb_width_transect = if_else(frac_leveed_longitudinal>=0.5,
                                      coalesce(lateral_levee_confinement_ft*0.3048, vb_width_transect),
                                      vb_width_transect),
-         vb_bf_w_ratio = vb_width_transect / chan_width_m,) 
+         vb_bf_w_ratio = vb_width_transect / chan_width_m,) |>
+  mutate(da_scalar_maf = (da_area_sq_km * 247.1053815) * (da_ppt_mean_mm / 304.8) / 1E6)
 
 flowline_attributes |> saveRDS(here::here("data-raw", "results", "flowline_attributes.Rds"))
 
@@ -715,7 +737,7 @@ flowlines <-
   inner_join(flowline_attributes) |>
   filter(huc_8 %in% selected_huc_8) |>
   arrange(hydro_seq) |>
-  st_transform(project_crs)
+  st_transform(habistat::const_proj_crs())
 
 # for visualizing
 waterbodies <- 
@@ -727,7 +749,7 @@ waterbodies <-
          rc_huc_12 = substr(reachcode, 1, 12)) |>
   filter(rc_huc_8 %in% selected_huc_8) |>
   arrange(comid) |>
-  st_transform(project_crs)
+  st_transform(habistat::const_proj_crs())
 ```
 
 ## Maps of attribute data (exploratory)
@@ -1080,7 +1102,7 @@ catchments <-
   mutate(comid = as.numeric(featureid)) |>
   inner_join(flowlines |> st_drop_geometry() |> select(comid)) |>
   arrange(comid) |>
-  st_transform(project_crs) 
+  st_transform(habistat::const_proj_crs()) 
 
 # examples
 ggplot() + geom_sf(data = catchments, color="orange") + 

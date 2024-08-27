@@ -16,6 +16,9 @@ output:
 library(tidyverse)
 library(sf)
 library(terra)
+
+theme_set(theme_minimal())
+
 ```
 
 ```{r import, message=FALSE, warning=FALSE}
@@ -37,9 +40,11 @@ Examine existing redd surveys and define ranges of river gradients and other cha
 
 Map the known redd locations like sailor bar
 
+## Determining the Geographic Scope
+
 ### HQT gradient class and known spawning reaches
 
-```{r}
+```{r reach-import}
 valley_lowland <- 
   readRDS(here::here("data-raw", "source", "hqt", "hqt_valley_lowland.Rds")) |> 
   st_transform(project_crs) |> 
@@ -68,8 +73,36 @@ cvpia_extents_nhd_spawning <-
   cvpia_extents_nhd |> 
   filter(str_detect(habitat, "spawning"))
 ```
+```{r spawning-mainstems-import}
+spawning_mainstems <-
+  read_sf(here::here("data-raw", "source", "rearing_spatial_data", "nhdplusv2_comid_habitat_xw.shp.zip")) |>
+  janitor::clean_names() |>
+  filter(str_detect(habitat, "spawning")) |>
+  st_zm() |>
+  st_transform(habistat::const_proj_crs()) |>
+  select(river, comid) |>
+  rename(river_cvpia = river)
 
-```{r, fig.width=6, fig.height=6, dpi=300}
+rearing_mainstems <-
+  read_sf(here::here("data-raw", "source", "rearing_spatial_data", "nhdplusv2_comid_habitat_xw.shp.zip")) |>
+  janitor::clean_names() |>
+  filter(str_detect(habitat, "rearing")) |>
+  st_zm() |>
+  st_transform(habistat::const_proj_crs()) |>
+  select(river, comid) |>
+  rename(river_cvpia = river)
+
+historical_mainstems <-
+  read_sf(here::here("data-raw", "source", "rearing_spatial_data", "nhdplusv2_comid_habitat_xw.shp.zip")) |>
+  janitor::clean_names() |>
+  filter(str_detect(habitat, "spawning") | str_detect(habitat, "rearing") | str_detect(habitat, "historical")) |>
+  st_zm() |>
+  st_transform(habistat::const_proj_crs()) |>
+  select(river, comid) |>
+  rename(river_cvpia = river)
+```
+
+```{r hqt-classes, fig.width=6, fig.height=6, dpi=300}
 ggplot() +
   geom_sf(data = valley_lowland, color=NA, fill="lightgoldenrod") +
   geom_sf(data = cvpia_extents, color="gray") +
@@ -79,7 +112,7 @@ ggplot() +
 
 ### UCD eFlows Geomorph Classes
 
-```{r, fig.width=12, fig.height=12, dpi=300}
+```{r geomorph-classes-overlay, fig.width=12, fig.height=12, dpi=300}
 #geomorph_class <- readRDS(here::here("data-raw", "results", "attr_geomorph_class.Rds"))
 geomorph_classes <- readRDS(here::here("data-raw", "results", "attr_geomorph_class.Rds"))
 geomorph_site_data <- readRDS(here::here("data-raw", "results", "geomorph_sites_ucd.Rds"))
@@ -103,7 +136,7 @@ ggplot() +
   geom_sf(data = cvpia_extents_spawning |> st_line_sample(sample=c(0, 1)), color="black", size=1, shape=15)
 ```
 
-```{r fig.width=12, fig.height=12, dpi=300}
+```{r geomorph-classes-filter, fig.width=12, fig.height=12, dpi=300}
 # breakdown of geomorph classes of geomorph sites that are within spawning reaches
 spawning_reach_geomorph_sites <- 
   geomorph_site_data |> 
@@ -135,7 +168,7 @@ ggplot() +
 
 ### Filter by Gradient and Elevation
 
-```{r}
+```{r gradient-elevation-hist}
 cvpia_extents_nhd_spawning |>
   left_join(flowline_attributes) |>
   ggplot() + 
@@ -165,44 +198,498 @@ cvpia_extents_nhd_spawning |>
   annotation_logticks(sides="b") + 
   geom_vline(aes(xintercept = 1E02), linetype="dashed") +
   theme(panel.grid.minor = element_blank())
-
 ```
 
 
 
-## Combine all filters
-
-
 ```{r}
-lyr <- flowlines |>
-  left_join(flowline_attributes) |>
-  filter(range_cvchinook_extant) |> 
+# filtered flowlines dataset
+flowlines_filtered <- habistat::flowline_geom_proj |>
+  # filter(comid %in% within_network_comids) |>
+  left_join(habistat::flowline_attr) |>
+  # filter for just the Sacramento and San Joaquin Basins
+  filter(watershed_level_1 %in% c("Sacramento River", "San Joaquin River")) |>
+  # filter based on size of the stream
+  filter((((stream_order >= 4) & (da_area_sq_km > 1)) | ((stream_order >= 3) & (da_area_sq_km >= 50))) | 
+           (comid %in% habistat::cv_mainstems$comid)) |>
+  select(comid, geometry)
+
+flowlines_filtered |>
+  ggplot() + geom_sf() + ggtitle("Flowlines Filtered by Stream Order and Drainage Area")
+```
+
+```{r pisces-range-output}
+pisces_range_comid <- habistat::flowline_attr |>
+  filter(range_cvchinook_historical) |> 
+  pull(comid)
+
+pisces_ranges <- 
+  habistat::flowline_attr |> 
+  transmute(comid, range = if_else(range_cvchinook_historical, "Within Historical Range", "Outside Historical Range")) |>
+  st_drop_geometry()
+
+flowlines_filtered |>
+  left_join(pisces_ranges) |>
+  filter(range == "Within Historical Range") |>
+  ggplot() + geom_sf(aes(color = range)) + 
+  geom_sf(data=spawning_mainstems, aes(color = "Spawning Mainstems")) +
+  ggtitle("PISCES Ranges")
+```
+
+
+```{r geomorph-filter-output}
+geomorph_filter_comid <- habistat::flowline_attr |>
+  # # FILTER MAPPED CV CHINOOK RANGE (PISCES)
+  # filter(range_cvchinook_extant) |> 
+  # # FILTER HQT GRADIENT CLASS
   filter(hqt_gradient_class != "Valley Lowland")  |>
+  # # FILTER GEOMORPH CLASSES
   filter(str_detect(geomorph_class, "riffle-pool") | 
          str_detect(geomorph_class, "gravel") | 
          str_detect(geomorph_class, "low-gradient step-pool")) |>
-  filter(slope <= 1E-2)
-  #filter(comid %in% filter(flowline_attributes, range_cvchinook_extant)$comid) |>
-  #filter(comid %in% filter(flowline_attributes, hqt_gradient_class != "Valley Lowland")$comid) |>
-  #filter(comid %in% filter(geomorph_class, geomorph_gravel)$comid) |>
-  #filter(comid %in% filter(flowline_attributes, da_area_sq_km > 10)$comid) |>
-  #filter(comid %in% filter(flowline_attributes, slope*100 >= 0.05 & slope*100 <= 0.4)$comid) |>
-# |>
-  #filter(comid %in% filter(flowline_attributes, da_area_sq_km > 50)$comid) #|>
- # filter(comid %in% filter(flowline_attributes, slope <= 1E-2)$comid)# |>
-  #filter(comid %in% filter(flowline_attributes, hqt_gradient_class != "Valley Lowland")$comid)
+  #filter(slope <= 1E-2) |>
+  pull(comid)
 
-#leaflet::leaflet() |> leaflet::addPolylines(data=lyr)
+flowlines_filtered |>
+  left_join(pisces_ranges) |>
+  filter(comid %in% geomorph_filter_comid) |>
+  ggplot() + geom_sf(aes(color = range)) + 
+  geom_sf(data=spawning_mainstems, aes(color = "Spawning Mainstems")) +
+  ggtitle("Geomorphic Filter")
 ```
 
+```{r gradient-class-output}
+gradient_class_comid <- habistat::flowline_attr |>
+  filter(hqt_gradient_class != "Valley Lowland")  |>
+  pull(comid)
+
+flowlines_filtered |>
+  left_join(pisces_ranges) |>
+  filter(comid %in% gradient_class_comid) |>
+  ggplot() + geom_sf(aes(color = range)) + 
+  geom_sf(data=spawning_mainstems, aes(color = "Spawning Mainstems")) +
+  ggtitle("Gradient Class Filter")
+```
+
+```{r gradient-filter-output}
+gradient_range_comid <- habistat::flowline_attr |>
+  #filter(hqt_gradient_class != "Valley Lowland")  |>
+  #filter(slope <= 1E-2) |>
+  filter((slope <= 1E-1) & (slope >= 1E-3)) |>
+  pull(comid)
+
+flowlines_filtered |>
+  left_join(pisces_ranges) |>
+  filter(comid %in% gradient_range_comid) |>
+  ggplot() + geom_sf(aes(color = range)) + 
+  geom_sf(data=spawning_mainstems, aes(color = "Spawning Mainstems")) +
+  ggtitle("Gradient Range Filter")
+```
+
+### Apply CVPIA watershed spawning ranges to adjacent tributaries
+
+within each CVPIA watershed, get min and max of spawning flowline and apply it to all streams within that watershed
+
+```{r elevation-filter-output}
+# GET ELEVATION RANGES FOR EACH SPAWNING MAINSTEM
+spawning_elevation_ranges <- 
+  spawning_mainstems |> 
+  left_join(habistat::flowline_attr |>
+              select(comid, elev_min, elev_max, watershed_level_3)) |>
+  group_by(watershed_level_3) |>
+  summarize(spawning_elev_min = min(elev_min), 
+            spawning_elev_max = max(elev_max)) |>
+  st_drop_geometry()
+
+historical_elevation_ranges <- 
+  historical_mainstems |> 
+  left_join(habistat::flowline_attr |>
+              select(comid, elev_min, elev_max, watershed_level_3)) |>
+  group_by(watershed_level_3) |>
+  summarize(historical_elev_min = min(elev_min), 
+            historical_elev_max = max(elev_max)) |>
+  st_drop_geometry()
+
+elevation_ranges <- 
+  full_join(spawning_elevation_ranges, historical_elevation_ranges) |>
+  mutate(query_elev_min = if_else(watershed_level_3 %in% c("Upper Sacramento River", "Upper San Joaquin River", "McCloud River", "Pit River"), 
+                                  coalesce(spawning_elev_min, historical_elev_min), 
+                                  spawning_elev_min),
+         query_elev_max = if_else(watershed_level_3 %in% c("Upper Sacramento River", "Upper San Joaquin River", "McCloud River", "Pit River"), 
+                                  coalesce(historical_elev_max, spawning_elev_max), 
+                                  historical_elev_max))
+
+elevation_ranges |>
+  #select(watershed_level_3, query_elev_min, query_elev_max) |>
+  knitr::kable()
+
+# PULL LIST OF COMIDS WITHIN SPAWNING ELEVATION RANGE
+elevation_range_comid <- 
+  habistat::flowline_attr |>
+  #mutate(river_cvpia = watershed_level_3) |>
+  inner_join(elevation_ranges) |>
+  #filter(((elev_min >= spawning_elev_min) & (elev_max <= historical_elev_max))) |>
+  filter(((elev_min >= query_elev_min) & (elev_max <= query_elev_max))) |>
+  pull(comid)
+
+flowlines_filtered |>
+  left_join(pisces_ranges) |>
+  filter(comid %in% elevation_range_comid) |>
+  ggplot() + geom_sf(aes(color = range)) + 
+  geom_sf(data=spawning_mainstems, aes(color = "Spawning Mainstems")) +
+  ggtitle("Elevation Range Filter")
+```
+
+eliminate those that are not physically connected to the mainstems
+
+use USGS COMID network search API to filter for tribs that flow into mainstem spawning reaches
+
+```{r tributary-network-search}
+# FUNCTION TO PULL 
+list_upstream_comids <- function(comid) {
+  # USGS upstream trib search service
+  # e.g. https://labs.waterdata.usgs.gov/api/nldi/linked-data/comid/12074740/navigation/UT/flowlines?f=json&distance=9999
+  result <- nhdplusTools::navigate_nldi(list(featureSource = "comid", 
+                                        featureID = comid), 
+                                        mode = "upstreamTributaries", 
+                                        distance_km = 9999)
+  # returns a geojson, want just the list of comids
+  return(as.integer(result$UT$nhdplus_comid))
+}
+
+# LIST COMIDS MATCHING NETWORK SEARCH AND ELEVATION RANGE FILTER
+spawning_trib_comid <- 
+  spawning_mainstems |>
+  st_drop_geometry() |>
+  left_join(habistat::flowline_attr |> select(comid, da_area_sq_km, watershed_level_3)) |>
+  # keep just the farthest DS to minimize amount of searching needed
+  #group_by(river_cvpia) |> filter(da_area_sq_km == max(da_area_sq_km)) |> ungroup() |>
+  group_by(watershed_level_3) |> filter(da_area_sq_km == max(da_area_sq_km)) |> ungroup() |>
+  # get tribuary network using USGS service
+  mutate(trib_comids = map(comid, list_upstream_comids)) |>
+  unnest(trib_comids) |>
+  # apply the elevation range filter
+  #filter(trib_comids %in% potential_spawning_comid) |>
+  pull(trib_comids)
+
+flowlines_filtered |>
+  left_join(pisces_ranges) |>
+  filter(comid %in% spawning_trib_comid) |>
+  filter(comid %in% elevation_range_comid) |>
+  ggplot() + geom_sf(aes(color = range)) + 
+  geom_sf(data=spawning_mainstems, aes(color = "Spawning Mainstems")) +
+  ggtitle("Elevation Range Filter - Tributaries of Spawning Streams Only")
+
+```
+
+```{r tributary-network-search-v2}
+# LIST COMIDS MATCHING NETWORK SEARCH AND ELEVATION RANGE FILTER
+rearing_trib_comid <- 
+  historical_mainstems |>
+  st_drop_geometry() |>
+  left_join(habistat::flowline_attr |> select(comid, da_area_sq_km, watershed_level_3)) |>
+  # keep just the farthest DS to minimize amount of searching needed
+  #group_by(river_cvpia) |> filter(da_area_sq_km == max(da_area_sq_km)) |> ungroup() |>
+  group_by(watershed_level_3) |> filter(da_area_sq_km == max(da_area_sq_km)) |> ungroup() |>
+  # get tribuary network using USGS service
+  mutate(trib_comids = map(comid, list_upstream_comids)) |>
+  unnest(trib_comids) |>
+  # apply the elevation range filter
+  #filter(trib_comids %in% potential_spawning_comid) |>
+  pull(trib_comids)
+
+flowlines_filtered |>
+  left_join(pisces_ranges) |>
+  filter(comid %in% rearing_trib_comid) |>
+  filter(comid %in% elevation_range_comid) |>
+  ggplot() + geom_sf(aes(color = range)) + 
+  geom_sf(data=spawning_mainstems, aes(color = "Spawning Mainstems")) +
+  ggtitle("Elevation Range Filter - Tributaries of Rearing Streams Only")
+```
+
+Test combining with additioanl filters -- may be too strict
+
+```{r combined-filters-test}
+flowlines_filtered |>
+  left_join(pisces_ranges) |>
+  filter(comid %in% rearing_trib_comid) |>
+  filter(comid %in% elevation_range_comid) |>
+  filter(comid %in% gradient_range_comid) |>
+  ggplot() + geom_sf(aes(color = range)) + 
+  geom_sf(data=spawning_mainstems, aes(color = "Spawning Mainstems")) +
+  ggtitle("Elevation, Gradient, and Tributary Filters")
+
+flowlines_filtered |>
+  left_join(pisces_ranges) |>
+  filter(comid %in% rearing_trib_comid) |>
+  filter(comid %in% elevation_range_comid) |>
+  filter(comid %in% geomorph_filter_comid) |>
+  ggplot() + geom_sf(aes(color = range)) + 
+  geom_sf(data=spawning_mainstems, aes(color = "Spawning Mainstems")) +
+  ggtitle("Elevation, Geomorph, and Tributary Filters")
+```
+
+### Final version
+
+Flowlines matching all of the following criteria:
+
+* elevation > minimum known spawning elevation for the watershed
+* elevation < maximum historical habitat elevation for the watershed
+* tributary of a known rearing stream
+* within a subcatchment identified as historical habitat in the PISCES dataset
+* outside of the valley lowland area (i.e. in valley foothill or bedrock)
+* (stream order > 3 & drainage area > 50 km2) OR (stream order > 4)
+
+```{r combined-filters-final}
+spawning_flowlines_final <- flowlines_filtered |>
+  filter((comid %in% spawning_mainstems$comid) | 
+         ((comid %in% elevation_range_comid) &
+          (comid %in% rearing_trib_comid) &
+          (comid %in% pisces_range_comid) &
+          (comid %in% gradient_class_comid) &
+          (comid %in% flowlines_filtered$comid)))
+
+spawning_flowlines_final |>
+  ggplot() + 
+  ggspatial::annotation_spatial(data=flowlines_filtered, color="#dddddd") +
+  geom_sf(data=rearing_mainstems, aes(color = "Rearing Mainstems")) +
+  geom_sf(aes(color = "Potential Spawning Habitat - All")) +
+  geom_sf(data=spawning_mainstems, aes(color = "Potential Spawning Habitat - Mainstems")) +
+  ggtitle("Final Spawning Reach Dataset") +
+  scale_color_manual(name = "",
+                     values = c("Potential Spawning Habitat - Mainstems" = "darkblue",
+                                "Potential Spawning Habitat - All"= "cornflowerblue",
+                                "Rearing Mainstems" = "darkgoldenrod"))
+```
+
+## Reach by Reach Analysis
+
+### Sediment Transport Approach
+
+Next, let's locate particular reaches within this geographic scope that are likely to have spawning gravels.
+
+**During typical flows:**
+
+Silts need to be in suspension so that they do not settle out and bury/clog gravels. 
+i.e. max grain size in suspension must be at least 0.0625 mm (phi = 4)
+
+Mobilization threshold should not be so high as to scour gravels 
+
+**During high flows:**
+
+Silts still need to be in suspension -- see above. 
+
+Mobilization threshold *should* be high enough to mobilize gravels:
+
+> Several uncertainties exist as to the suitability
+for successful spawning in the existing stream bed within Reach 1A, which include
+adequate (1) hyporheic and surface water exchange, (2) flow depth and velocity, (3) 
+sediment attributes, and (4) hyporheic water quality. The channel area that currently
+contain and is expected to maintain each of these attributes in high quality should be used
+to quantify the amount of suitable spawning habitat. Most of these attributes and their
+contribution to spawning and incubation habitat quality are dependent on the
+maintenance of the spawning bed’s surface texture. **This maintenance is performed by
+occasional flows that are capable of dislodging the coarse grains (i.e., gravel and cobble),
+flushing the finer particles (e.g., sand and silt), and recruiting additional gravel.**
+
+> After the completion of Friant Dam in the 1940s the reduced instream flow that ensued
+downstream resulted in a coarsened bed texture as finer grains were typically the only
+grains capable of being eroded. Several studies have concluded that mobilizing this
+coarsened bed surface as required to maintain salmon spawning habitat in Reach 1A
+generally requires flows in the range of 12,000 to 16,000 cfs (MEI, 2002; JSA and MEI,
+2002; McBain and Trush, 2002; Stillwater Sciences, 2003), well above the maximum
+Restoration releases called for in the Settlement
+
+- https://www.restoresjr.net/?wpfb_dl=796
+
+
+
+```{r step-2-sed-transport-classes}
+# DEFINE WENTWORTH SIZE CLASSES
+phi_levels <- seq(-12, 14, 1)
+phi_labels <- c("very large boulder", "large boulder", "medium boulder", "small boulder", # -12:-9
+                "large cobble", "small cobble", "very coarse gravel", "coarse gravel", # -8:-5
+                "medium gravel", "fine gravel", "very fine gravel", "very coarse sand", # -4:-1
+                "coarse sand", "medium sand", "fine sand", "very fine sand", # 0:3
+                "coarse silt", "medium silt", "fine silt", "very fine silt", # 4:7
+                "clay", "clay", "clay", "clay", "clay", "clay", "clay") # 8:14
+
+tibble(phi = phi_levels, label = phi_labels) |> 
+  mutate(max_diam_mm = 2^-phi) |> knitr::kable()
+```
+
+
+https://www.fs.usda.gov/Internet/FSE_DOCUMENTS/fsm91_054559.pdf
+
+
+```{r step-2-sed-transport-setup}
+# DEFINE CONSTANTS
+# gravitational constant, cm/s2
+g_cgs <- 981
+# sedimetn grain density, g/cm3
+rho_s_cgs <- 2.65
+# water density, g/cm3
+rho_cgs <- 1.00
+# sediment specific_gravity
+sed_sg <- rho_s_cgs / rho_cgs
+# kinematic viscosity of water, cm2/s
+nu_cgs <- 0.01
+
+# CALCULATE BANKFULL BED MOBILIZATION AND SUSPENDED TRANSPORT
+sediment_data <- flowline_attributes |>
+  transmute(comid, slope, bf_depth_m, bf_width_m,
+            # assume rectangular channel for the cross sectional area and wetted perimeter
+            bf_xarea_m = bf_width_m * bf_depth_m,
+            wetted_perimeter_m = (2 * bf_depth_m) + bf_width_m,
+            hydraulic_radius_m = bf_xarea_m / wetted_perimeter_m,
+            # Lamb et al. 2008 estiamte of critical Shield's parameter (tau*) based on slope
+            critical_shields_number = 0.15 * slope^(1/4), 
+            # Shields 1936 for uniform grains on flat bed: tau* = rho * hydraulic_radius * slope / ((sediment specific gravity - 1) * particle size)
+            # This is a major simplificaiton assuming uniformity-- ideally we should account for particle of interest relative to D50 of reach-- but D50 is not known
+            # Also, note that the depth-slope product for shear stress assumes hydraulic radius interchangeable for mean depth
+            grain_size_mobilized_mm = 10 * rho_cgs * (hydraulic_radius_m * 100) * slope /  # hydraulic radius converted m to cm, result converted cm to mm
+                                      (critical_shields_number * (sed_sg - 1)),
+            grain_size_mobilized_phi = floor(-log(grain_size_mobilized_mm, 2)),
+            largest_grain_class_mobilized = factor(grain_size_mobilized_phi, levels=phi_levels, labels=phi_labels),
+            shear_velocity_cm_s = sqrt(g_cgs * (hydraulic_radius_m * 100) * slope),
+            settling_velocity_ndim = rho_cgs * shear_velocity_cm_s^3 / 
+                                     ((rho_s_cgs - rho_cgs) * g_cgs * nu_cgs),
+            # dimensionless settling velocity = 1.71 * 10^-4 (dimensionless particle size)^2  (Dietrich, 1982, eq. 8)
+            # dimensionless particle size = (rho_s - rho) * g * (particle size)^3 / (rho * nu^2)
+            grain_size_suspended_ndim = sqrt(5832 * settling_velocity_ndim), # this is Dietrich, 1982, eq. 8, rearranged
+            grain_size_suspended_mm = 10 * grain_size_suspended_ndim * rho_cgs * nu_cgs^2 /
+                                      ((rho_s_cgs - rho_cgs) * g_cgs)^(1/3),
+            grain_size_suspended_phi = floor(-log(grain_size_suspended_mm, 2)),
+            largest_grain_class_suspended = factor(grain_size_suspended_phi, levels=phi_levels, labels=phi_labels))
+
+spawning_flowlines_final |>
+  left_join(sediment_data, by=join_by(comid)) |>
+  pivot_longer(cols = c(largest_grain_class_mobilized, largest_grain_class_suspended)) |>
+  mutate(name = str_replace(name, "largest_grain_class_", "")) |>
+  filter(!is.na(value)) |>
+  ggplot() + geom_sf(aes(color = value)) + facet_wrap(~name) +
+  scale_color_discrete(name = "largest grain class") + 
+  ggtitle("Bankfull bed mobilization and suspended transport")
+
+spawning_flowlines_final |>
+  left_join(sediment_data, by=join_by(comid)) |>
+  ggplot() + 
+  geom_histogram(data=sediment_data, aes(x = -log(grain_size_mobilized_mm, 2), y = (after_stat(count / sum(count)))), alpha=0.5) + 
+  geom_histogram(aes(x = -log(grain_size_mobilized_mm, 2), y = (after_stat(count / sum(count)))), fill="red", alpha=0.5) + 
+  # scale_x_log10() + 
+  # annotation_logticks(sides="b") + 
+  # geom_vline(aes(xintercept = 0.0039, linetype="0.0039 mm Clay-Silt")) +
+  # geom_vline(aes(xintercept = 0.0625, linetype="0.0625 mm Silt-Sand")) +
+  # geom_vline(aes(xintercept = 2.0000, linetype="2.0000 mm Sand-Gravel")) +
+  geom_vline(aes(xintercept = 8, linetype="Silt-Clay")) +
+  geom_vline(aes(xintercept = 4, linetype="Sand-Silt")) +
+  geom_vline(aes(xintercept = -1, linetype="Gravel-Sand")) +
+  theme(panel.grid.minor = element_blank())
+
+spawning_flowlines_final |>
+  left_join(sediment_data, by=join_by(comid)) |>
+  ggplot() + 
+  geom_histogram(data=sediment_data, aes(x = -log(grain_size_suspended_mm, 2), y = (after_stat(count / sum(count)))), alpha=0.5) + 
+  geom_histogram(aes(x = -log(grain_size_suspended_mm, 2), y = (after_stat(count / sum(count)))), fill="red", alpha=0.5) + 
+  # scale_x_log10() + 
+  # annotation_logticks(sides="b") + 
+  # geom_vline(aes(xintercept = 0.0039, linetype="0.0039 mm Clay-Silt")) +
+  # geom_vline(aes(xintercept = 0.0625, linetype="0.0625 mm Silt-Sand")) +
+  # geom_vline(aes(xintercept = 2.0000, linetype="2.0000 mm Sand-Gravel")) +
+  geom_vline(aes(xintercept = 8, linetype="Silt-Clay")) +
+  geom_vline(aes(xintercept = 4, linetype="Sand-Silt")) +
+  geom_vline(aes(xintercept = -1, linetype="Gravel-Sand")) +
+  theme(panel.grid.minor = element_blank())
+
+spawning_flowlines_final |>
+  left_join(sediment_data, by=join_by(comid)) |>
+  ggplot() + 
+  geom_point(data=sediment_data, aes(x = -log(grain_size_mobilized_mm, 2), y = -log(grain_size_suspended_mm, 2)), alpha=0.5) + 
+  geom_point(aes(x = -log(grain_size_mobilized_mm, 2), y = -log(grain_size_suspended_mm, 2)), color="red") + 
+  geom_vline(aes(xintercept = 8, linetype="Silt-Clay")) +
+  geom_vline(aes(xintercept = 4, linetype="Sand-Silt")) +
+  geom_vline(aes(xintercept = -1, linetype="Gravel-Sand")) +
+  geom_hline(aes(yintercept = 8, linetype="Silt-Clay")) +
+  geom_hline(aes(yintercept = 4, linetype="Sand-Silt")) +
+  geom_hline(aes(yintercept = -1, linetype="Gravel-Sand")) +
+  theme(panel.grid.minor = element_blank())
+```
+
+```{r step-2-sed-transport-filter}
+spawning_flowlines_final |>
+  left_join(sediment_data, by=join_by(comid)) |>
+  
+  # eliminate reaches where largest grain size mobilized is within the silt or clay range
+  filter(!(str_detect(largest_grain_class_suspended, "silt|clay"))) |> 
+  
+  # ensure that flows are sufficient to mobilize gravels/cobbles, but not so powerful as to be mobilizing boulders
+  filter(str_detect(largest_grain_class_mobilized, "gravel|cobble")) |> 
+  
+  ggplot() +
+  geom_sf(data=spawning_flowlines_final, aes(color="All Potential Spawning Habitat")) + 
+  geom_sf(aes(color="Most Likely Spawning Gravel Reaches")) + 
+  ggtitle("Spawning Gravel Likelihood based on Bankfull Sediment Transport") + 
+  scale_color_manual(name = "", 
+                     values = c("All Potential Spawning Habitat" = "cornflowerblue",
+                                "Most Likely Spawning Gravel Reaches" = "mediumvioletred"))
+
+```
+
+Validate this by looking at known redd locations
+
+### Alternative Approach
+
+Using the *predicted* UCD geomorph classifications
+
+```{r step-2-geomorph-filter}
+spawning_flowlines_final |>
+  filter(comid %in% geomorph_filter_comid) |>
+  ggplot() + 
+  geom_sf(data=spawning_flowlines_final, aes(color="All Potential Spawning Habitat")) + 
+  geom_sf(aes(color="Most Likely Spawning Gravel Reaches")) + 
+  ggtitle("Spawning Gravel Likelihood based on Geomorphic Reach Classes") + 
+  scale_color_manual(name = "", 
+                     values = c("All Potential Spawning Habitat" = "cornflowerblue",
+                                "Most Likely Spawning Gravel Reaches" = "mediumvioletred"))
+```
+
+For a conservative (more inclusive) estimate, include reaches matching either set of criteria
+
+```{r step-2-combined-filter}
+spawning_flowlines_final |>
+  left_join(sediment_data, by=join_by(comid)) |>
+  filter((!(str_detect(largest_grain_class_suspended, "silt|clay")) & 
+            str_detect(largest_grain_class_mobilized, "gravel|cobble")) | 
+           comid %in% geomorph_filter_comid) |>
+  ggplot() +
+  #ggspatial::annotation_spatial(data=flowlines_filtered, color="#dddddd") +
+  geom_sf(data=spawning_flowlines_final, aes(color="Potential Spawning Habitat - All")) + 
+  geom_sf(aes(color="Potential Spawning Habitat - Most Likely Spawning Gravels")) + 
+  #scale_color_discrete(name = "") + 
+  ggtitle("Spawning Gravel Likelihood") + 
+  scale_color_manual(name = "", 
+                     values = c("Potential Spawning Habitat - All" = "cornflowerblue",
+                                "Potential Spawning Habitat - Most Likely Spawning Gravels" = "mediumvioletred"))
+```
+
+## Additional criteria to explore
+
+* Intersection of gradient and confinement: Excluding narrow steep bedrock streams 
+
+## Export result
 
 ```{r}
-ggplot() +
-  geom_sf(data=cvpia_extents, color="gray") +
-  geom_sf(data=lyr, color="red") +
-  geom_sf(data=cvpia_extents_spawning |> st_line_sample(sample=c(0, 1)), color="black", size=0.5) 
+spawning_context <- habistat::flowline_attr |>
+  select(comid) |>
+  left_join(sediment_data, by=join_by(comid)) |>
+  transmute(comid,
+            spawning_geographic_context = comid %in% spawning_flowlines_final$comid,
+            spawning_gravel_via_sediment = 
+              (!(str_detect(largest_grain_class_suspended, "silt|clay")) & 
+                 str_detect(largest_grain_class_mobilized, "gravel|cobble")),
+            spawning_gravel_via_geomorph = comid %in% geomorph_filter_comid,
+            spawning_filter_all = spawning_geographic_context & 
+              (spawning_gravel_via_sediment | spawning_gravel_via_geomorph))
+
+spawning_context |> saveRDS(here::here("data-raw", "results", "spawning_context.Rds"))
 ```
-
-
-
-

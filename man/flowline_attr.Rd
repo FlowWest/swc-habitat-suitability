@@ -5,12 +5,15 @@
 \alias{flowline_attr}
 \title{NHD Flowline (ComID) Attributes}
 \format{
-An object of class \code{data.frame} with 178868 rows and 117 columns.
+An object of class \code{tbl_df} (inherits from \code{tbl}, \code{data.frame}) with 178868 rows and 153 columns.
 }
 \usage{
 flowline_attr
 }
 \description{
 NHD Flowline (ComID) Attributes
+}
+\examples{
+flowline_attr |> pillar::glimpse()
 }
 \keyword{datasets}

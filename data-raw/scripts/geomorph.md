@@ -1,11 +1,14 @@
 Predictor Data Prep: Geomorphology and Soils
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-05-23
+2024-08-16
 
 - [Soils](#soils)
 - [UCD Geomorphology classes
   (experimental)](#ucd-geomorphology-classes-experimental)
+  - [version 1](#version-1)
+  - [version 2](#version-2)
+- [UCD Geomorph Classes](#ucd-geomorph-classes)
 
 ## Soils
 
@@ -153,15 +156,7 @@ geomorph_attr <-
          geomorph_riffles = str_detect(geomorph_class, "riffle"),
          geomorph_gravel = str_detect(geomorph_class, "gravel"),
          geomorph_spawning = (geomorph_riffles | geomorph_steppool)) 
-```
 
-    ## Warning in sf_column %in% names(g): Detected an unexpected many-to-many relationship between `x` and `y`.
-    ## ℹ Row 4 of `x` matches multiple rows in `y`.
-    ## ℹ Row 29868 of `y` matches multiple rows in `x`.
-    ## ℹ If a many-to-many relationship is expected, set `relationship =
-    ##   "many-to-many"` to silence this warning.
-
-``` r
 geomorph_attr |>
   ggplot() +
   geom_point(aes(x = slope*100, y = da_area_sq_km, color = geomorph_riffles)) + 
@@ -176,10 +171,15 @@ geomorph_attr |>
   ggplot() +
   geom_point(aes(x = slope*100, y = da_area_sq_km, color = geomorph_class)) + 
   scale_x_log10() + scale_y_log10() + annotation_logticks() +
-  theme(panel.grid.minor = element_blank()) 
+  theme(panel.grid.minor = element_blank()) +
+  scale_fill_brewer(type="qual", palette="Paired", aesthetics = c("fill", "color"))
 ```
 
 ![](geomorph_files/figure-gfm/unnamed-chunk-1-2.png)<!-- -->
+
+### version 1
+
+### version 2
 
 ``` r
 geomorph_training_data <- 
@@ -278,24 +278,18 @@ geomorph_training_data |>
 
     ## Joining with `by = join_by(comid)`
 
-    ## Warning in inner_join(select(geomorph_training_data, comid, geomorph_class_actual = geomorph_class), : Detected an unexpected many-to-many relationship between `x` and `y`.
-    ## ℹ Row 4 of `x` matches multiple rows in `y`.
-    ## ℹ Row 1579 of `y` matches multiple rows in `x`.
-    ## ℹ If a many-to-many relationship is expected, set `relationship =
-    ##   "many-to-many"` to silence this warning.
-
 | geomorph_class_pred                                                    | Unconfined, boulder-bedrock, bed undulating | Confined, boulder, high gradient, step-pool/cascade | Confined, boulder-bedrock, uniform | Confined, boulder-bedrock, low-gradient step-pool | Confined, gravel-cobble, uniform | Partly-confined, low width-to-depth ratio, gravel-cobble, riffle-pool | Partly-confined, cobble-boulder, uniform | Partly-confined, high width-to-depth ratio, gravel-cobble, riffle-pool | Unconfined, low width-to-depth ratio, gravel | Unconfined, gravel-cobble, riffle-pool |
 |:-----------------------------------------------------------------------|--------------------------------------------:|----------------------------------------------------:|-----------------------------------:|--------------------------------------------------:|---------------------------------:|----------------------------------------------------------------------:|-----------------------------------------:|-----------------------------------------------------------------------:|---------------------------------------------:|---------------------------------------:|
 | Unconfined, boulder-bedrock, bed undulating                            |                                           3 |                                                  NA |                                 NA |                                                NA |                               NA |                                                                    NA |                                       NA |                                                                     NA |                                           NA |                                     NA |
-| Confined, boulder, high gradient, step-pool/cascade                    |                                          NA |                                                  29 |                                  2 |                                                 1 |                               NA |                                                                    NA |                                       NA |                                                                     NA |                                           NA |                                      1 |
-| Confined, boulder-bedrock, uniform                                     |                                          NA |                                                   3 |                                 76 |                                                 5 |                               NA |                                                                     2 |                                        4 |                                                                      1 |                                           NA |                                     NA |
-| Confined, boulder-bedrock, low-gradient step-pool                      |                                          NA |                                                   2 |                                  2 |                                                35 |                                1 |                                                                    NA |                                       NA |                                                                      1 |                                           NA |                                     NA |
-| Confined, gravel-cobble, uniform                                       |                                          NA |                                                  NA |                                  2 |                                                NA |                               39 |                                                                     2 |                                       NA |                                                                      1 |                                           NA |                                     NA |
-| Partly-confined, low width-to-depth ratio, gravel-cobble, riffle-pool  |                                           1 |                                                   2 |                                  2 |                                                NA |                                3 |                                                                    45 |                                        3 |                                                                      4 |                                            2 |                                      2 |
-| Partly-confined, cobble-boulder, uniform                               |                                          NA |                                                  NA |                                  1 |                                                 1 |                                2 |                                                                    NA |                                       40 |                                                                      3 |                                           NA |                                     NA |
-| Partly-confined, high width-to-depth ratio, gravel-cobble, riffle-pool |                                          NA |                                                  NA |                                 NA |                                                NA |                                2 |                                                                    NA |                                       NA |                                                                     21 |                                           NA |                                     NA |
-| Unconfined, low width-to-depth ratio, gravel                           |                                          NA |                                                  NA |                                 NA |                                                NA |                               NA |                                                                     1 |                                       NA |                                                                     NA |                                           39 |                                     NA |
-| Unconfined, gravel-cobble, riffle-pool                                 |                                          NA |                                                  NA |                                 NA |                                                NA |                               NA |                                                                    NA |                                       NA |                                                                     NA |                                            1 |                                     18 |
+| Confined, boulder, high gradient, step-pool/cascade                    |                                          NA |                                                  17 |                                  2 |                                                 3 |                                1 |                                                                    NA |                                       NA |                                                                     NA |                                            1 |                                      1 |
+| Confined, boulder-bedrock, uniform                                     |                                          NA |                                                   3 |                                 23 |                                                 1 |                               NA |                                                                     1 |                                        5 |                                                                      1 |                                           NA |                                     NA |
+| Confined, boulder-bedrock, low-gradient step-pool                      |                                          NA |                                                   2 |                                  3 |                                                27 |                               NA |                                                                    NA |                                        1 |                                                                      3 |                                           NA |                                     NA |
+| Confined, gravel-cobble, uniform                                       |                                          NA |                                                  NA |                                  2 |                                                 1 |                               33 |                                                                     2 |                                       NA |                                                                     NA |                                            1 |                                     NA |
+| Partly-confined, low width-to-depth ratio, gravel-cobble, riffle-pool  |                                           1 |                                                   2 |                                  4 |                                                 1 |                                3 |                                                                    39 |                                        3 |                                                                      6 |                                            2 |                                      2 |
+| Partly-confined, cobble-boulder, uniform                               |                                          NA |                                                  NA |                                  2 |                                                NA |                                2 |                                                                    NA |                                       20 |                                                                      4 |                                            1 |                                     NA |
+| Partly-confined, high width-to-depth ratio, gravel-cobble, riffle-pool |                                          NA |                                                  NA |                                 NA |                                                NA |                                2 |                                                                    NA |                                       NA |                                                                      8 |                                           NA |                                     NA |
+| Unconfined, low width-to-depth ratio, gravel                           |                                          NA |                                                  NA |                                 NA |                                                NA |                               NA |                                                                     2 |                                       NA |                                                                     NA |                                           20 |                                     NA |
+| Unconfined, gravel-cobble, riffle-pool                                 |                                          NA |                                                  NA |                                 NA |                                                NA |                               NA |                                                                    NA |                                       NA |                                                                     NA |                                           NA |                                     12 |
 
 ``` r
 ggplot() +
@@ -307,7 +301,8 @@ ggplot() +
   theme(legend.position = "none") + ylab("Slope (%)") + xlab("Drainage Area (km2)")
 ```
 
-    ## Warning: Transformation introduced infinite values in continuous x-axis
+    ## Warning in scale_x_log10(labels = scales::label_comma()): log-10 transformation
+    ## introduced infinite values.
 
 ![](geomorph_files/figure-gfm/geomorph-fill-gaps-predict-2.png)<!-- -->
 
@@ -321,13 +316,16 @@ ggplot() +
   theme(legend.position = "none") + xlab("Drainage Area (km2)") + ylab("Elevation (ft)")
 ```
 
-    ## Warning in self$trans$transform(x): NaNs produced
+    ## Warning in transformation$transform(x): NaNs produced
 
-    ## Warning: Transformation introduced infinite values in continuous y-axis
+    ## Warning in scale_y_sqrt(labels = scales::label_comma()): sqrt transformation
+    ## introduced infinite values.
 
-    ## Warning: Transformation introduced infinite values in continuous x-axis
+    ## Warning in scale_x_log10(labels = scales::label_comma()): log-10 transformation
+    ## introduced infinite values.
 
-    ## Warning: Removed 487 rows containing missing values (`geom_point()`).
+    ## Warning: Removed 423 rows containing missing values or values outside the scale range
+    ## (`geom_point()`).
 
 ![](geomorph_files/figure-gfm/geomorph-fill-gaps-predict-3.png)<!-- -->
 
@@ -340,9 +338,96 @@ ggplot() +
 
     ## Joining with `by = join_by(comid)`
 
+    ## Warning: Removed 147795 rows containing missing values or values outside the scale range
+    ## (`geom_sf()`).
+
 ![](geomorph_files/figure-gfm/geomorph-export2-1.png)<!-- -->
 
 ``` r
 geomorph_pred |> select(comid, starts_with("geomorph_")) |>  #select(comid, geomorph_class) |> 
+  saveRDS(here::here("data-raw", "results", "attr_geomorph_class.Rds"))
+```
+
+## UCD Geomorph Classes
+
+Guillon, H., Byrne, C.F., Lane, B.A., Sandoval-Solis, S., and Pasternack
+G.B. (2020). Machine Learning Predicts Reach-Scale Channel Types from
+Coarse-Scale Geospatial Data in a Large River Basin. J. of Water
+Resources Research. <https://doi.org/10.1029/2019WR026691> \[Article\]
+
+Guillon, Hervé et al. (2020). Channel types predictions for the
+Sacramento River basin \[Dataset\]. Dryad.
+<https://doi.org/10.25338/B8031W>
+
+Sandoval-Solis, S., Lane, B.A., Pasternack G.B., Byrne, C.F. &
+Pasternack, G.B. Appendix F. Geomorphic Classification of California
+Rivers. in California Environmental Flows Framework.
+<https://ceff.ucdavis.edu/sites/g/files/dgvnsk5566/files/media/documents/Appendix_F%20Geomorphic%20Classification%20of%20CA.pdf>
+
+``` r
+geomorph_nhd_ucd <- read_sf(here::here("data-raw", "source", "ucd_geomorph", "SAC_channel-types_predictions_v1.shp.zip")) |>
+  transmute(comid = COMID,
+            geomorph_class_num=str_replace(group, "SAC","") |> as.numeric(),
+            geomorph_class = factor(group, 
+              levels = paste0("SAC",sprintf("%02d", seq(1,10,1))),
+              labels = c("SAC01"  = "Unconfined, boulder-bedrock, bed undulating",
+              "SAC02"  = "Confined, boulder, high gradient, step-pool/cascade",
+              "SAC03"  = "Confined, boulder-bedrock, uniform",
+              "SAC04"  = "Confined, boulder-bedrock, low-gradient step-pool",
+              "SAC05"  = "Confined, gravel-cobble, uniform",
+              "SAC06"  = "Partly-confined, low width-to-depth ratio, gravel-cobble, riffle-pool",
+              "SAC07"  = "Partly-confined, cobble-boulder, uniform",
+              "SAC08"  = "Partly-confined, high width-to-depth ratio, gravel-cobble, riffle-pool",
+              "SAC09"  = "Unconfined, low width-to-depth ratio, gravel",
+              "SAC010" = "Unconfined, gravel-cobble, riffle-pool")))
+
+ggplot() + 
+  geom_sf(data = geomorph_nhd_ucd, aes(color = geomorph_class)) + 
+  geom_sf(data = geomorph_site_data, aes(fill = geomorph_class), shape=21) + 
+  scale_fill_brewer(type="qual", palette="Paired", aesthetics = c("fill", "color"))
+```
+
+![](geomorph_files/figure-gfm/unnamed-chunk-2-1.png)<!-- -->
+
+Combine the official UCD dataset for Sac with our rougher classification
+for San Joaquin
+
+``` r
+geomorph_final <- 
+  geomorph_pred |>
+  #geomorph_pred_v2 |>
+  select(comid, geomorph_class_pred = geomorph_class) |>
+  left_join(geomorph_nhd_ucd |>
+              st_drop_geometry() |>
+              select(comid, geomorph_class_ucd = geomorph_class), by=join_by(comid)) |>
+  transmute(comid,
+            geomorph_class = coalesce(geomorph_class_ucd, geomorph_class_pred)) |>
+  mutate(geomorph_confined = str_split_i(geomorph_class, ", ", 1) |> as_factor(),
+         geomorph_uniform = str_detect(geomorph_class, "uniform"),
+         geomorph_steppool = str_detect(geomorph_class, "step-pool"), 
+         geomorph_riffles = str_detect(geomorph_class, "riffle"),
+         geomorph_gravel = str_detect(geomorph_class, "gravel"),
+         geomorph_spawning = (geomorph_riffles | geomorph_steppool))
+
+# # validation matrix
+# geomorph_final |>
+#   group_by(geomorph_class_ucd, geomorph_class_pred) |>
+#   tally() |> 
+#   mutate(n=coalesce(n,0)) |>
+#   spread(geomorph_class_ucd, n) |>
+#   knitr::kable()
+
+ggplot() + 
+  geom_sf(data = inner_join(flowlines, geomorph_final), aes(color = geomorph_class)) + 
+  geom_sf(data = geomorph_site_data, aes(fill = geomorph_class), shape=21) + 
+  scale_fill_brewer(type="qual", palette="Paired", aesthetics = c("fill", "color"))
+```
+
+    ## Joining with `by = join_by(comid)`
+
+![](geomorph_files/figure-gfm/unnamed-chunk-4-1.png)<!-- -->
+
+``` r
+geomorph_final |> select(comid, starts_with("geomorph_")) |>  #select(comid, geomorph_class) |> 
   saveRDS(here::here("data-raw", "results", "attr_geomorph_class.Rds"))
 ```

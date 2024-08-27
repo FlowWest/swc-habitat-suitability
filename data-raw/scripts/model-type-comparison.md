@@ -18,21 +18,25 @@ at different geographic scales.
 ``` r
 # load the data
 
-wuas <- habistat::wua_predicted
+# wuas <- habistat::wua_predicted
+# 
+# hqt_gradient_class <- readRDS(here::here("data-raw", "results", "hqt_gradient_class.Rds"))
+# 
+# hqt_cls <- habistat::flowline_geom |>
+#   st_zm() |>
+#   st_transform("ESRI:102039") |> 
+#   st_point_on_surface() |>
+#   st_join(hqt_gradient_class) |>
+#   st_drop_geometry() |> 
+#   select(comid, hqt_gradient_class) |> 
+#   mutate(hqt_gradient_class = coalesce(hqt_gradient_class, "Bedrock"),
+#          hqt_gradient_class = factor(hqt_gradient_class, levels=c("Valley Lowland", "Valley Foothill", "Bedrock"))) 
+# 
+# wuas_merge <- wuas |> left_join(hqt_cls) |> glimpse()
 
-hqt_gradient_class <- readRDS(here::here("data-raw", "results", "hqt_gradient_class.Rds"))
-
-hqt_cls <- habistat::flowline_geom |>
-  st_zm() |>
-  st_transform("ESRI:102039") |> 
-  st_point_on_surface() |>
-  st_join(hqt_gradient_class) |>
-  st_drop_geometry() |> 
-  select(comid, hqt_gradient_class) |> 
-  mutate(hqt_gradient_class = coalesce(hqt_gradient_class, "Bedrock"),
-         hqt_gradient_class = factor(hqt_gradient_class, levels=c("Valley Lowland", "Valley Foothill", "Bedrock"))) 
-
-wuas_merge <- wuas |> left_join(hqt_cls) |> glimpse()
+wuas_merge <- habistat::wua_predicted |> 
+  left_join(habistat::flowline_attr |> select(comid, hqt_gradient_class)) |>
+  glimpse()
 ```
 
     ## Rows: 4,987,896
@@ -57,12 +61,13 @@ Explore the WUAs but different groups
 # SN = scale normalized
 # TODO: i want no post-hoc baseflow removal, is this logic correct?
 rearing_wua_grouped <- wuas_merge |> 
-  filter(model_bfc == TRUE,
+  filter(model_bfc == FALSE, # FALSE = training data does not have baseflow channel = baseflow channel was removed
          habitat == "rearing") |> 
   mutate(model_name = case_when(model_name == "SD" ~ "Scale-Dependent",
-                                model_name == "SN" ~ "Scale-Normalized")) |> 
+                                model_name == "SN" ~ "Scale-Normalized"),
+         total_wua = wua_per_lf_pred * reach_length_ft) |> 
   group_by(model_name, flow_cfs, watershed_level_3, habitat, hqt_gradient_class) |> 
-  summarise(total_wua = sum(wua_per_lf_pred))
+  summarise(total_wua = sum(total_wua))
 ```
 
     ## `summarise()` has grouped output by 'model_name', 'flow_cfs',
@@ -76,6 +81,7 @@ rearing_wua_grouped |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = total_wua, color = model_name)) +
   theme(legend.position = "top")+
+  scale_x_log10() + annotation_logticks(sides = "b") +
   facet_wrap(~hqt_gradient_class) +
   ggtitle("Rearing: all watersheds grouped by HQT class")
 ```
@@ -91,6 +97,7 @@ rearing_wua_grouped |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = total_wua, color = model_name)) +
   theme(legend.position = "top")+
+  scale_x_log10() + annotation_logticks(sides = "b") +
   facet_wrap(~hqt_gradient_class + watershed_level_3)
 ```
 
@@ -102,6 +109,7 @@ rearing_wua_grouped |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = total_wua, color = model_name)) +
   theme(legend.position = "top")+
+  scale_x_log10() + annotation_logticks(sides = "b") +
   facet_wrap(~hqt_gradient_class + watershed_level_3)
 ```
 
@@ -113,6 +121,7 @@ rearing_wua_grouped |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = total_wua, color = model_name)) +
   theme(legend.position = "top")+
+  scale_x_log10() + annotation_logticks(sides = "b") +
   facet_wrap(~hqt_gradient_class + watershed_level_3)
 ```
 
@@ -123,14 +132,14 @@ rearing_wua_grouped |>
 ``` r
 # SD = scale dependent
 # SN = scale normalized
-# TODO: i want no post-hoc baseflow removal, is this logic correct?
 spawning_wua_grouped <- wuas_merge |> 
   filter(model_bfc == TRUE,
          habitat == "spawning") |> 
   mutate(model_name = case_when(model_name == "SD" ~ "Scale-Dependent",
-                                model_name == "SN" ~ "Scale-Normalized")) |> 
+                                model_name == "SN" ~ "Scale-Normalized"),
+         total_wua = wua_per_lf_pred * reach_length_ft) |> 
   group_by(model_name, flow_cfs, watershed_level_3, habitat, hqt_gradient_class) |> 
-  summarise(total_wua = sum(wua_per_lf_pred))
+  summarise(total_wua = sum(total_wua))
 ```
 
     ## `summarise()` has grouped output by 'model_name', 'flow_cfs',
@@ -144,8 +153,9 @@ spawning_wua_grouped |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = total_wua, color = model_name)) +
   theme(legend.position = "top")+
-  facet_wrap(~hqt_gradient_class) +
-  ggtitle("Spawning: all watersheds grouped by HQT class")
+  facet_wrap(~hqt_gradient_class) + 
+  scale_x_log10() + annotation_logticks(sides = "b") +
+  ggtitle("Spawning: all watersheds grouped by HQT class") 
 ```
 
     ## `summarise()` has grouped output by 'hqt_gradient_class', 'flow_cfs'. You can
@@ -159,6 +169,7 @@ spawning_wua_grouped |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = total_wua, color = model_name)) +
   theme(legend.position = "top")+
+  scale_x_log10() + annotation_logticks(sides = "b") +
   facet_wrap(~hqt_gradient_class + watershed_level_3)
 ```
 
@@ -170,6 +181,7 @@ spawning_wua_grouped |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = total_wua, color = model_name)) +
   theme(legend.position = "top")+
+  scale_x_log10() + annotation_logticks(sides = "b") +
   facet_wrap(~hqt_gradient_class + watershed_level_3)
 ```
 
@@ -181,7 +193,74 @@ spawning_wua_grouped |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = total_wua, color = model_name)) +
   theme(legend.position = "top")+
+  scale_x_log10() + annotation_logticks(sides = "b") +
   facet_wrap(~hqt_gradient_class + watershed_level_3)
 ```
 
 ![](model-type-comparison_files/figure-gfm/unnamed-chunk-3-4.png)<!-- -->
+
+## Spatial Distribution
+
+``` r
+habistat::flowline_geom_proj |>
+  inner_join(habistat::flowline_attr |> select(comid, da_scalar_maf)) |>
+  filter(comid %in% habistat::wua_predicted$comid) |>
+  ggplot() +
+  geom_sf(aes(color = da_scalar_maf)) + 
+  theme(legend.key.height = unit(48, "pt"),
+        axis.text = element_blank()) + 
+  ggtitle("Flow Scalar (Drainage Area * Mean Annual Precip)") + 
+  scale_color_viridis_c(name = "Million Acre-Feet", 
+                        direction = -1, 
+                        trans = habistat::trans_semiIHS, 
+                        breaks = c(0.1, 1, 10, 100), 
+                        limits = c(0.1, 100), na.value = "darkorange")
+```
+
+    ## Joining with `by = join_by(comid)`
+
+![](model-type-comparison_files/figure-gfm/map-comparison-scalar-1.png)<!-- -->
+
+``` r
+habistat::flowline_geom_proj |>
+  inner_join(habistat::wua_predicted |> 
+               filter(flow_cfs %in% c(300, 1000, 3000, 10000)) |>
+               #filter((habitat=="rearing" & !model_bfc) | (habitat=="spawning" & model_bfc))
+               filter((habitat=="rearing" & !model_bfc)), by=join_by(comid)) |>
+  ggplot() +
+  facet_grid(rows = vars(model_name), cols = vars(flow_cfs), switch = "both") + 
+  geom_sf(aes(color = wua_per_lf_pred)) + 
+  scale_color_gradientn(name = "WUA per LF",
+                        limits = c(0, 300),
+                        breaks = c(0, 1, 3, 10, 30, 100, 300), 
+                        trans = habistat::trans_semiIHS,
+                        values = scales::rescale(habistat::semiIHS(c(0, 1, 3, 10, 30, 100, 300))),
+                        colors = c("darkblue", "turquoise", "gold", "darkorange", "darkred", "violetred4", "mediumvioletred")) + 
+  theme(legend.key.height = unit(48, "pt"),
+        axis.text = element_blank()) + 
+  xlab("Flow (cfs)") + ylab("Model Type") + ggtitle("Rearing")
+```
+
+![](model-type-comparison_files/figure-gfm/map-comparison-rearing-1.png)<!-- -->
+
+``` r
+habistat::flowline_geom_proj |>
+  inner_join(habistat::wua_predicted |> 
+               filter(flow_cfs %in% c(300, 1000, 3000, 10000)) |>
+               #filter((habitat=="rearing" & !model_bfc) | (habitat=="spawning" & model_bfc))
+               filter((habitat=="spawning" & model_bfc)), by=join_by(comid)) |>
+  ggplot() +
+  facet_grid(rows = vars(model_name), cols = vars(flow_cfs), switch = "both") + 
+  geom_sf(aes(color = wua_per_lf_pred)) + 
+  scale_color_gradientn(name = "WUA per LF",
+                        limits = c(0, 300),
+                        breaks = c(0, 1, 3, 10, 30, 100, 300), 
+                        trans = habistat::trans_semiIHS,
+                        values = scales::rescale(habistat::semiIHS(c(0, 1, 3, 10, 30, 100, 300))),
+                        colors = c("darkblue", "turquoise", "gold", "darkorange", "darkred", "violetred4", "mediumvioletred")) + 
+  theme(legend.key.height = unit(48, "pt"),
+        axis.text = element_blank()) + 
+  xlab("Flow (cfs)") + ylab("Model Type") + ggtitle("Spawning")
+```
+
+![](model-type-comparison_files/figure-gfm/map-comparison-spawning-1.png)<!-- -->

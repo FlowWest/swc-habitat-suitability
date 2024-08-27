@@ -1,0 +1,121 @@
+---
+title: "Model Comparison"
+author: "Maddee Rubenson (FlowWest)"
+date: "`r Sys.Date()`"
+output:  github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(sf)
+
+theme_set(theme_minimal())
+
+```
+
+The purpose of this markdown is to explore the different model methods and how they impact reaches differently through exploring model outputs at different geographic scales.
+
+**Model types:**
+
+-   Scale Dependent: non-normalized - this is the WUA (sq feet/linear foot) vs. flow
+
+-   Scale Normalized: normalized - this is WUA (sq feet/linear foot) (normalized) vs. flow (normalized)
+
+```{r message=FALSE, warning=FALSE}
+# load the data
+
+wuas <- habistat::wua_predicted
+
+hqt_gradient_class <- readRDS(here::here("data-raw", "results", "hqt_gradient_class.Rds"))
+
+hqt_cls <- habistat::flowline_geom |>
+  st_zm() |>
+  st_transform("ESRI:102039") |> 
+  st_point_on_surface() |>
+  st_join(hqt_gradient_class) |>
+  st_drop_geometry() |> 
+  select(comid, hqt_gradient_class) |> 
+  mutate(hqt_gradient_class = coalesce(hqt_gradient_class, "Bedrock"),
+         hqt_gradient_class = factor(hqt_gradient_class, levels=c("Valley Lowland", "Valley Foothill", "Bedrock"))) 
+
+wuas_merge <- wuas |> left_join(hqt_cls) |> glimpse()
+
+```
+
+Explore the WUAs but different groups
+
+## Rearing:
+
+```{r}
+# SD = scale dependent
+# SN = scale normalized
+# TODO: i want no post-hoc baseflow removal, is this logic correct?
+rearing_wua_grouped <- wuas_merge |> 
+  filter(model_bfc == TRUE,
+         habitat == "rearing") |> 
+  mutate(model_name = case_when(model_name == "SD" ~ "Scale-Dependent",
+                                model_name == "SN" ~ "Scale-Normalized")) |> 
+  group_by(model_name, flow_cfs, watershed_level_3, habitat, hqt_gradient_class) |> 
+  summarise(total_wua = sum(wua_per_lf_pred))
+
+rearing_wua_grouped |> 
+  filter(watershed_level_3 %in% c("Feather River")) |> 
+  ggplot() + 
+  geom_line(aes(x = flow_cfs, y = total_wua, color = model_name)) +
+  theme(legend.position = "top")+
+  facet_wrap(~hqt_gradient_class + watershed_level_3)
+
+rearing_wua_grouped |> 
+  filter(watershed_level_3 %in% c("American River")) |> 
+  ggplot() + 
+  geom_line(aes(x = flow_cfs, y = total_wua, color = model_name)) +
+  theme(legend.position = "top")+
+  facet_wrap(~hqt_gradient_class + watershed_level_3)
+
+
+rearing_wua_grouped |> 
+  filter(watershed_level_3 %in% c("Battle Creek")) |> 
+  ggplot() + 
+  geom_line(aes(x = flow_cfs, y = total_wua, color = model_name)) +
+  theme(legend.position = "top")+
+  facet_wrap(~hqt_gradient_class + watershed_level_3)
+```
+
+## Spawning:
+
+```{r}
+# SD = scale dependent
+# SN = scale normalized
+# TODO: i want no post-hoc baseflow removal, is this logic correct?
+spawning_wua_grouped <- wuas_merge |> 
+  filter(model_bfc == TRUE,
+         habitat == "spawning") |> 
+  mutate(model_name = case_when(model_name == "SD" ~ "Scale-Dependent",
+                                model_name == "SN" ~ "Scale-Normalized")) |> 
+  group_by(model_name, flow_cfs, watershed_level_3, habitat, hqt_gradient_class) |> 
+  summarise(total_wua = sum(wua_per_lf_pred))
+
+spawning_wua_grouped |> 
+  filter(watershed_level_3 %in% c("Feather River")) |> 
+  ggplot() + 
+  geom_line(aes(x = flow_cfs, y = total_wua, color = model_name)) +
+  theme(legend.position = "top")+
+  facet_wrap(~hqt_gradient_class + watershed_level_3)
+
+spawning_wua_grouped |> 
+  filter(watershed_level_3 %in% c("American River")) |> 
+  ggplot() + 
+  geom_line(aes(x = flow_cfs, y = total_wua, color = model_name)) +
+  theme(legend.position = "top")+
+  facet_wrap(~hqt_gradient_class + watershed_level_3)
+
+
+spawning_wua_grouped |> 
+  filter(watershed_level_3 %in% c("Battle Creek")) |> 
+  ggplot() + 
+  geom_line(aes(x = flow_cfs, y = total_wua, color = model_name)) +
+  theme(legend.position = "top")+
+  facet_wrap(~hqt_gradient_class + watershed_level_3)
+```

@@ -69,19 +69,25 @@ rearing_wua_grouped <- wuas_merge |>
     ## 'watershed_level_3', 'habitat'. You can override using the `.groups` argument.
 
 ``` r
+# all watersheds
 rearing_wua_grouped |> 
-  filter(watershed_level_3 %in% c("Feather River")) |> 
+  group_by(hqt_gradient_class, flow_cfs, model_name) |> 
+  summarise(total_wua = sum(total_wua)) |> 
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = total_wua, color = model_name)) +
   theme(legend.position = "top")+
-  facet_wrap(~hqt_gradient_class + watershed_level_3)
+  facet_wrap(~hqt_gradient_class) +
+  ggtitle("Rearing: all watersheds grouped by HQT class")
 ```
+
+    ## `summarise()` has grouped output by 'hqt_gradient_class', 'flow_cfs'. You can
+    ## override using the `.groups` argument.
 
 ![](model-type-comparison_files/figure-gfm/unnamed-chunk-2-1.png)<!-- -->
 
 ``` r
 rearing_wua_grouped |> 
-  filter(watershed_level_3 %in% c("American River")) |> 
+  filter(watershed_level_3 %in% c("Feather River")) |> 
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = total_wua, color = model_name)) +
   theme(legend.position = "top")+
@@ -92,7 +98,7 @@ rearing_wua_grouped |>
 
 ``` r
 rearing_wua_grouped |> 
-  filter(watershed_level_3 %in% c("Battle Creek")) |> 
+  filter(watershed_level_3 %in% c("American River")) |> 
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = total_wua, color = model_name)) +
   theme(legend.position = "top")+
@@ -100,6 +106,17 @@ rearing_wua_grouped |>
 ```
 
 ![](model-type-comparison_files/figure-gfm/unnamed-chunk-2-3.png)<!-- -->
+
+``` r
+rearing_wua_grouped |> 
+  filter(watershed_level_3 %in% c("Battle Creek")) |> 
+  ggplot() + 
+  geom_line(aes(x = flow_cfs, y = total_wua, color = model_name)) +
+  theme(legend.position = "top")+
+  facet_wrap(~hqt_gradient_class + watershed_level_3)
+```
+
+![](model-type-comparison_files/figure-gfm/unnamed-chunk-2-4.png)<!-- -->
 
 ## Spawning:
 
@@ -120,19 +137,25 @@ spawning_wua_grouped <- wuas_merge |>
     ## 'watershed_level_3', 'habitat'. You can override using the `.groups` argument.
 
 ``` r
+# all watersheds
 spawning_wua_grouped |> 
-  filter(watershed_level_3 %in% c("Feather River")) |> 
+  group_by(hqt_gradient_class, flow_cfs, model_name) |> 
+  summarise(total_wua = sum(total_wua)) |> 
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = total_wua, color = model_name)) +
   theme(legend.position = "top")+
-  facet_wrap(~hqt_gradient_class + watershed_level_3)
+  facet_wrap(~hqt_gradient_class) +
+  ggtitle("Spawning: all watersheds grouped by HQT class")
 ```
+
+    ## `summarise()` has grouped output by 'hqt_gradient_class', 'flow_cfs'. You can
+    ## override using the `.groups` argument.
 
 ![](model-type-comparison_files/figure-gfm/unnamed-chunk-3-1.png)<!-- -->
 
 ``` r
 spawning_wua_grouped |> 
-  filter(watershed_level_3 %in% c("American River")) |> 
+  filter(watershed_level_3 %in% c("Feather River")) |> 
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = total_wua, color = model_name)) +
   theme(legend.position = "top")+
@@ -143,7 +166,7 @@ spawning_wua_grouped |>
 
 ``` r
 spawning_wua_grouped |> 
-  filter(watershed_level_3 %in% c("Battle Creek")) |> 
+  filter(watershed_level_3 %in% c("American River")) |> 
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = total_wua, color = model_name)) +
   theme(legend.position = "top")+
@@ -151,3 +174,14 @@ spawning_wua_grouped |>
 ```
 
 ![](model-type-comparison_files/figure-gfm/unnamed-chunk-3-3.png)<!-- -->
+
+``` r
+spawning_wua_grouped |> 
+  filter(watershed_level_3 %in% c("Battle Creek")) |> 
+  ggplot() + 
+  geom_line(aes(x = flow_cfs, y = total_wua, color = model_name)) +
+  theme(legend.position = "top")+
+  facet_wrap(~hqt_gradient_class + watershed_level_3)
+```
+
+![](model-type-comparison_files/figure-gfm/unnamed-chunk-3-4.png)<!-- -->

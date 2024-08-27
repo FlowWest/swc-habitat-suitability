@@ -60,6 +60,17 @@ rearing_wua_grouped <- wuas_merge |>
   group_by(model_name, flow_cfs, watershed_level_3, habitat, hqt_gradient_class) |> 
   summarise(total_wua = sum(wua_per_lf_pred))
 
+# all watersheds
+rearing_wua_grouped |> 
+  group_by(hqt_gradient_class, flow_cfs, model_name) |> 
+  summarise(total_wua = sum(total_wua)) |> 
+  ggplot() + 
+  geom_line(aes(x = flow_cfs, y = total_wua, color = model_name)) +
+  theme(legend.position = "top")+
+  facet_wrap(~hqt_gradient_class) +
+  ggtitle("Rearing: all watersheds grouped by HQT class")
+
+
 rearing_wua_grouped |> 
   filter(watershed_level_3 %in% c("Feather River")) |> 
   ggplot() + 
@@ -96,6 +107,16 @@ spawning_wua_grouped <- wuas_merge |>
                                 model_name == "SN" ~ "Scale-Normalized")) |> 
   group_by(model_name, flow_cfs, watershed_level_3, habitat, hqt_gradient_class) |> 
   summarise(total_wua = sum(wua_per_lf_pred))
+
+# all watersheds
+spawning_wua_grouped |> 
+  group_by(hqt_gradient_class, flow_cfs, model_name) |> 
+  summarise(total_wua = sum(total_wua)) |> 
+  ggplot() + 
+  geom_line(aes(x = flow_cfs, y = total_wua, color = model_name)) +
+  theme(legend.position = "top")+
+  facet_wrap(~hqt_gradient_class) +
+  ggtitle("Spawning: all watersheds grouped by HQT class")
 
 spawning_wua_grouped |> 
   filter(watershed_level_3 %in% c("Feather River")) |> 

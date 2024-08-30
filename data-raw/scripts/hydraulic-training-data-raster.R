@@ -315,10 +315,10 @@ combine_reaches <- function(data) {
   unnest(result) |>
   filter(!is.nan(area_tot)) |>
   group_by(comid) %>%
-  complete(flow_cfs = unique(.$flow_cfs)) |>
+  complete(flow_cfs = unique(flow_cfs)) |>
   arrange(comid, flow_cfs) |>
   mutate(across(c(area_tot, area_wua, length_ft),
-                function(x) zoo::na.approx(x, x = flow_cfs, rule = 2))) |>
+                function(x) zoo::na.approx(x, x = flow_cfs, rule = 2:1, na.rm=F))) |>
   group_by(flow_cfs, comid) |>
   summarize(area_tot = sum(area_tot),
             area_wua = sum(area_wua),

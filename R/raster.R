@@ -100,8 +100,8 @@ raster_dvhsi_lyr <- function(d, v) {
 #' @export
 #'
 #' @examples
-raster_dvhsi_spawning <- function(d, v, run="max") {
-  terra::lapp(c(d, v), function(d, v) vector_dvhsi_spawning(d, v, run=run))
+raster_dvhsi_spawning <- function(d, v, run="max", strict=T) {
+  terra::lapp(c(d, v), function(d, v) vector_dvhsi_spawning(d, v, run=run, strict=strict))
 }
 
 #' Calculate HSI based on HEC-RAS 2D rasters

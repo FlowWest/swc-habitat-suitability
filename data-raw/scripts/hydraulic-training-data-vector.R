@@ -52,28 +52,22 @@ stan_csvs <- tribble(~flow_cfs, ~filename,
                       5000, "5000cfs_071113.csv.gz") |>
   mutate(filename = file.path(stan_dir, filename))
 
+# ### ORIGINAL VERSION
+#
+# stan_result <-
+#   vector_summarize_hsi(stan_mesh_prepped, stan_hsi_by_flow) |>
+#   suitability_postprocess(stan_comid, .group_var = comid)
+#
+# outpath <- here::here("data-raw", "results", "fsa_stan.Rds")
+#
+# stan_result |> saveRDS(outpath)
+
+### VARIATION FOR REARING - BASEFLOW REMOVAL
+
 stan_hsi_by_flow <-
   stan_csvs |>
   vector_import_srh2d(units = "m") |>
   vector_calculate_hsi(hsi_func = vector_dvhsi_hqt)
-
-### ORIGINAL VERSION
-
-stan_mesh_prepped <-
-  stan_thiessen |>
-  vector_prep_mesh(group_polygons = stan_comid,
-                   .group_var = comid,
-                   .id_var = vid)
-
-stan_result <-
-  vector_summarize_hsi(stan_mesh_prepped, stan_hsi_by_flow) |>
-  suitability_postprocess(stan_comid, .group_var = comid)
-
-outpath <- here::here("data-raw", "results", "fsa_stan.Rds")
-
-stan_result |> saveRDS(outpath)
-
-### VARIATION FOR REARING - BASEFLOW REMOVAL
 
 # define baseflow mask as 500 cfs (COMID 2819818 observed dry season baseflow is 306 cfs)
 stan_baseflow_poly <- stan_thiessen |>
@@ -97,6 +91,12 @@ outpath <- here::here("data-raw", "results", "fsa_stan_nbfc.Rds")
 stan_result_nbfc |> saveRDS(outpath)
 
 ### VARIATION FOR SPAWNING - ALTERNATIVE HSI
+
+stan_mesh_prepped <-
+  stan_thiessen |>
+  vector_prep_mesh(group_polygons = stan_comid,
+                   .group_var = comid,
+                   .id_var = vid)
 
 stan_hsi_by_flow_spawning <-
   stan_csvs |>
@@ -170,88 +170,73 @@ yuba_mesh_data_by_reach <-
          geom_thiessen = future_map(filename_thiessen,
                              function(x) st_read(x, as_tibble=T)))
 
-### ORIGINAL VERSION
+# ### ORIGINAL VERSION
+#
+# yuba_output_by_reach <-
+#   inner_join(yuba_hsi_by_flow_by_reach, yuba_mesh_prepped_by_reach,
+#              by=join_by(reach), relationship="one-to-one") |>
+#   mutate(hsi_output = pmap(list(mesh_prepped, tbl_hsi),
+#                            function(x, y) vector_summarize_hsi(x, y, .group_var=comid, .id_var=vid))) |>
+#   mutate(hsi_final = pmap(list(hsi_output, reach),
+#                           function(x, y) suitability_postprocess(x, yuba_comid |> filter(reach==y), .group_var=comid))) |>
+#   select(reach, hsi_final)
+#
+# yuba_output_by_reach |> saveRDS(file.path(yuba_dir, "yuba_output_by_reach.Rds"))
+#
+# yuba_result <-
+#   yuba_output_by_reach |>
+#   select(reach, hsi_final) |>
+#   unnest(hsi_final)
+#
+# outpath <- here::here("data-raw", "results", "fsa_yuba.Rds")
+#
+# yuba_result |> saveRDS(outpath)
+#
+### VARIATION FOR REARING - BASEFLOW REMOVAL
 
-if(!file.exists(file.path(yuba_dir, "yuba_mesh_prepped_by_reach.Rds"))) {
+if(!file.exists(file.path(yuba_dir, "yuba_mesh_prepped_by_reach_nbfc.Rds"))) {
 
-  yuba_mesh_prepped_by_reach <-
+  yuba_baseflow_poly <-
+    yuba_mesh_data_by_reach |>
+      mutate(result = future_pmap(list(geom_vertices, geom_thiessen, reach),
+                                  function(vtx, thp, rch) {
+                                    thp |>
+                                      st_join(vtx |>
+                                                transmute(vid=row_number()),
+                                              join=st_contains_properly, left = FALSE) |>
+                                      arrange(vid) |>
+                                      filter(vid %in% filter(unnest(yuba_hsi_by_flow_by_reach, tbl_hsi), inundated & flow_cfs == 700 & reach == rch)$vid) |>
+                                      summarize() |>
+                                      st_union()
+                                  })) |>
+    pull(result) |>
+    data.table::rbindlist() |>
+    st_sfc(crs = st_crs(yuba_comid)) |>
+    st_union()
+
+  yuba_mesh_prepped_by_reach_nbfc <-
     yuba_mesh_data_by_reach |>
     mutate(mesh_prepped = future_pmap(list(geom_vertices, geom_thiessen, reach),
-                               function(vtx, thp, rch) {
-                                 thp |>
-                                   st_join(vtx |>
-                                             transmute(vid=row_number()),
-                                           join=st_contains_properly, left = FALSE) |> #st_nearest_feature) |>
-                                   arrange(vid) |>
-                                   vector_prep_mesh(group_polygons = yuba_comid |> filter(reach==rch),
-                                                    .group_var = comid,
-                                                    .id_var = vid)
-                               })) |>
+                                      function(vtx, thp, rch) {
+                                        thp |>
+                                          st_join(vtx |>
+                                                    transmute(vid=row_number()),
+                                                  join=st_contains_properly, left = FALSE) |> #st_nearest_feature) |>
+                                          arrange(vid) |>
+                                          vector_prep_mesh(group_polygons = yuba_comid |> filter(reach==rch),
+                                                           mask_polygons = yuba_baseflow_poly,
+                                                           .group_var = comid,
+                                                           .id_var = vid)
+                                      })) |>
     select(reach, mesh_prepped)
 
-  yuba_mesh_prepped_by_reach |> saveRDS(file.path(yuba_dir, "yuba_mesh_prepped_by_reach.Rds"))
+  yuba_mesh_prepped_by_reach_nbfc |> saveRDS("yuba_mesh_prepped_by_reach_nbfc.Rds")
 
 } else {
 
-  yuba_mesh_prepped_by_reach <- readRDS(file.path(yuba_dir, "yuba_mesh_prepped_by_reach.Rds"))
+  yuba_mesh_prepped_by_reach_nbfc <- readRDS("yuba_mesh_prepped_by_reach_nbfc.Rds")
 
 }
-
-yuba_output_by_reach <-
-  inner_join(yuba_hsi_by_flow_by_reach, yuba_mesh_prepped_by_reach,
-             by=join_by(reach), relationship="one-to-one") |>
-  mutate(hsi_output = pmap(list(mesh_prepped, tbl_hsi),
-                           function(x, y) vector_summarize_hsi(x, y, .group_var=comid, .id_var=vid))) |>
-  mutate(hsi_final = pmap(list(hsi_output, reach),
-                          function(x, y) suitability_postprocess(x, yuba_comid |> filter(reach==y), .group_var=comid))) |>
-  select(reach, hsi_final)
-
-yuba_output_by_reach |> saveRDS(file.path(yuba_dir, "yuba_output_by_reach.Rds"))
-
-yuba_result <-
-  yuba_output_by_reach |>
-  select(reach, hsi_final) |>
-  unnest(hsi_final)
-
-outpath <- here::here("data-raw", "results", "fsa_yuba.Rds")
-
-yuba_result |> saveRDS(outpath)
-
-### VARIATION FOR REARING - BASEFLOW REMOVAL
-
-yuba_baseflow_poly <-
-  yuba_mesh_data_by_reach |>
-    mutate(result = future_pmap(list(geom_vertices, geom_thiessen, reach),
-                                function(vtx, thp, rch) {
-                                  thp |>
-                                    st_join(vtx |>
-                                              transmute(vid=row_number()),
-                                            join=st_contains_properly, left = FALSE) |>
-                                    arrange(vid) |>
-                                    filter(vid %in% filter(unnest(yuba_hsi_by_flow_by_reach, tbl_hsi), inundated & flow_cfs == 700 & reach == rch)$vid) |>
-                                    summarize() |>
-                                    st_union()
-                                })) |>
-  pull(result) |>
-  data.table::rbindlist() |>
-  st_sfc(crs = st_crs(yuba_comid)) |>
-  st_union()
-
-yuba_mesh_prepped_by_reach_nbfc <-
-  yuba_mesh_data_by_reach |>
-  mutate(mesh_prepped = future_pmap(list(geom_vertices, geom_thiessen, reach),
-                                    function(vtx, thp, rch) {
-                                      thp |>
-                                        st_join(vtx |>
-                                                  transmute(vid=row_number()),
-                                                join=st_contains_properly, left = FALSE) |> #st_nearest_feature) |>
-                                        arrange(vid) |>
-                                        vector_prep_mesh(group_polygons = yuba_comid |> filter(reach==rch),
-                                                         mask_polygons = yuba_baseflow_poly,
-                                                         .group_var = comid,
-                                                         .id_var = vid)
-                                    })) |>
-  select(reach, mesh_prepped)
 
 yuba_output_by_reach_nbfc <-
   inner_join(yuba_hsi_by_flow_by_reach, yuba_mesh_prepped_by_reach_nbfc,
@@ -274,6 +259,31 @@ outpath <- here::here("data-raw", "results", "fsa_yuba_nbfc.Rds")
 yuba_result_nbfc |> saveRDS(outpath)
 
 ### VARIATION FOR SPAWNING - ALTERNATIVE HSI
+
+if(!file.exists(file.path(yuba_dir, "yuba_mesh_prepped_by_reach.Rds"))) {
+
+  yuba_mesh_prepped_by_reach <-
+    yuba_mesh_data_by_reach |>
+    mutate(mesh_prepped = future_pmap(list(geom_vertices, geom_thiessen, reach),
+                                      function(vtx, thp, rch) {
+                                        thp |>
+                                          st_join(vtx |>
+                                                    transmute(vid=row_number()),
+                                                  join=st_contains_properly, left = FALSE) |> #st_nearest_feature) |>
+                                          arrange(vid) |>
+                                          vector_prep_mesh(group_polygons = yuba_comid |> filter(reach==rch),
+                                                           .group_var = comid,
+                                                           .id_var = vid)
+                                      })) |>
+    select(reach, mesh_prepped)
+
+  yuba_mesh_prepped_by_reach |> saveRDS(file.path(yuba_dir, "yuba_mesh_prepped_by_reach.Rds"))
+
+} else {
+
+  yuba_mesh_prepped_by_reach <- readRDS(file.path(yuba_dir, "yuba_mesh_prepped_by_reach.Rds"))
+
+}
 
 yuba_hsi_by_flow_by_reach_spawning <-
   yuba_srh2d_result_by_reach |>

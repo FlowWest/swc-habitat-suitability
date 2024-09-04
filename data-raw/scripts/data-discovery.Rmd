@@ -143,18 +143,19 @@ drive_file_by_id("1sf3hKUmo6ZvJwnfyR9m4PoeY9V2n4hou") |>
 flowline_vaattr <- 
   foreign::read.dbf(here::here("data-raw", "temp", "PlusFlowlineVAA.dbf")) |> 
   as_tibble() |> 
-  select(comid = ComID, 
+  transmute(comid = ComID, 
          hydro_seq = Hydroseq,
          reach_code = ReachCode,
          stream_level = StreamLeve, 
          stream_order = StreamOrde, 
          us_length_km = ArbolateSu,
          ds_length_km = Pathlength,
-         da_area_sq_km = DivDASqKM, # using divergence-routed version 
-         #da_area_sq_km_tot = TotDASqKM,
+         da_area_sq_km = TotDASqKM, # using non-divergence-routed version as "default" 
+         da_area_sq_km_div = DivDASqKM, # include both for clarity
+         da_area_sq_km_tot = TotDASqKM, # include both for clarity
+         divergence_ratio = DivDASqKM / TotDASqKM,
          reach_length_km = LengthKM,
-         ) |>
-  mutate(reach_length_ft = reach_length_km * 1000 / 0.3048) 
+         reach_length_ft = LengthKM * 1000 / 0.3048)
 
 # slopes and endpoint elevations
 flowline_slopes <- 
@@ -720,7 +721,7 @@ flowline_attributes <-
                                      coalesce(lateral_levee_confinement_ft*0.3048, vb_width_transect),
                                      vb_width_transect),
          vb_bf_w_ratio = vb_width_transect / chan_width_m,) |>
-  mutate(da_scalar_maf = (da_area_sq_km * 247.1053815) * (da_ppt_mean_mm / 304.8) / 1E6)
+  mutate(da_scalar_maf = (da_area_sq_km_tot * 247.1053815) * (da_ppt_mean_mm / 304.8) / 1E6)
 
 flowline_attributes |> saveRDS(here::here("data-raw", "results", "flowline_attributes.Rds"))
 

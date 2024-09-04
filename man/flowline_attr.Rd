@@ -5,7 +5,7 @@
 \alias{flowline_attr}
 \title{NHD Flowline (ComID) Attributes}
 \format{
-An object of class \code{tbl_df} (inherits from \code{tbl}, \code{data.frame}) with 178868 rows and 153 columns.
+An object of class \code{tbl_df} (inherits from \code{tbl}, \code{data.frame}) with 178868 rows and 155 columns.
 }
 \usage{
 flowline_attr

@@ -1,7 +1,7 @@
 Predictor Data Preparation and Consolidation
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-06-06
+2024-09-03
 
 - [Case study geographic scope](#case-study-geographic-scope)
   - [Import Flowline Geometry](#import-flowline-geometry)
@@ -47,8 +47,6 @@ watersheds <-
 
     ## ℹ The googledrive package is using a cached token for 'slewis@flowwest.com'.
 
-    ## Auto-refreshing stale OAuth token.
-
     ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/WBD_Subwatershed.shp.zip already exists and will be used...
 
 ``` r
@@ -78,10 +76,11 @@ flowline_geom |> usethis::use_data(overwrite = T)
 ```
 
     ## ✔ Setting active project to
-    ## 'C:/Users/skylerlewis/Github/swc-habitat-suitability'
+    ##   "C:/Users/skylerlewis/Github/swc-habitat-suitability".
 
-    ## ✔ Saving 'flowline_geom' to 'data/flowline_geom.rda'
-    ## • Document your data (see 'https://r-pkgs.org/data.html')
+    ## ✔ Saving "flowline_geom" to "data/flowline_geom.rda".
+
+    ## ☐ Document your data (see <https://r-pkgs.org/data.html>).
 
 ``` r
 # projected version
@@ -93,8 +92,8 @@ flowline_geom_proj |> saveRDS(here::here("data-raw", "results", "flowline_geomet
 flowline_geom_proj |> usethis::use_data(overwrite = T)
 ```
 
-    ## ✔ Saving 'flowline_geom_proj' to 'data/flowline_geom_proj.rda'
-    ## • Document your data (see 'https://r-pkgs.org/data.html')
+    ## ✔ Saving "flowline_geom_proj" to "data/flowline_geom_proj.rda".
+    ## ☐ Document your data (see <https://r-pkgs.org/data.html>).
 
 ``` r
 #hs_flowlines <- flowline_geom
@@ -189,18 +188,19 @@ drive_file_by_id("1sf3hKUmo6ZvJwnfyR9m4PoeY9V2n4hou") |>
 flowline_vaattr <- 
   foreign::read.dbf(here::here("data-raw", "temp", "PlusFlowlineVAA.dbf")) |> 
   as_tibble() |> 
-  select(comid = ComID, 
+  transmute(comid = ComID, 
          hydro_seq = Hydroseq,
          reach_code = ReachCode,
          stream_level = StreamLeve, 
          stream_order = StreamOrde, 
          us_length_km = ArbolateSu,
          ds_length_km = Pathlength,
-         da_area_sq_km = DivDASqKM, # using divergence-routed version 
-         #da_area_sq_km_tot = TotDASqKM,
+         da_area_sq_km = TotDASqKM, # using non-divergence-routed version as "default" 
+         da_area_sq_km_div = DivDASqKM, # include both for clarity
+         da_area_sq_km_tot = TotDASqKM, # include both for clarity
+         divergence_ratio = DivDASqKM / TotDASqKM,
          reach_length_km = LengthKM,
-         ) |>
-  mutate(reach_length_ft = reach_length_km * 1000 / 0.3048) 
+         reach_length_ft = LengthKM * 1000 / 0.3048)
 
 # slopes and endpoint elevations
 flowline_slopes <- 
@@ -684,13 +684,13 @@ geomorph_class <-
     ## Rows: 31,073
     ## Columns: 8
     ## $ comid             <dbl> 7918025, 7918031, 7918595, 7918019, 7918027, 7918039…
-    ## $ geomorph_class    <fct> "Partly-confined, low width-to-depth ratio, gravel-c…
-    ## $ geomorph_confined <fct> Partly-confined, Confined, Confined, Confined, Confi…
-    ## $ geomorph_uniform  <lgl> FALSE, TRUE, TRUE, TRUE, FALSE, FALSE, FALSE, FALSE,…
-    ## $ geomorph_steppool <lgl> FALSE, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE, FALS…
-    ## $ geomorph_riffles  <lgl> TRUE, FALSE, FALSE, FALSE, FALSE, TRUE, TRUE, TRUE, …
-    ## $ geomorph_gravel   <lgl> TRUE, TRUE, TRUE, TRUE, FALSE, TRUE, TRUE, TRUE, TRU…
-    ## $ geomorph_spawning <lgl> TRUE, FALSE, FALSE, FALSE, TRUE, TRUE, TRUE, TRUE, F…
+    ## $ geomorph_class    <fct> "Unconfined, gravel-cobble, riffle-pool", "Confined,…
+    ## $ geomorph_confined <fct> Unconfined, Confined, Confined, Confined, Confined, …
+    ## $ geomorph_uniform  <lgl> FALSE, TRUE, TRUE, TRUE, TRUE, TRUE, FALSE, FALSE, T…
+    ## $ geomorph_steppool <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FAL…
+    ## $ geomorph_riffles  <lgl> TRUE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE, FALSE…
+    ## $ geomorph_gravel   <lgl> TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE…
+    ## $ geomorph_spawning <lgl> TRUE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE, FALSE…
 
 #### HQT boundaries
 
@@ -921,7 +921,7 @@ flowline_attributes <-
                                      coalesce(lateral_levee_confinement_ft*0.3048, vb_width_transect),
                                      vb_width_transect),
          vb_bf_w_ratio = vb_width_transect / chan_width_m,) |>
-  mutate(da_scalar_maf = (da_area_sq_km * 247.1053815) * (da_ppt_mean_mm / 304.8) / 1E6)
+  mutate(da_scalar_maf = (da_area_sq_km_tot * 247.1053815) * (da_ppt_mean_mm / 304.8) / 1E6)
 
 flowline_attributes |> saveRDS(here::here("data-raw", "results", "flowline_attributes.Rds"))
 
@@ -1252,7 +1252,8 @@ flowlines |>
   scale_color_viridis_c(trans = "log")
 ```
 
-    ## Warning: Transformation introduced infinite values in discrete y-axis
+    ## Warning in scale_color_viridis_c(trans = "log"): log-2.718282 transformation
+    ## introduced infinite values.
 
 ![](data-discovery_files/figure-gfm/plot-width-combined-1.png)<!-- -->
 
@@ -1282,7 +1283,8 @@ flowlines |>
   scale_color_viridis_c(direction=1, trans="log10")
 ```
 
-    ## Warning: Transformation introduced infinite values in discrete y-axis
+    ## Warning in scale_color_viridis_c(direction = 1, trans = "log10"): log-10
+    ## transformation introduced infinite values.
 
 ![](data-discovery_files/figure-gfm/plot-vb_width_transect-1.png)<!-- -->
 

@@ -1,7 +1,7 @@
 Predictor Data Preparation and Consolidation
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-09-03
+2024-09-04
 
 - [Case study geographic scope](#case-study-geographic-scope)
   - [Import Flowline Geometry](#import-flowline-geometry)
@@ -592,6 +592,10 @@ nf <-
 ``` r
 # A selection of potentially useful flow frequency metrics. There are many other potential options
 nf_ffm <- reduce(list(
+  # dry season baseflow in a dry water year
+  nf |> 
+    filter(ffm=="ds_mag_50" & source=="model" & wyt=="dry") |> 
+    select(comid, nf_bfl_dry_cfs_dry = p50),
   # dry season baseflow in moderate water year
   nf |> 
     filter(ffm=="ds_mag_50" & source=="model" & wyt=="moderate") |> 

@@ -1,7 +1,7 @@
 Model Comparison
 ================
 Maddee Rubenson (FlowWest)
-2024-08-27
+2024-09-05
 
 The purpose of this markdown is to explore the different model methods
 and how they impact reaches differently through exploring model outputs
@@ -39,16 +39,17 @@ wuas_merge <- habistat::wua_predicted |>
   glimpse()
 ```
 
-    ## Rows: 4,987,896
-    ## Columns: 10
-    ## $ comid              <dbl> 342517, 342517, 342517, 342517, 342517, 342517, 342…
+    ## Rows: 1,217,164
+    ## Columns: 11
+    ## $ comid              <dbl> 342455, 342455, 342455, 342455, 342455, 342455, 342…
     ## $ model_bfc          <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FA…
     ## $ model_name         <fct> SD, SD, SD, SD, SD, SD, SD, SD, SD, SD, SD, SD, SD,…
-    ## $ flow_cfs           <dbl> 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200…
-    ## $ wua_per_lf_pred    <dbl> 0.1509557, 0.3060996, 0.4994948, 0.9621796, 1.32640…
+    ## $ flow_idx           <int> 50, 56, 63, 70, 79, 89, 100, 112, 125, 141, 158, 17…
+    ## $ flow_cfs           <dbl> 50.11872, 56.23413, 63.09573, 70.79458, 79.43282, 8…
+    ## $ wua_per_lf_pred    <dbl> 0.02460845, 0.02527939, 0.02587131, 0.02719230, 0.0…
     ## $ river_cvpia        <fct> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA,…
     ## $ watershed_level_3  <fct> Stanislaus River, Stanislaus River, Stanislaus Rive…
-    ## $ reach_length_ft    <dbl> 2926.509, 2926.509, 2926.509, 2926.509, 2926.509, 2…
+    ## $ reach_length_ft    <dbl> 291.9948, 291.9948, 291.9948, 291.9948, 291.9948, 2…
     ## $ habitat            <chr> "rearing", "rearing", "rearing", "rearing", "rearin…
     ## $ hqt_gradient_class <fct> Bedrock, Bedrock, Bedrock, Bedrock, Bedrock, Bedroc…
 
@@ -222,11 +223,14 @@ habistat::flowline_geom_proj |>
 ![](model-type-comparison_files/figure-gfm/map-comparison-scalar-1.png)<!-- -->
 
 ``` r
+wua_selected_flows <- habistat::wua_predicted |> 
+  group_by(comid, model_name, habitat) |>
+  complete(flow_cfs = c(300, 1000, 3000, 10000)) |>
+  mutate(wua_per_lf_pred = zoo::na.approx(wua_per_lf_pred, x = log(flow_cfs), na.rm=F)) |>
+  filter(flow_cfs %in% c(300, 1000, 3000, 10000))
+
 habistat::flowline_geom_proj |>
-  inner_join(habistat::wua_predicted |> 
-               filter(flow_cfs %in% c(300, 1000, 3000, 10000)) |>
-               #filter((habitat=="rearing" & !model_bfc) | (habitat=="spawning" & model_bfc))
-               filter((habitat=="rearing" & !model_bfc)), by=join_by(comid)) |>
+  inner_join(wua_selected_flows |> filter(habitat=="rearing"), by=join_by(comid)) |>
   ggplot() +
   facet_grid(rows = vars(model_name), cols = vars(flow_cfs), switch = "both") + 
   geom_sf(aes(color = wua_per_lf_pred)) + 
@@ -235,7 +239,8 @@ habistat::flowline_geom_proj |>
                         breaks = c(0, 1, 3, 10, 30, 100, 300), 
                         trans = habistat::trans_semiIHS,
                         values = scales::rescale(habistat::semiIHS(c(0, 1, 3, 10, 30, 100, 300))),
-                        colors = c("darkblue", "turquoise", "gold", "darkorange", "darkred", "violetred4", "mediumvioletred")) + 
+                        colors = c("darkblue", "turquoise", "gold", "darkorange", "darkred", "violetred4", "mediumvioletred"),
+                        na.value = "#ffffff00") + 
   theme(legend.key.height = unit(48, "pt"),
         axis.text = element_blank()) + 
   xlab("Flow (cfs)") + ylab("Model Type") + ggtitle("Rearing")
@@ -245,22 +250,32 @@ habistat::flowline_geom_proj |>
 
 ``` r
 habistat::flowline_geom_proj |>
-  inner_join(habistat::wua_predicted |> 
-               filter(flow_cfs %in% c(300, 1000, 3000, 10000)) |>
-               #filter((habitat=="rearing" & !model_bfc) | (habitat=="spawning" & model_bfc))
-               filter((habitat=="spawning" & model_bfc)), by=join_by(comid)) |>
+  inner_join(wua_selected_flows |> filter(habitat=="spawning"), by=join_by(comid)) |>
   ggplot() +
   facet_grid(rows = vars(model_name), cols = vars(flow_cfs), switch = "both") + 
   geom_sf(aes(color = wua_per_lf_pred)) + 
   scale_color_gradientn(name = "WUA per LF",
                         limits = c(0, 120),
                         breaks = c(0, 20, 40, 60, 80, 100, 120), 
-                        #trans = habistat::trans_semiIHS,
-                        #values = scales::rescale(habistat::semiIHS(c(0, 1, 3, 10, 30, 100, 300))),
-                        colors = c("darkblue", "turquoise", "gold", "darkorange", "darkred", "violetred4", "mediumvioletred")) + 
+                        colors = c("darkblue", "turquoise", "gold", "darkorange", "darkred", "violetred4", "mediumvioletred"),
+                        na.value = "#ffffff00") + 
   theme(legend.key.height = unit(48, "pt"),
         axis.text = element_blank()) + 
   xlab("Flow (cfs)") + ylab("Model Type") + ggtitle("Spawning")
 ```
 
 ![](model-type-comparison_files/figure-gfm/map-comparison-spawning-1.png)<!-- -->
+
+``` r
+habistat::flowline_geom_proj |>
+  inner_join(wua_selected_flows |> filter(habitat=="rearing" & model_name=="SD"), by=join_by(comid)) |>
+  ggplot() +
+  facet_grid(cols = vars(flow_cfs), switch = "both") + 
+  geom_sf(aes(color = if_else(is.na(wua_per_lf_pred), "Out of Range", "In Range"))) + 
+  theme(legend.key.height = unit(48, "pt"),
+        axis.text = element_blank()) + 
+  xlab("Flow (cfs)") + ggtitle("Flow Filter") + 
+  scale_color_manual(name = "Result", values = c("lightblue", "darkred"))
+```
+
+![](model-type-comparison_files/figure-gfm/map-flowline-filter-1.png)<!-- -->

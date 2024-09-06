@@ -40,7 +40,7 @@ function(input, output, session){
     #   filter(flow_cfs == input$active_flow) |>
     #   mutate(wua_per_lf = !!sym(input$wua_var))
     predictions |>
-      filter(flow_cfs == input$active_flow) |>
+      filter(flow_idx == as.integer(input$active_flow)) |>
       filter(habitat == input$habitat_type) |>
       glimpse() #|>
     # TODO could also filter for selected model and bfc removed/not removed
@@ -421,8 +421,6 @@ selected_watershed <- reactiveValues(object_id = NA,
 
   observe({
 
-    message(selected_watershed$object_id)
-
     proxy <- leaflet::leafletProxy("main_map") |>
       leaflet::removeShape("active_watershed")
 
@@ -493,14 +491,14 @@ selected_watershed <- reactiveValues(object_id = NA,
 
   active_predictions_watershed <- reactive({
     predictions_watershed |>
-      filter(flow_cfs == input$active_flow) |>
+      filter(flow_idx == as.integer(input$active_flow)) |>
       filter(habitat == input$habitat_type) |>
       glimpse()
   })
 
   active_predictions_mainstem <- reactive({
     predictions_mainstem |>
-      filter(flow_cfs == input$active_flow) |>
+      filter(flow_idx == as.integer(input$active_flow)) |>
       filter(habitat == input$habitat_type) |>
       glimpse()
   })

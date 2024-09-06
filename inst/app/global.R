@@ -23,7 +23,7 @@ predictions <- get_data(wua_predicted, package = "habistat") |>
   mutate(model_id = if_else((habitat=="rearing" & model_bfc),
                             paste0(model_name, "_ph_bfc_rm"), # post-hoc baseflow channel removal
                             model_name)) |>
-  select(comid, flow_cfs, habitat, model_id, wua_per_lf_pred, river_cvpia, watershed_level_3, reach_length_ft) |>
+  select(comid, flow_idx, flow_cfs, habitat, model_id, wua_per_lf_pred, river_cvpia, watershed_level_3, reach_length_ft) |>
   pivot_wider(names_from = model_id,
               values_from = wua_per_lf_pred,
               names_glue = c("wua_per_lf_pred_{model_id}")) |>
@@ -40,6 +40,8 @@ predictions <- get_data(wua_predicted, package = "habistat") |>
 gc() # garbage collect after loading from habistat package
 
 all_flows <- unique(predictions$flow_cfs)
+all_flows_idx <- unique(predictions$flow_idx)
+message(paste(all_flows_idx))
 
 attr <- get_data(flowline_attr, package = "habistat") |>
   filter(comid %in% predictions$comid) |>
@@ -91,7 +93,7 @@ predictions_watershed <- get_data(wua_predicted_cv_watersheds, package = "habist
   mutate(model_id = if_else((habitat=="rearing" & model_bfc),
                             paste0(model_name, "_ph_bfc_rm"), # post-hoc baseflow channel removal
                             model_name)) |>
-  select(watershed_level_3, flow_cfs, habitat, model_id, wua_per_lf_pred) |>
+  select(watershed_level_3, flow_idx, flow_cfs, habitat, model_id, wua_per_lf_pred) |>
   pivot_wider(names_from = model_id,
               values_from = wua_per_lf_pred,
               names_glue = c("wua_per_lf_pred_{model_id}"))
@@ -102,7 +104,7 @@ predictions_mainstem <- get_data(wua_predicted_cv_mainstems, package = "habistat
   mutate(model_id = if_else((habitat=="rearing" & model_bfc),
                             paste0(model_name, "_ph_bfc_rm"), # post-hoc baseflow channel removal
                             model_name)) |>
-  select(river_cvpia, flow_cfs, habitat, model_id, wua_per_lf_pred) |>
+  select(river_cvpia, flow_idx, flow_cfs, habitat, model_id, wua_per_lf_pred) |>
   pivot_wider(names_from = model_id,
               values_from = wua_per_lf_pred,
               names_glue = c("wua_per_lf_pred_{model_id}"))

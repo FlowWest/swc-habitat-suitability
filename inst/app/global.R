@@ -130,6 +130,8 @@ streamgages <- streamgage_attr |>
   mutate(data = map(data, function(x) deframe(x) |> as.list())) |>
   deframe()
 
+hqt_boundary <- get_data(hqt, package = "habistat")
+
 # PLOT STYLES AND PALETTES -----------------------------------------------------
 
 # pal <- function(x, n = 10,

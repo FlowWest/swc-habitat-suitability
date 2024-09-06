@@ -383,7 +383,18 @@ function(input, output, session){
                                                                fillOpacity = 0.5,
                                                                bringToFront = F)
       ) |>
-      layer_flowlines(type = input$flowline_scope)
+      layer_flowlines(type = input$flowline_scope) |>
+      leaflet::addPolygons(data = hqt, group = "HQT - Valley Lowland",
+                           popup = "Habitat Quantification Tool Boundary",
+                           color = "darkgrey",
+                  fillColor = "grey", fillOpacity = 0.8) |>
+      addLayersControl(
+        baseGroups = c("Basemap"),
+        overlayGroups = c("flowlines", "HQT - Valley Lowland"), # TODO: unsure how to do watersheds right now..
+        options = layersControlOptions(collapsed = FALSE)
+      ) |>
+      hideGroup("HQT - Valley Lowland")
+
 
   })
 
@@ -455,7 +466,7 @@ selected_watershed <- reactiveValues(object_id = NA,
   # ACTIVE MAP LOGIC ------------------------------------------------
 
   observe({
-    proxy <- leaflet::leafletProxy("main_map") |>
+    proxy <- leaflet::leafletProxy("main_map", session = session) |>
       leaflet::removeShape("active_watershed")
 
     if (most_recent_map_click$type == "watershed") {
@@ -485,14 +496,21 @@ selected_watershed <- reactiveValues(object_id = NA,
     }
 
     if (most_recent_map_click$type == "comid") {
+      clicked_polyline <- active_geom() |>
+        filter(comid == selected_point$comid)
+
+      bbox <- sf::st_bbox(clicked_polyline)
+
       proxy |>
-        leaflet::addPolylines(data = active_geom() |> filter(comid == selected_point$comid),
-                             #stroke = T,
-                             weight = 20, # 2
-                             color = "yellow", #"red",
+        fitBounds(bbox$ymin, bbox$xmin, bbox$ymax, bbox$xmax) |> #TODO: get this to work...
+        leaflet::addPolylines(data = clicked_polyline,
+                             weight = 20,
+                             color = "yellow",
                              opacity = 1,
                              layerId = "active_comid",
-                             popup = ~lapply(object_label, htmltools::HTML))
+                             label = ~lapply(object_label, htmltools::HTML))
+
+
 
     } else {
 

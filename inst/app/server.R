@@ -641,23 +641,42 @@ selected_watershed <- reactiveValues(object_id = NA,
     }
   })
 
+    streamgage_options_geom_labelled <- reactive({
+      if(length(streamgage_options()) > 0){
+        streamgage_options_geom() |>
+          mutate(selected = (station_id == input$streamgage_id))
+      } else {
+        st_sf(st_sfc())
+      }
+    })
+
   observe({
-    streamgage_options_geom()
+    streamgage_options_geom_labelled()
     proxy <- leaflet::leafletProxy("main_map")
     proxy |>
       leaflet::removeMarker(paste0("streamgage_", streamgage_pts$station_id))
     if (length(streamgage_options()) > 0) {
       proxy |>
-        leaflet::addCircleMarkers(data = streamgage_options_geom(),
+        leaflet::addCircleMarkers(data = streamgage_options_geom_labelled(),
                                   layerId = ~paste0("streamgage_", station_id),
                                   group = "streamgages",
                                   label = ~station_label,
-                                  color = "#000000", #~if_else(nearest, "#00A2E8", "#000000"),
+                                  color = ~if_else(selected, "#00A2E8", "#000000"),
                                   radius = 6,
                                   options = leaflet::markerOptions(pane = "Overlays"))
     }
   })
 
+  observeEvent(input$main_map_marker_click, {
+    cat(input$main_map_marker_click$id)
+    if (!is.null(input$main_map_marker_click$id)) {
+      if(substr(input$main_map_marker_click$id, 1, 11) == "streamgage_") {
+        message("clicked streamgage")
+        most_recent_map_click$lng <- input$main_map_marker_click$lng
+        most_recent_map_click$lat <- input$main_map_marker_click$lat
+      }
+    }
+  })
 
   # DURATION CURVE CALCULATION
 

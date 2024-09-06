@@ -297,6 +297,7 @@ function(input, output, session){
                          lat1 = bbox[["ymin"]],
                          lng2 = bbox[["xmax"]],
                          lat2 = bbox[["ymax"]])
+
     return(m)
   }
 
@@ -382,11 +383,8 @@ function(input, output, session){
                                                                fillOpacity = 0.5,
                                                                bringToFront = F)
       ) |>
-      layer_flowlines(type = input$flowline_scope) #|>
-    #leaflet::addLayersControl(baseGroups = c("watersheds", "none"),
-    #                          overlayGroups = c("flowlines", "aoi"),
-    #                          position = "bottomleft",
-    #                          options = leaflet::layersControlOptions(collapsed = FALSE))
+      layer_flowlines(type = input$flowline_scope)
+
   })
 
 
@@ -457,7 +455,6 @@ selected_watershed <- reactiveValues(object_id = NA,
   # ACTIVE MAP LOGIC ------------------------------------------------
 
   observe({
-
     proxy <- leaflet::leafletProxy("main_map") |>
       leaflet::removeShape("active_watershed")
 
@@ -489,13 +486,13 @@ selected_watershed <- reactiveValues(object_id = NA,
 
     if (most_recent_map_click$type == "comid") {
       proxy |>
-        leaflet::addPolylines(data = active_geom(),
-                             stroke = T,
-                             weight = 2,
-                             color = "red",
+        leaflet::addPolylines(data = active_geom() |> filter(comid == selected_point$comid),
+                             #stroke = T,
+                             weight = 20, # 2
+                             color = "yellow", #"red",
                              opacity = 1,
                              layerId = "active_comid",
-                             label = ~lapply(object_label, htmltools::HTML))
+                             popup = ~lapply(object_label, htmltools::HTML))
 
     } else {
 

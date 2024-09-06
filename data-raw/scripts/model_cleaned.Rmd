@@ -906,6 +906,8 @@ model_predicted_final <- bind_rows(
    # filter((comid %in% baseflows_by_comid$comid)) |>
     mutate(habitat = "spawning")
   ) #|>
+  #mutate(wua_acres_pred = wua_per_lf_pred * reach_length_ft / 43560,
+  #       wua_acres_pred = wua_per_lf_pred * reach_length_ft / 43560)#|>
  # # join hydraulic modelled results for comparison
  # # left_join(wua_hydraulic |>
  # #             filter(habitat == "rearing"), 
@@ -926,7 +928,8 @@ wua_predicted_cv_watersheds <-
   wua_predicted |>
   filter(!is.na(watershed_level_3)) |>
   group_by(habitat, model_bfc, model_name, watershed_level_3, flow_idx, flow_cfs) |>
-  summarize(wua_per_lf_pred = sum(wua_per_lf_pred * reach_length_ft) / sum(reach_length_ft)) |>
+  summarize(wua_per_lf_pred = sum(wua_per_lf_pred * reach_length_ft) / sum(reach_length_ft),
+            wua_acres_pred = sum(wua_per_lf_pred * reach_length_ft) / 43560) |>
   ungroup()
 usethis::use_data(wua_predicted_cv_watersheds, overwrite = TRUE) 
 
@@ -934,7 +937,8 @@ wua_predicted_cv_mainstems <-
   wua_predicted |>
   filter(!is.na(river_cvpia)) |>
   group_by(habitat, model_bfc, model_name, river_cvpia, flow_idx, flow_cfs) |>
-  summarize(wua_per_lf_pred = sum(wua_per_lf_pred * reach_length_ft) / sum(reach_length_ft)) |>
+  summarize(wua_per_lf_pred = sum(wua_per_lf_pred * reach_length_ft) / sum(reach_length_ft),
+            wua_acres_pred = sum(wua_per_lf_pred * reach_length_ft) / 43560) |>
   ungroup()
 usethis::use_data(wua_predicted_cv_mainstems, overwrite = TRUE)
 ```

@@ -159,21 +159,25 @@ function(input, output, session){
     palette_colors <- c("Scale-Dependent" = "#6388b4",
                         "Scale-Normalized" = "#8cc2ca",
                         "Actual" = "#ffae34")
+    #var_not_selected <- switch(input$wua_var,
+    #                           "wua_per_lf_pred_SD"="wua_per_lf_pred_SN",
+    #                           "wua_per_lf_pred_SN"="wua_per_lf_pred_SD")
 
     if (most_recent_map_click$type == "comid") { #& (length(selected_point$comid)>0)) {
     predictions |>
       filter(comid == selected_point$comid) |>
       filter(habitat == input$habitat_type) |>
-      ggplot(aes(x = flow_cfs)) +
-      geom_line(aes(y = wua_per_lf_actual, color="Actual", linetype = "Unscaled")) + #, linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
-      geom_line(aes(y = wua_per_lf_pred_SD, color="Scale-Dependent", linetype = "Unscaled")) + #, linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
-      #geom_line(aes(y = wua_per_lf_pred_SD_ph_bfc_rm, color="Scale-Dependent", linetype="Post-Model BFC Removal")) +
-      geom_line(aes(y = wua_per_lf_pred_SN, color="Scale-Normalized", linetype = "Unscaled")) +#, linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
-     # geom_line(aes(y = wua_per_lf_pred_SN_ph_bfc_rm, color="Scale-Normalized", linetype="Post-Model BFC Removal")) +
+      ggplot(aes(x = flow_cfs)) + #|> add_color_scale(type = input$habitat_type) +
+      geom_line(aes(y = wua_per_lf_actual, color="Actual", linetype = "Unscaled")) +
+      geom_line(aes(y = wua_per_lf_pred_SD, color="Scale-Dependent", linetype = "Unscaled")) +
+      geom_line(aes(y = wua_per_lf_pred_SN, color="Scale-Normalized", linetype = "Unscaled")) +
       geom_line(data=duration_curve(), aes(x = q, y = durwua, linetype="Duration Scaled", color = case_when(
         input$wua_var == "wua_per_lf_pred_SD" ~ "Scale-Dependent",
         input$wua_var == "wua_per_lf_pred_SN" ~ "Scale-Normalized",
         input$wua_var == "wua_per_lf_actual" ~ "Actual"))) +
+      #geom_line(aes(y = !!sym(var_not_selected), linetype = "Unscaled"), color = "gray") +
+      #geom_line(aes(y = !!sym(input$wua_var), linetype = "Unscaled"), linewidth=1) +
+      #geom_line(data=duration_curve(), aes(x = q, y = durwua, linetype="Duration Scaled", color = durwua)) +
       #geom_hline(aes(yintercept = chan_width_ft)) + #, linetype="Channel Width (ft)")) +
       #geom_vline(aes(xintercept = baseflow_cfs)) +
       #geom_text(aes(x = 1, y = chan_width_ft, label = chan_width_ft)) +
@@ -182,8 +186,8 @@ function(input, output, session){
       #scale_y_continuous(trans = ihs, labels = scales::label_comma(), limits = c(0, NA)) +
       theme_minimal() + theme(panel.grid.minor = element_blank(), legend.position = "top", legend.box="vertical", text=element_text(size=21)) +
       xlab("Flow (cfs)") + ylab("WUA (ft2) per linear ft") +
-        scale_color_manual(name = "Model Type",
-                           values = palette_colors) +
+      scale_color_manual(name = "Model Type",
+                         values = palette_colors) +
       scale_linetype_manual(name = "Duration Analysis",
                             values = palette_linetypes)
     } else if (most_recent_map_click$type == "watershed") {
@@ -419,7 +423,7 @@ selected_watershed <- reactiveValues(object_id = NA,
       mutate(object_id = "active_mainstem")
   })
 
-  # ACTIVE PLOT LOGIC ------------------------------------------------
+  # ACTIVE MAP LOGIC ------------------------------------------------
 
   observe({
 

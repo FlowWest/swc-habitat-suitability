@@ -150,6 +150,19 @@ pal <- function(x, type = "rearing") {
       labels = flow_scale_colors[[type]]) |> as.character()
 }
 
+add_color_scale <- function(g, type="rearing", ...) {
+  g + scale_color_gradientn(name = "WUA per LF",
+                            limits = c(flow_scale_breaks[[type]][[1]],
+                                       flow_scale_breaks[[type]][[length(flow_scale_breaks[[type]])]]),
+                            breaks = flow_scale_breaks[[type]],
+                            trans = if (type=="rearing") habistat::trans_semiIHS else NULL,
+                            values = if (type=="rearing") scales::rescale(habistat::semiIHS(flow_scale_breaks[[type]])) else NULL,
+                            colors = flow_scale_colors[[type]],
+                            na.value = "#ffffff00",
+                            ...)
+}
+
+
 # before deploying shiny app, install package from github:
 # options(timeout=600)
 # devtools::install_github("FlowWest/swc-habitat-suitability@training-data-no-bfc-removal")

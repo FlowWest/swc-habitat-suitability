@@ -925,15 +925,17 @@ usethis::use_data(wua_predicted, overwrite = TRUE)
 wua_predicted_cv_watersheds <- 
   wua_predicted |>
   filter(!is.na(watershed_level_3)) |>
-  group_by(habitat, model_bfc, model_name, watershed_level_3, flow_cfs) |>
-  summarize(wua_per_lf_pred = sum(wua_per_lf_pred * reach_length_ft) / sum(reach_length_ft)) 
-usethis::use_data(wua_predicted_cv_watersheds, overwrite = TRUE)
+  group_by(habitat, model_bfc, model_name, watershed_level_3, flow_idx, flow_cfs) |>
+  summarize(wua_per_lf_pred = sum(wua_per_lf_pred * reach_length_ft) / sum(reach_length_ft)) |>
+  ungroup()
+usethis::use_data(wua_predicted_cv_watersheds, overwrite = TRUE) 
 
 wua_predicted_cv_mainstems <- 
   wua_predicted |>
   filter(!is.na(river_cvpia)) |>
-  group_by(habitat, model_bfc, model_name, river_cvpia, flow_cfs) |>
-  summarize(wua_per_lf_pred = sum(wua_per_lf_pred * reach_length_ft) / sum(reach_length_ft))
+  group_by(habitat, model_bfc, model_name, river_cvpia, flow_idx, flow_cfs) |>
+  summarize(wua_per_lf_pred = sum(wua_per_lf_pred * reach_length_ft) / sum(reach_length_ft)) |>
+  ungroup()
 usethis::use_data(wua_predicted_cv_mainstems, overwrite = TRUE)
 ```
 

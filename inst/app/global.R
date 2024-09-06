@@ -114,6 +114,21 @@ predictions_mainstem <- get_data(wua_predicted_cv_mainstems, package = "habistat
 
 gc() # garbage collect after loading from habistat package
 
+# STREAMGAGES ------------------------------------------------------------------
+
+streamgage_attr <- get_data(streamgage_attr, package = "habistat") |>
+  transmute(watershed, station_id,
+            station_label = glue::glue("{str_to_upper(station_id)}: {str_to_upper(name)} ({min_wy}-{max_wy})"))
+
+streamgage_pts <- get_data(streamgage_geom, package = "habistat") |>
+  st_transform("+proj=longlat +datum=NAD83") |>
+  st_set_crs("+proj=longlat +datum=WGS84") |>
+  inner_join(streamgage_attr, by=join_by(station_id))
+
+streamgages <- streamgage_attr |>
+  nest(.by = watershed) |>
+  mutate(data = map(data, function(x) deframe(x) |> as.list())) |>
+  deframe()
 
 # PLOT STYLES AND PALETTES -----------------------------------------------------
 

@@ -269,6 +269,7 @@ function(input, output, session){
       leaflet::addMapPane("Basemap", zIndex = 400) |>
       leaflet::addMapPane("Watersheds", zIndex = 440) |>
       leaflet::addMapPane("Flowlines", zIndex = 470) |>
+      leaflet::addMapPane("Overlays", zIndex = 475) |>
       leaflet::addMapPane("AOI", zIndex = 480) |>
       leaflet::addMapPane("Reference", zIndex = 490) |>
       leaflet::addTiles(urlTemplate = 'https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}',
@@ -345,11 +346,13 @@ function(input, output, session){
                                                                               bringToFront = TRUE)
       ) |>
         leaflet::addLegend(position = "bottomright",
-                           colors = rev(pal(seq(pal_limits[[1]], pal_limits[[2]], (pal_limits[[2]]-pal_limits[[1]])/5))),
-                           labels = c(round(pal_limits[[2]],2), rep("", 5-1), round(pal_limits[[1]],2)),
-                           title = "WUA (ft2) per linear ft",
+                           colors = rev(flow_scale_colors[[input$habitat_type]]),
+                           #                           colors = rev(pal(seq(pal_limits[[1]], pal_limits[[2]], (pal_limits[[2]]-pal_limits[[1]])/5))),
+                           labels = lapply(paste("&ge;", rev(flow_scale_breaks[[input$habitat_type]])), htmltools::HTML),
+                           #                           labels = c(round(pal_limits[[2]],2), rep("", 5-1), round(pal_limits[[1]],2)),
+                           title = "Suitable Habitat Area (ft2) per linear ft",
                            layerId = "clegend")
-      } else {
+    } else {
         m |> leaflet::removeShape(active_geom_mainstem()$object_id) |> leaflet::removeControl("clegend")
       }
     }
@@ -518,7 +521,6 @@ selected_watershed <- reactiveValues(object_id = NA,
 
     }
 
-
   })
 
   # REACTIVE FLOW FILTER (WATERSHED AND MAINSTEM) ------------------------------
@@ -538,17 +540,6 @@ selected_watershed <- reactiveValues(object_id = NA,
   })
 
   # DURATION ANALYSIS ----------------------------------------------------------
-
-  streamgages <- get_data(streamgage_attr, package = "habistat") |>
-    transmute(watershed, station_id,
-              station_label = glue::glue("{str_to_upper(station_id)}: {str_to_upper(name)} ({min_wy}-{max_wy})")) |>
-    nest(.by = watershed) |>
-    mutate(data = map(data, function(x) deframe(x) |> as.list())) |>
-    deframe()
-
-  streamgage_locs <- get_data(streamgage_geom, package = "habistat") |>
-    st_transform("+proj=longlat +datum=NAD83") |>
-    st_set_crs("+proj=longlat +datum=WGS84") # for display purposes only
 
   streamgage_drc <- reactive({
     if (most_recent_map_click$type == "comid") {
@@ -590,48 +581,85 @@ selected_watershed <- reactiveValues(object_id = NA,
 
   })
 
-  output$streamgage_selector <- renderUI({
+  # ACTIVE STREAMGAGE SELECTOR
+  active_reach_info <- reactiveValues(is_mainstem = FALSE,
+                                      watershed_name = NA)
 
-    active_reach_is_mainstem <- FALSE
-    active_reach_watershed_name <- NA
-
+  observe({
     if (most_recent_map_click$type == "comid") {
-      active_reach_watershed_name <- (attr |>
+      active_reach_info$watershed_name <- (attr |>
                                         filter(comid == selected_point$comid) |>
                                         pull(watershed_level_3))[[1]]
-      active_reach_is_mainstem <- !is.na((attr |>
+      active_reach_info$is_mainstem <- !is.na((attr |>
                                      filter(comid == selected_point$comid) |>
                                      pull(river_cvpia))[[1]])
     } else if (most_recent_map_click$type == "watershed"){
-      active_reach_watershed_name <- selected_watershed$watershed_name
-      active_reach_is_mainstem <- FALSE
+      active_reach_info$watershed_name <- selected_watershed$watershed_name
+      active_reach_info$is_mainstem <- FALSE
     } else if (most_recent_map_click$type == "mainstem"){
-      active_reach_watershed_name <- selected_mainstem$river_name
-      active_reach_is_mainstem <- TRUE
+      active_reach_info$watershed_name <- selected_mainstem$river_name
+      active_reach_info$is_mainstem <- TRUE
     }
+  })
 
-    if(active_reach_is_mainstem) {
-      streamgage_options <- streamgages[[active_reach_watershed_name]]
-      streamgage_options_geom <- streamgage_geom |> filter(station_id %in% names(streamgage_options))
+  streamgage_options <- reactive({
+    if(active_reach_info$is_mainstem) {
+      streamgages[[active_reach_info$watershed_name]]
+    } else {
+      list()
+    }
+  })
 
-      streamgage_options_selected <-
-        streamgage_options_geom$station_id[[
+  streamgage_options_geom <- reactive({
+    message(paste(length(streamgage_options()), " streamgages found"))
+    if(length(streamgage_options()) > 0){
+      geom <- streamgage_pts |>
+        filter(station_id %in% names(streamgage_options()))
+
+
+      nearest_station_id <- geom$station_id[[
           st_nearest_feature(st_point(c(most_recent_map_click$lng,
                                         most_recent_map_click$lat)),
-                           streamgage_options_geom,
-                           check_crs = FALSE)]]
+                             geom,
+                             check_crs = FALSE)]]
+      geom |> mutate(nearest = (station_id == nearest_station_id))
+    } else {
+      st_sf(st_sfc())
+    }
+  })
 
+    output$streamgage_selector <- renderUI({
+    if(active_reach_info$is_mainstem) {
       selectInput(inputId = "streamgage_id",
                   label = "Select Gage for Duration Analysis",
-                  choices = setNames(names(streamgage_options), streamgage_options),
-                  selected = streamgage_options_selected) # names(streamgage_options)[[1]])
+                  choices = setNames(names(streamgage_options()), streamgage_options()),
+                  selected = streamgage_options_geom()$station_id[[which(streamgage_options_geom()$nearest)]])
     } else {
       selectInput(inputId = "streamgage_id",
                   label = "Select Gage for Duration Analysis",
                   choices = c())
     }
-    # TODO Update this to default to the gage closest to the click point
   })
+
+  observe({
+    streamgage_options_geom()
+    proxy <- leaflet::leafletProxy("main_map")
+    proxy |>
+      leaflet::removeMarker(paste0("streamgage_", streamgage_pts$station_id))
+    if (length(streamgage_options()) > 0) {
+      proxy |>
+        leaflet::addCircleMarkers(data = streamgage_options_geom(),
+                                  layerId = ~paste0("streamgage_", station_id),
+                                  group = "streamgages",
+                                  label = ~station_label,
+                                  color = "#000000", #~if_else(nearest, "#00A2E8", "#000000"),
+                                  radius = 6,
+                                  options = leaflet::markerOptions(pane = "Overlays"))
+    }
+  })
+
+
+  # DURATION CURVE CALCULATION
 
   duration_curve <- reactive({
 
@@ -750,6 +778,7 @@ selected_watershed <- reactiveValues(object_id = NA,
 #      annotation_logticks(sides = "b")
 
   })
+
 
 #   # INTERFACE
 #

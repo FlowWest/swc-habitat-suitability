@@ -35,7 +35,10 @@ predictions <- get_data(wua_predicted, package = "habistat") |>
               transmute(comid,
                         chan_width_ft = chan_width_m/0.3048,
                         baseflow_cfs = nf_bfl_dry_cfs),
-            by = join_by(comid))
+            by = join_by(comid)) |>
+  mutate(wua_acres_pred_SD = wua_per_lf_pred_SD * reach_length_ft / 43560,
+         wua_acres_pred_SN = wua_per_lf_pred_SN * reach_length_ft / 43560,
+         wua_acres_actual = wua_per_lf_actual * reach_length_ft / 43560)
 
 gc() # garbage collect after loading from habistat package
 
@@ -93,10 +96,10 @@ predictions_watershed <- get_data(wua_predicted_cv_watersheds, package = "habist
   mutate(model_id = if_else((habitat=="rearing" & model_bfc),
                             paste0(model_name, "_ph_bfc_rm"), # post-hoc baseflow channel removal
                             model_name)) |>
-  select(watershed_level_3, flow_idx, flow_cfs, habitat, model_id, wua_per_lf_pred) |>
+  select(watershed_level_3, flow_idx, flow_cfs, habitat, model_id, wua_per_lf_pred, wua_acres_pred) |>
   pivot_wider(names_from = model_id,
-              values_from = wua_per_lf_pred,
-              names_glue = c("wua_per_lf_pred_{model_id}"))
+              values_from = c(wua_per_lf_pred, wua_acres_pred),
+              names_glue = c("{.value}_{model_id}"))
 
 predictions_mainstem <- get_data(wua_predicted_cv_mainstems, package = "habistat") |>
   ungroup() |>
@@ -104,10 +107,10 @@ predictions_mainstem <- get_data(wua_predicted_cv_mainstems, package = "habistat
   mutate(model_id = if_else((habitat=="rearing" & model_bfc),
                             paste0(model_name, "_ph_bfc_rm"), # post-hoc baseflow channel removal
                             model_name)) |>
-  select(river_cvpia, flow_idx, flow_cfs, habitat, model_id, wua_per_lf_pred) |>
+  select(river_cvpia, flow_idx, flow_cfs, habitat, model_id, wua_per_lf_pred, wua_acres_pred) |>
   pivot_wider(names_from = model_id,
-              values_from = wua_per_lf_pred,
-              names_glue = c("wua_per_lf_pred_{model_id}"))
+              values_from = c(wua_per_lf_pred, wua_acres_pred),
+              names_glue = c("{.value}_{model_id}"))
 
 gc() # garbage collect after loading from habistat package
 

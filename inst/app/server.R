@@ -6,6 +6,34 @@
 
 function(input, output, session){
 
+  # WUA VARIABLE UNITS ---------------------------------------------------------
+  wua_var <- reactive({
+    switch(input$wua_var,
+           "wua_per_lf_pred_SD" = paste0(input$wua_units,"_pred_SD"),
+           "wua_per_lf_pred_SN" = paste0(input$wua_units,"_pred_SN"),
+           "wua_per_lf_actual" = paste0(input$wua_units,"_actual"))
+    })
+
+  wua_lab <- reactive({
+    switch(input$wua_units,
+           "wua_per_lf" = "Suitable Habitat Area (ft2) per linear ft",
+           "wua_acres" = "Suitable Habitat Area (acres)")
+  })
+
+  wua_suf <- reactive({
+    switch(input$wua_units,
+           "wua_per_lf" = "ft2 / ft",
+           "wua_acres" = "ac")
+  })
+
+  output$units_selector <- renderUI({
+    shinyWidgets::radioGroupButtons("wua_units", "Select Habitat Units",
+                 choices=c("ft2 per linear ft" = "wua_per_lf",
+                           "total acres" = "wua_acres"),
+                 selected= if (input$flowline_scope=="comid") "wua_per_lf" else "wua_acres",
+                 disabled = is.null(input$main_map_shape_click$id))
+  })
+
   # IDENTIFIERS FOR CLICKED ELEMENT --------------------------------------------
 
   most_recent_map_click <- reactiveValues(type = "none",
@@ -168,9 +196,9 @@ function(input, output, session){
       filter(comid == selected_point$comid) |>
       filter(habitat == input$habitat_type) |>
       ggplot(aes(x = flow_cfs)) + #|> add_color_scale(type = input$habitat_type) +
-      geom_line(aes(y = wua_per_lf_actual, color="Actual", linetype = "Unscaled")) +
-      geom_line(aes(y = wua_per_lf_pred_SD, color="Scale-Dependent", linetype = "Unscaled")) +
-      geom_line(aes(y = wua_per_lf_pred_SN, color="Scale-Normalized", linetype = "Unscaled")) +
+      geom_line(aes(y = !!sym(paste0(input$wua_units,"_actual")), color="Actual", linetype = "Unscaled")) +
+      geom_line(aes(y = !!sym(paste0(input$wua_units,"_pred_SD")), color="Scale-Dependent", linetype = "Unscaled")) +
+      geom_line(aes(y = !!sym(paste0(input$wua_units,"_pred_SN")), color="Scale-Normalized", linetype = "Unscaled")) +
       geom_line(data=duration_curve(), aes(x = q, y = durwua, linetype="Duration Scaled", color = case_when(
         input$wua_var == "wua_per_lf_pred_SD" ~ "Scale-Dependent",
         input$wua_var == "wua_per_lf_pred_SN" ~ "Scale-Normalized",
@@ -185,7 +213,7 @@ function(input, output, session){
       scale_y_continuous(limits = c(0, NA)) +
       #scale_y_continuous(trans = ihs, labels = scales::label_comma(), limits = c(0, NA)) +
       theme_minimal() + theme(panel.grid.minor = element_blank(), legend.position = "top", legend.box="vertical", text=element_text(size=21)) +
-      xlab("Flow (cfs)") + ylab("WUA (ft2) per linear ft") +
+      xlab("Flow (cfs)") + ylab(wua_lab()) +
       scale_color_manual(name = "Model Type",
                          values = palette_colors) +
       scale_linetype_manual(name = "Duration Analysis",
@@ -614,21 +642,21 @@ selected_watershed <- reactiveValues(object_id = NA,
         predictions |>
         filter(comid == selected_point$comid) |>
         filter(habitat == input$habitat_type) |>
-        transmute(flow_cfs, selected_wua = !!sym(input$wua_var)) |>
+        transmute(flow_cfs, selected_wua = !!sym(wua_var())) |>
         glimpse()
     } else if (most_recent_map_click$type == "mainstem") {
       fsa <-
         predictions_mainstem |>
         filter(river_cvpia == selected_mainstem$river_name) |>
         filter(habitat == input$habitat_type) |>
-        transmute(flow_cfs, selected_wua = !!sym(input$wua_var)) |>
+        transmute(flow_cfs, selected_wua = !!sym(wua_var())) |>
         glimpse()
     } else if (most_recent_map_click$type == "watershed") {
       fsa <-
         predictions_watershed |>
         filter(watershed_level_3 == selected_watershed$watershed_name) |>
         filter(habitat == input$habitat_type) |>
-        transmute(flow_cfs, selected_wua = !!sym(input$wua_var)) |>
+        transmute(flow_cfs, selected_wua = !!sym(wua_var())) |>
         glimpse()
     } else {
       fsa <- tibble()
@@ -667,7 +695,7 @@ selected_watershed <- reactiveValues(object_id = NA,
         mutate(varname = varname |> factor(levels = c("days", "dhsi", "wua"),
                                            labels = c("Max Length of Period Exceeding Flow per WY-Season (days)",
                                                       "Duration Suitability Factor",
-                                                      "Suitable Habitat Curve (ft2/ft)")),
+                                                      paste0("Suitable Habitat Curve (", wua_suf(),")"))),
                grp = grp |> coalesce("None") |>
                             factor(levels = c("None", "ref", "wua", "durwua"),
                                    labels = c("None", "ref", "Original", "Duration-Weighted"))) |>

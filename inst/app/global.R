@@ -114,13 +114,13 @@ gc() # garbage collect after loading from habistat package
 
 # PLOT STYLES AND PALETTES -----------------------------------------------------
 
-pal <- function(x, n = 10,
-                palette_function = viridisLite::cividis,
-                palette_args = list(direction = -1)) {
-  #palette <- palette_function(n)
-  palette <- do.call(palette_function, c(list(n=n), palette_args))
-  palette[cut(x, n)]
-}
+# pal <- function(x, n = 10,
+#                 palette_function = viridisLite::cividis,
+#                 palette_args = list(direction = -1)) {
+#   #palette <- palette_function(n)
+#   palette <- do.call(palette_function, c(list(n=n), palette_args))
+#   palette[cut(x, n)]
+# }
 
 theme_set(theme_minimal())
 
@@ -131,6 +131,24 @@ ihs <- scales::trans_new("ihs",
                          #minor_breaks = scales::minor_breaks_n(n = 0),
                          domain=c(0, Inf),
                          format = scales::label_comma())
+
+# flow_scale_colors <- c("darkblue", "turquoise", "gold", "darkorange", "darkred", "violetred4", "mediumvioletred"),
+flow_scale_colors <- list(rearing = c("#00008B", "#40E0D0", "#FFD700", "#FF8C00", "#8B0000", "#8B2252", "#C71585"),
+                          spawning = c("#00008B", "#40E0D0", "#FFD700", "#FF8C00", "#8B0000", "#8B2252", "#C71585"))
+flow_scale_breaks <- list(rearing = c(0, 1, 3, 10, 30, 100, 300),
+                          spawning = c(0, 20, 40, 60, 80, 100, 120))
+
+pal <- function(x, type = "rearing") {
+    breaks_scaled <- scales::rescale(flow_scale_breaks[[type]])
+  if(type == "rearing") {
+    values_scaled <- scales::rescale(habistat::semiIHS(x))
+  } else if(type == "spawning") {
+    values_scaled <- scales::rescale(x)
+  }
+  cut(x = values_scaled,
+      breaks = c(-Inf, breaks_scaled[2:length(breaks_scaled)], Inf),
+      labels = flow_scale_colors[[type]]) |> as.character()
+}
 
 # before deploying shiny app, install package from github:
 # options(timeout=600)

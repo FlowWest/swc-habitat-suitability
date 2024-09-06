@@ -270,13 +270,13 @@ function(input, output, session){
   layer_flowlines <- function(m, show = TRUE, type = "comid") {
     if(type == "comid") {
     if(show) {
-      pal_limits <- c(min(active_geom()$wua_per_lf), max(active_geom()$wua_per_lf))
+      # pal_limits <- c(min(active_geom()$wua_per_lf), max(active_geom()$wua_per_lf))
       message("plotting ", nrow(active_geom()), " flowlines")
       #m |> leafgl::addGlPolylines(data = active_geom(),layerId = ~object_id)
       m |> leaflet::addPolylines(data = active_geom(), # TODO switch to leafgl::addGlPolylines
                                  layerId = ~object_id,
                                  label = ~lapply(object_label, htmltools::HTML),
-                                 color = ~pal(wua_per_lf), #pal(wua_per_lf),
+                                 color = ~pal(wua_per_lf, type=input$habitat_type), #pal(wua_per_lf),
                                  opacity = 1,
                                  weight = 2,
                                  options = leaflet::pathOptions(pane = "Flowlines"),
@@ -286,9 +286,11 @@ function(input, output, session){
                                                                               bringToFront = TRUE)
       ) |>
         leaflet::addLegend(position = "bottomright",
-                           colors = rev(pal(seq(pal_limits[[1]], pal_limits[[2]], (pal_limits[[2]]-pal_limits[[1]])/5))),
-                           labels = c(round(pal_limits[[2]],2), rep("", 5-1), round(pal_limits[[1]],2)),
-                           title = "WUA (ft2) per linear ft",
+                           colors = rev(flow_scale_colors[[input$habitat_type]]),
+#                           colors = rev(pal(seq(pal_limits[[1]], pal_limits[[2]], (pal_limits[[2]]-pal_limits[[1]])/5))),
+                           labels = lapply(paste("&ge;", rev(flow_scale_breaks[[input$habitat_type]])), htmltools::HTML),
+#                           labels = c(round(pal_limits[[2]],2), rep("", 5-1), round(pal_limits[[1]],2)),
+                           title = "Suitable Habitat Area (ft2) per linear ft",
                            layerId = "clegend")
       } else {
         m |> leaflet::removeShape(active_geom()$comid) |> leaflet::removeControl("clegend")
@@ -301,7 +303,7 @@ function(input, output, session){
       m |> leaflet::addPolylines(data = active_geom_mainstem(),
                                  layerId = ~mainstem_id,
                                  label = ~lapply(object_label, htmltools::HTML),
-                                 color = ~pal(wua_per_lf), #pal(wua_per_lf),
+                                 color = ~pal(wua_per_lf, type=input$habitat_type), #pal(wua_per_lf),
                                  opacity = 1,
                                  weight = 2,
                                  options = leaflet::pathOptions(pane = "Flowlines"),

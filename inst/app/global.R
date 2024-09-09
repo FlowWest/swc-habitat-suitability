@@ -185,4 +185,4 @@ add_color_scale <- function(g, type="rearing", ...) {
 
 # before deploying shiny app, install package from github:
 # options(timeout=600)
-# devtools::install_github("FlowWest/swc-habitat-suitability@training-data-no-bfc-removal")
+# devtools::install_github("FlowWest/swc-habitat-suitability@26-shiny-app-interface-fixes")

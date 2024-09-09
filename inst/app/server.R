@@ -267,7 +267,8 @@ function(input, output, session){
   make_leaflet <- function(bbox=c(xmin=-122.3, ymin=38.5, xmax=-121.3, ymax=39.7)) {
     m <- leaflet::leaflet() |>
       leaflet::addMapPane("Basemap", zIndex = 400) |>
-      leaflet::addMapPane("Watersheds", zIndex = 440) |>
+      leaflet::addMapPane("ValleyLowland", zIndex = 440) |>
+      leaflet::addMapPane("Watersheds", zIndex = 445) |>
       leaflet::addMapPane("Flowlines", zIndex = 470) |>
       leaflet::addMapPane("Overlays", zIndex = 475) |>
       leaflet::addMapPane("AOI", zIndex = 480) |>
@@ -302,6 +303,11 @@ function(input, output, session){
   }
 
   layer_flowlines <- function(m, show = TRUE, type = "comid") {
+
+    # first remove any existing flowlines
+    m |> leaflet::removeShape(geom$object_id)
+    m |> leaflet::removeShape(mainstems$object_id)
+
     if(type == "comid") {
     if(show) {
       # pal_limits <- c(min(active_geom()$wua_per_lf), max(active_geom()$wua_per_lf))
@@ -327,7 +333,7 @@ function(input, output, session){
                            title = "Suitable Habitat Area (ft2) per linear ft",
                            layerId = "clegend")
       } else {
-        m |> leaflet::removeShape(active_geom()$comid) |> leaflet::removeControl("clegend")
+        m |> leaflet::removeShape(active_geom()$object_id) |> leaflet::removeControl("clegend")
         # TODO switch to leaflet::removeGlPolylines
       }
     } else if (type == "mainstem") {
@@ -366,13 +372,14 @@ function(input, output, session){
     make_leaflet() |>
       leaflet::addPolygons(data = watersheds,
                            stroke = T,
-                           weight = 0,
-                           color = "#FFFFFF",
-                           opacity = 0,
+                           weight = 1,
+                           color = "red",
+                           opacity = 0.5,
                            fill = T,
                            fillColor = "#FFFFFF",
                            fillOpacity = 0,
                            layerId = ~watershed_id,
+                           group = "watersheds",
                            label = ~lapply(watershed_label, htmltools::HTML),
                            highlightOptions = highlightOptions(stroke = T,
                                                                weight = 1,
@@ -383,21 +390,26 @@ function(input, output, session){
                                                                fillOpacity = 0.5,
                                                                bringToFront = F)
       ) |>
-      layer_flowlines(type = input$flowline_scope) |>
       leaflet::addPolygons(data = hqt, group = "HQT - Valley Lowland",
                            popup = "Habitat Quantification Tool Boundary",
                            color = "darkgrey",
-                  fillColor = "grey", fillOpacity = 0.8) |>
+                           weight = 0,
+                           fillColor = "grey",
+                           fillOpacity = 0.33,
+                           options = leaflet::pathOptions(pane = "ValleyLowland")) |>
       addLayersControl(
         baseGroups = c("Basemap"),
-        overlayGroups = c("flowlines", "HQT - Valley Lowland"), # TODO: unsure how to do watersheds right now..
+        overlayGroups = c("flowlines", "watersheds", "HQT - Valley Lowland"), # TODO: unsure how to do watersheds right now..
         options = layersControlOptions(collapsed = FALSE)
       ) |>
       hideGroup("HQT - Valley Lowland")
-
-
   })
 
+  observe({
+    proxy <- leaflet::leafletProxy("main_map", session = session)
+    proxy |>
+      layer_flowlines(type = input$flowline_scope)
+  })
 
 # SELECTED WATERSHED OBSERVER ----------------------------------------------------
 
@@ -480,6 +492,7 @@ selected_watershed <- reactiveValues(object_id = NA,
                              fill = T,
                              fillColor = "red",
                              fillOpacity = 0.25,
+                             group = "watersheds", # this will make the active watershed also show/hide with the layer toggle
                              layerId = "active_watershed",
                              label = ~lapply(watershed_label, htmltools::HTML))
 

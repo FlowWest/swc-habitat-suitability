@@ -9,10 +9,43 @@
 #' @examples
 raster_prep_grid <- function(filenames){
 
+#  # check extents
+#  max_extent <-
+#    filenames$depth |>
+#    lapply(function(x) x |>
+#             terra::rast() |>
+#             terra::ext() |>
+#             as.list()) |>
+#    enframe() |>
+#    unnest_wider(value) |>
+#    summarize(xmin = min(xmin),
+#              xmax = max(xmax),
+#              ymin = min(ymin),
+#              ymax = max(ymax)) |>
+#    as.list() |>
+#    unlist() |>
+#    terra::ext()
+#
+#  scaling_fn <- function(x) {
+#    r <- terra::rast(x)
+#    if (terra::ext(r) != max_extent) {
+#      message("rescaling raster to match max extent")
+#        r |> terra::extend(max_extent, snap = "out")
+#    } else {
+#      message("no rescaling needed")
+#        r
+#    }}
+#
+#  dep_rescaled <- filenames$depth |> lapply(scaling_fn)
+
   dep_r <- terra::rast(filenames$depth)
+#  dep_r <- terra::rast(dep_rescaled)
   terra::set.names(dep_r, filenames$flow_cfs)
 
+#  vel_rescaled <- filenames$velocity |> lapply(scaling_fn)
+
   vel_r <- terra::rast(filenames$velocity)
+#  vel_r <- terra::rast(vel_rescaled)
   terra::set.names(vel_r, filenames$flow_cfs)
 
   return(list("depth" = dep_r,
@@ -35,7 +68,7 @@ raster_prep_grid <- function(filenames){
 
 raster_dvhsi_hqt <- function(d, v) {
   #(d>1.0 & d<=3.28) & (v>0 & v<=1.5)
-  terra::lapp(c(d, v), raster_dvhsi_hqt)
+  terra::lapp(c(d, v), vector_dvhsi_hqt)
 }
 
 #' Raster Habitat Suitability Index (HSI) function: LYR
@@ -52,7 +85,7 @@ raster_dvhsi_hqt <- function(d, v) {
 #' @examples
 raster_dvhsi_lyr <- function(d, v) {
   #(d>0.5 & d<=5.2) & (v>0 & v<=4.0)
-  terra::lapp(c(d, v), raster_dvhsi_lyr)
+  terra::lapp(c(d, v), vector_dvhsi_lyr)
 }
 
 #' Raster Habitat Suitability Index (HSI) function: Fall-Run Chinook Spawning
@@ -67,8 +100,8 @@ raster_dvhsi_lyr <- function(d, v) {
 #' @export
 #'
 #' @examples
-raster_dvhsi_spawning <- function(d, v, run="max") {
-  terra::lapp(c(d, v), function(d, v) vector_dvhsi_spawning(d, v, run=run))
+raster_dvhsi_spawning <- function(d, v, run="max", strict=T) {
+  terra::lapp(c(d, v), function(d, v) vector_dvhsi_spawning(d, v, run=run, strict=strict))
 }
 
 #' Calculate HSI based on HEC-RAS 2D rasters

@@ -44,23 +44,23 @@ basso_groups <-
 basso_rast <- basso_filenames |>
   raster_prep_grid()
 
-### ORIGINAL VERSION
-
-outpath <- here::here("data-raw", "results", "fsa_basso.Rds")
-
-if(!file.exists(outpath)) {
-
-  basso_result <- basso_rast |>
-    raster_summarize_hsi(basso_groups, .group_var = comid, hsi_func = raster_dvhsi_hqt) |>
-    suitability_postprocess(basso_groups, .group_var = comid)
-
-  basso_result |> saveRDS(outpath)
-
-} else {
-
-  basso_result <- readRDS(outpath)
-
-}
+# ### ORIGINAL VERSION - no longer used
+#
+# outpath <- here::here("data-raw", "results", "fsa_basso.Rds")
+#
+# if(!file.exists(outpath)) {
+#
+#   basso_result <- basso_rast |>
+#     raster_summarize_hsi(basso_groups, .group_var = comid, hsi_func = raster_dvhsi_hqt) |>
+#     suitability_postprocess(basso_groups, .group_var = comid)
+#
+#   basso_result |> saveRDS(outpath)
+#
+# } else {
+#
+#   basso_result <- readRDS(outpath)
+#
+# }
 
 ### VARIATION FOR REARING - BASEFLOW REMOVAL
 
@@ -140,23 +140,23 @@ deer_groups <-
 deer_rast <- deer_filenames |>
   raster_prep_grid()
 
-### ORIGINAL VERSION
-
-outpath <- here::here("data-raw", "results", "fsa_deer.Rds")
-
-if(!file.exists(outpath)) {
-
-  deer_result <- deer_rast |>
-    raster_summarize_hsi(deer_groups, .group_var = comid, hsi_func = raster_dvhsi_hqt) |>
-    suitability_postprocess(deer_groups, .group_var = comid)
-
-  deer_result |> saveRDS(outpath)
-
-} else {
-
-  deer_result <- readRDS(outpath)
-
-}
+# ### ORIGINAL VERSION - no longer used
+#
+# outpath <- here::here("data-raw", "results", "fsa_deer.Rds")
+#
+# if(!file.exists(outpath)) {
+#
+#   deer_result <- deer_rast |>
+#     raster_summarize_hsi(deer_groups, .group_var = comid, hsi_func = raster_dvhsi_hqt) |>
+#     suitability_postprocess(deer_groups, .group_var = comid)
+#
+#   deer_result |> saveRDS(outpath)
+#
+# } else {
+#
+#   deer_result <- readRDS(outpath)
+#
+# }
 
 ### VARIATION FOR REARING - BASEFLOW REMOVAL
 
@@ -197,3 +197,145 @@ if(!file.exists(outpath)) {
   deer_result_spawning <- readRDS(outpath)
 
 }
+
+# MOKELUMNE RIVER (EBMUD) ------------------------------------------------------
+
+moke_dir <- here::here("data-raw", "temp", "mokelumne-river")
+dir.create(moke_dir, recursive=T)
+
+moke_ids <- c(R2 = "1BLE0U1lZkqgSb9QM0QlPo8VpmSXOnshe",
+              R3 = "1m_ivN7Sr05agsp8EMg6Zn6MFMJoM8ifS", #1__pZkEuGf6J4bHUcZbY2XWx6Dl9vd35w",
+              R4 = "1i2GUrr0Y2AoI9jNIYYbUqU4tohOD1Lwu", #160FV8cy3TceAo_1GxqhDs0VTgGS1kvAu",
+              R5 = "1Dhmyq-9zbYn_T-jTXu5_hYdM-sxs3r0y", #19qrFSDLzpcdejPENh4qCUlO4sx6_IS_C",
+              R6 = "1c9QsKaK7F6DVIiNFpw3YnLCDjUV-Eav8", #1jq7-hNmJXUNWa_TLqTe0WbI_3-P1gtYo",
+              R7 = "1c_Phhz-46YpCCdIwVYGLJAp-xWKH43Y8") #1wyG0nk2ZlZivhYwnfakiIrySeAJQJi6k")
+              #R2_4410 = "1dwS1myvE9eQZ2jCwr0kM5Mtau9N1ZAqB",
+              #R2_8810 = "1Y3FCsy8AvNy43lOOkqTeS0-xJ9m7qrlH",
+              #R7new =  "1CPyNYb0iMnLHhrJhhgGNYVUSl8Y5CQ0P" / "1oenUfh3vDva94U0Slj5naT4TTs8KPzS5"
+lapply(names(moke_ids), function(x) {
+  dir.create(file.path(moke_dir, x), recursive=T)
+  drive_file_by_id(moke_ids[x], dir = moke_dir) |>
+    archive::archive_extract(file.path(moke_dir, x))
+  })
+
+moke_groups <-
+  drive_file_by_id("1lgD57oZyKP_vEUHVGuVEiNZ-L0WkFEvs", dir = moke_dir) |>
+  read_sf() |>
+  janitor::clean_names() |>
+  filter(comid > 0)
+
+moke_filenames <-
+  read_csv(here::here("data-raw", "source", "hydraulic_model_data", "mokelumne_ebmud_2021", "mok_model_timestamps.csv")) |>
+  mutate(depth = file.path(moke_dir, dir_id, glue::glue("Depth ({time_stamp_exact}).vrt")),
+         velocity = file.path(moke_dir, dir_id, glue::glue("Velocity ({time_stamp_exact}).vrt"))) |>
+  filter(dir_id %in% names(moke_ids))
+
+moke_rasters <-
+  moke_filenames |>
+  select(dir_id, flow_cfs = q_in, depth, velocity) |>
+  nest(filenames = c(flow_cfs, depth, velocity)) |>
+  mutate(rasters = map(filenames, raster_prep_grid))
+
+moke_reaches <-
+  drive_file_by_id("1MO6rIySOJ1DcsvXh8YvNHF5ISyXhgNaX", dir = moke_dir) |>
+  read_sf() |>
+  janitor::clean_names() |>
+  mutate(dir_id = str_replace(name, "Mok", "")) |>
+  select(dir_id, geometry)
+
+moke_groups_by_reach <- moke_groups |>
+  st_intersection(moke_reaches) |>
+  select(dir_id, comid, geometry) |>
+  nest(groups = c(comid, geometry)) |>
+  deframe()
+
+moke_rasters_cropped <- moke_rasters |>
+  mutate(rasters_cropped = pmap(list(dir_id, rasters), function(x, ras) {
+    e <- terra::ext(terra::vect(moke_groups_by_reach[[x]]))
+    list(depth = ras$depth |> terra::crop(e),
+         velocity = ras$velocity |> terra::crop(e))
+  })) |>
+    select(dir_id, rasters_cropped) |>
+    deframe()
+
+moke_results_nbfc <- list()
+moke_results_spawning <- list()
+
+for (r in moke_rasters$dir_id) {
+
+  message(r)
+
+  #moke_rast <- moke_rasters$rasters[[which(moke_rasters$dir_id==r)]]
+  moke_rast <- moke_rasters_cropped[[r]]
+
+  ### VARIATION FOR REARING - BASEFLOW REMOVAL ---------------------------------
+
+  # use the minimum flow available: 125 or 100 depending on the reach
+  moke_baseflow_mask <- terra::ifel(is.na(moke_rast$depth[[1]]), 1, 0)
+
+  outpath <- here::here("data-raw", "temp", glue::glue("fsa_moke_nbfc_{r}.Rds"))
+
+  if(!file.exists(outpath)) {
+
+    moke_results_nbfc[[r]] <- moke_rast |>
+      raster_summarize_hsi(moke_groups_by_reach[[r]], .group_var = comid, mask_raster = moke_baseflow_mask, hsi_func = raster_dvhsi_hqt) |>
+      suitability_postprocess(moke_groups_by_reach[[r]], .group_var = comid)
+
+    moke_results_nbfc[[r]] |> saveRDS(outpath)
+
+  } else {
+
+    moke_results_nbfc[[r]] <- readRDS(outpath)
+
+  }
+
+  ### VARIATION FOR SPAWNING - ALTERNATIVE HSI ---------------------------------
+
+  outpath <- here::here("data-raw", "temp", glue::glue("fsa_moke_spawning_{r}.Rds"))
+
+  if(!file.exists(outpath)) {
+
+    moke_results_spawning[[r]] <- moke_rast |>
+      raster_summarize_hsi(moke_groups_by_reach[[r]], .group_var = comid, hsi_func = raster_dvhsi_spawning) |>
+      suitability_postprocess(moke_groups_by_reach[[r]], .group_var = comid)
+
+    moke_results_spawning[[r]] |> saveRDS(outpath)
+
+  } else {
+
+    moke_results_spawning[[r]] <- readRDS(outpath)
+
+  }
+
+}
+
+combine_reaches <- function(data) {
+  tibble(dir_id = names(data),
+         result = data) |>
+  unnest(result) |>
+  filter(!is.nan(area_tot)) |>
+  group_by(comid) %>%
+  complete(flow_cfs = unique(flow_cfs)) |>
+  arrange(comid, flow_cfs) |>
+  mutate(across(c(area_tot, area_wua, length_ft),
+                function(x) zoo::na.approx(x, x = flow_cfs, rule = 2:1, na.rm=F))) |>
+  group_by(flow_cfs, comid) |>
+  summarize(area_tot = sum(area_tot),
+            area_wua = sum(area_wua),
+            area_pct = sum(area_wua) / sum(area_tot),
+            length_ft = sum(length_ft),
+            ind_per_lf = sum(area_tot) / sum(length_ft),
+            wua_per_lf = sum(area_wua) / sum(length_ft)) |>
+  ungroup() |>
+  arrange(comid, flow_cfs)
+}
+
+moke_result_nbfc_combined <- combine_reaches(moke_results_nbfc)
+moke_result_spawning_combined <- combine_reaches(moke_results_spawning)
+
+moke_result_nbfc_combined |>
+  saveRDS(here::here("data-raw", "results", glue::glue("fsa_moke_nbfc.Rds")))
+
+moke_result_spawning_combined |>
+  saveRDS(here::here("data-raw", "results", glue::glue("fsa_moke_spawning.Rds")))
+

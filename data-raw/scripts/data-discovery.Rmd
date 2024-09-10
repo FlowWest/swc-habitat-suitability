@@ -108,6 +108,67 @@ flowline_table <-
          rc_huc_10 = substr(reachcode, 1, 10),
          rc_huc_12 = substr(reachcode, 1, 12)) |>
   inner_join(fcodes |> select(fcode, ftype_desc))
+
+flowline_table$ftype |> unique()
+```
+
+Fill in info for artificial paths
+
+```{r}
+nhd_flowlines <- 
+  drive_file_by_id("1UiG8AeMr6mFOw7Jx--LyNRzez7GsDhzK") |>
+  read_sf() |>
+  janitor::clean_names() |>
+  st_zm() |>
+  st_transform(habistat::const_proj_crs())
+
+nhd_water_bodies <- 
+  drive_file_by_id("1ZGS3M97xTPb87k-78sGPJx_c1QkSq3AZ") |>
+  read_sf() |>
+  janitor::clean_names() |>
+  st_zm() |>
+  st_transform(habistat::const_proj_crs())
+
+nhd_areas <- 
+  drive_file_by_id("13FxQuW56rBNNYvneOJ2mFjEmRYpgNBhK") |>
+  read_sf() |>
+  janitor::clean_names() |>
+  st_zm() |>
+  st_transform(habistat::const_proj_crs())
+
+artificial_path_midpoints <- 
+  nhd_flowlines |>
+  filter(fcode == 55800) |>
+  st_point_on_surface() 
+
+polygon_features <-
+  bind_rows(NHDArea = nhd_areas |> 
+            select(comid, gnis_id, gnis_name, ftype, fcode, geometry),
+          NHDWaterbody = nhd_water_bodies |> 
+            select(comid, gnis_id, gnis_name, ftype, fcode, geometry),
+          .id = "nhd_dataset") |>
+  rename_with(function(x) paste0("ply_", x), c(everything(), -geometry))
+
+artificial_paths_joined <- 
+  artificial_path_midpoints |>
+  st_join(polygon_features, join = st_nearest_feature) |>
+  st_drop_geometry() |>
+  select(comid, ply_comid,
+         ftype, ply_ftype,
+         fcode, ply_fcode,
+         gnis_id, ply_gnis_id,
+         gnis_name, ply_gnis_name) |>
+  glimpse()
+
+flowline_table <-
+  flowline_table |>
+  mutate(artificial_path = (fcode == 55800)) |>
+  left_join(artificial_paths_joined) |>
+  mutate(ftype = coalesce(ply_ftype, ftype) |> as_factor(),
+         fcode = coalesce(ply_fcode, fcode) |> as_factor()) |>
+  select(-ply_ftype, -ply_fcode)
+
+flowline_table$ftype |> unique()
 ```
 
 #### WBD (HUC-12) Watersheds
@@ -143,18 +204,19 @@ drive_file_by_id("1sf3hKUmo6ZvJwnfyR9m4PoeY9V2n4hou") |>
 flowline_vaattr <- 
   foreign::read.dbf(here::here("data-raw", "temp", "PlusFlowlineVAA.dbf")) |> 
   as_tibble() |> 
-  select(comid = ComID, 
+  transmute(comid = ComID, 
          hydro_seq = Hydroseq,
          reach_code = ReachCode,
          stream_level = StreamLeve, 
          stream_order = StreamOrde, 
          us_length_km = ArbolateSu,
          ds_length_km = Pathlength,
-         da_area_sq_km = DivDASqKM, # using divergence-routed version 
-         #da_area_sq_km_tot = TotDASqKM,
+         da_area_sq_km = TotDASqKM, # using non-divergence-routed version as "default" 
+         da_area_sq_km_div = DivDASqKM, # include both for clarity
+         da_area_sq_km_tot = TotDASqKM, # include both for clarity
+         divergence_ratio = DivDASqKM / TotDASqKM,
          reach_length_km = LengthKM,
-         ) |>
-  mutate(reach_length_ft = reach_length_km * 1000 / 0.3048) 
+         reach_length_ft = LengthKM * 1000 / 0.3048)
 
 # slopes and endpoint elevations
 flowline_slopes <- 
@@ -458,6 +520,10 @@ nf <-
 
 # A selection of potentially useful flow frequency metrics. There are many other potential options
 nf_ffm <- reduce(list(
+  # dry season baseflow in a dry water year
+  nf |> 
+    filter(ffm=="ds_mag_50" & source=="model" & wyt=="dry") |> 
+    select(comid, nf_bfl_dry_cfs_dry = p50),
   # dry season baseflow in moderate water year
   nf |> 
     filter(ffm=="ds_mag_50" & source=="model" & wyt=="moderate") |> 
@@ -720,7 +786,7 @@ flowline_attributes <-
                                      coalesce(lateral_levee_confinement_ft*0.3048, vb_width_transect),
                                      vb_width_transect),
          vb_bf_w_ratio = vb_width_transect / chan_width_m,) |>
-  mutate(da_scalar_maf = (da_area_sq_km * 247.1053815) * (da_ppt_mean_mm / 304.8) / 1E6)
+  mutate(da_scalar_maf = (da_area_sq_km_tot * 247.1053815) * (da_ppt_mean_mm / 304.8) / 1E6)
 
 flowline_attributes |> saveRDS(here::here("data-raw", "results", "flowline_attributes.Rds"))
 

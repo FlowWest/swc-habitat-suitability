@@ -1,7 +1,7 @@
 Predictor Data Preparation and Consolidation
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-06-06
+2024-09-09
 
 - [Case study geographic scope](#case-study-geographic-scope)
   - [Import Flowline Geometry](#import-flowline-geometry)
@@ -47,8 +47,6 @@ watersheds <-
 
     ## ℹ The googledrive package is using a cached token for 'slewis@flowwest.com'.
 
-    ## Auto-refreshing stale OAuth token.
-
     ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/WBD_Subwatershed.shp.zip already exists and will be used...
 
 ``` r
@@ -68,7 +66,7 @@ flowline_geom <-
   st_zm()
 ```
 
-    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/NHDFlowline.zip already exists and will be used...
+    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/NHDFlowline.shp.zip already exists and will be used...
 
 ``` r
 # note that these are in NAD83, not the project CRS
@@ -78,10 +76,11 @@ flowline_geom |> usethis::use_data(overwrite = T)
 ```
 
     ## ✔ Setting active project to
-    ## 'C:/Users/skylerlewis/Github/swc-habitat-suitability'
+    ##   "C:/Users/skylerlewis/Github/swc-habitat-suitability".
 
-    ## ✔ Saving 'flowline_geom' to 'data/flowline_geom.rda'
-    ## • Document your data (see 'https://r-pkgs.org/data.html')
+    ## ✔ Saving "flowline_geom" to "data/flowline_geom.rda".
+
+    ## ☐ Document your data (see <https://r-pkgs.org/data.html>).
 
 ``` r
 # projected version
@@ -93,8 +92,8 @@ flowline_geom_proj |> saveRDS(here::here("data-raw", "results", "flowline_geomet
 flowline_geom_proj |> usethis::use_data(overwrite = T)
 ```
 
-    ## ✔ Saving 'flowline_geom_proj' to 'data/flowline_geom_proj.rda'
-    ## • Document your data (see 'https://r-pkgs.org/data.html')
+    ## ✔ Saving "flowline_geom_proj" to "data/flowline_geom_proj.rda".
+    ## ☐ Document your data (see <https://r-pkgs.org/data.html>).
 
 ``` r
 #hs_flowlines <- flowline_geom
@@ -147,7 +146,115 @@ flowline_table <-
          rc_huc_10 = substr(reachcode, 1, 10),
          rc_huc_12 = substr(reachcode, 1, 12)) |>
   inner_join(fcodes |> select(fcode, ftype_desc))
+
+flowline_table$ftype |> unique()
 ```
+
+    ## [1] StreamRiver    Connector      ArtificialPath Coastline      Pipeline      
+    ## [6] CanalDitch    
+    ## 6 Levels: ArtificialPath CanalDitch Coastline Connector ... StreamRiver
+
+Fill in info for artificial paths
+
+``` r
+nhd_flowlines <- 
+  drive_file_by_id("1UiG8AeMr6mFOw7Jx--LyNRzez7GsDhzK") |>
+  read_sf() |>
+  janitor::clean_names() |>
+  st_zm() |>
+  st_transform(habistat::const_proj_crs())
+```
+
+    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/NHDFlowline.shp.zip already exists and will be used...
+
+``` r
+nhd_water_bodies <- 
+  drive_file_by_id("1ZGS3M97xTPb87k-78sGPJx_c1QkSq3AZ") |>
+  read_sf() |>
+  janitor::clean_names() |>
+  st_zm() |>
+  st_transform(habistat::const_proj_crs())
+```
+
+    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/NHDWaterbody.shp.zip already exists and will be used...
+
+``` r
+nhd_areas <- 
+  drive_file_by_id("13FxQuW56rBNNYvneOJ2mFjEmRYpgNBhK") |>
+  read_sf() |>
+  janitor::clean_names() |>
+  st_zm() |>
+  st_transform(habistat::const_proj_crs())
+```
+
+    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/NHDArea.shp.zip already exists and will be used...
+
+``` r
+artificial_path_midpoints <- 
+  nhd_flowlines |>
+  filter(fcode == 55800) |>
+  st_point_on_surface() 
+```
+
+    ## Warning: st_point_on_surface assumes attributes are constant over geometries
+
+``` r
+polygon_features <-
+  bind_rows(NHDArea = nhd_areas |> 
+            select(comid, gnis_id, gnis_name, ftype, fcode, geometry),
+          NHDWaterbody = nhd_water_bodies |> 
+            select(comid, gnis_id, gnis_name, ftype, fcode, geometry),
+          .id = "nhd_dataset") |>
+  rename_with(function(x) paste0("ply_", x), c(everything(), -geometry))
+
+artificial_paths_joined <- 
+  artificial_path_midpoints |>
+  st_join(polygon_features, join = st_nearest_feature) |>
+  st_drop_geometry() |>
+  select(comid, ply_comid,
+         ftype, ply_ftype,
+         fcode, ply_fcode,
+         gnis_id, ply_gnis_id,
+         gnis_name, ply_gnis_name) |>
+  glimpse()
+```
+
+    ## Rows: 14,360
+    ## Columns: 10
+    ## $ comid         <int> 22227074, 22227072, 22227056, 22227058, 22227060, 222270…
+    ## $ ply_comid     <int> 22226572, 22226562, 22226556, 22226556, 22226556, 222265…
+    ## $ ftype         <chr> "ArtificialPath", "ArtificialPath", "ArtificialPath", "A…
+    ## $ ply_ftype     <chr> "LakePond", "LakePond", "LakePond", "LakePond", "LakePon…
+    ## $ fcode         <int> 55800, 55800, 55800, 55800, 55800, 55800, 55800, 55800, …
+    ## $ ply_fcode     <int> 39004, 39004, 39004, 39004, 39004, 39009, 39009, 39009, …
+    ## $ gnis_id       <chr> NA, NA, NA, "253899", "253899", NA, NA, NA, NA, NA, NA, …
+    ## $ ply_gnis_id   <chr> NA, NA, NA, NA, NA, "222843", "222843", "222843", "22284…
+    ## $ gnis_name     <chr> NA, NA, NA, "Smith River", "Smith River", NA, NA, NA, NA…
+    ## $ ply_gnis_name <chr> NA, NA, NA, NA, NA, "Lake Earl", "Lake Earl", "Lake Earl…
+
+``` r
+flowline_table <-
+  flowline_table |>
+  mutate(artificial_path = (fcode == 55800)) |>
+  left_join(artificial_paths_joined) |>
+  mutate(ftype = coalesce(ply_ftype, ftype) |> as_factor(),
+         fcode = coalesce(ply_fcode, fcode) |> as_factor()) |>
+  select(-ply_ftype, -ply_fcode)
+```
+
+    ## Joining with `by = join_by(comid, gnis_id, gnis_name, ftype, fcode)`
+
+``` r
+flowline_table$ftype |> unique()
+```
+
+    ##  [1] StreamRiver          Connector            LakePond            
+    ##  [4] Coastline            Pipeline             CanalDitch          
+    ##  [7] SwampMarsh           Reservoir            Inundation Area     
+    ## [10] Area to be Submerged Wash                 Submerged Stream    
+    ## [13] Rapids               Spillway             Playa               
+    ## [16] SeaOcean            
+    ## 16 Levels: StreamRiver Connector LakePond Coastline Pipeline ... SeaOcean
 
 #### WBD (HUC-12) Watersheds
 
@@ -189,18 +296,19 @@ drive_file_by_id("1sf3hKUmo6ZvJwnfyR9m4PoeY9V2n4hou") |>
 flowline_vaattr <- 
   foreign::read.dbf(here::here("data-raw", "temp", "PlusFlowlineVAA.dbf")) |> 
   as_tibble() |> 
-  select(comid = ComID, 
+  transmute(comid = ComID, 
          hydro_seq = Hydroseq,
          reach_code = ReachCode,
          stream_level = StreamLeve, 
          stream_order = StreamOrde, 
          us_length_km = ArbolateSu,
          ds_length_km = Pathlength,
-         da_area_sq_km = DivDASqKM, # using divergence-routed version 
-         #da_area_sq_km_tot = TotDASqKM,
+         da_area_sq_km = TotDASqKM, # using non-divergence-routed version as "default" 
+         da_area_sq_km_div = DivDASqKM, # include both for clarity
+         da_area_sq_km_tot = TotDASqKM, # include both for clarity
+         divergence_ratio = DivDASqKM / TotDASqKM,
          reach_length_km = LengthKM,
-         ) |>
-  mutate(reach_length_ft = reach_length_km * 1000 / 0.3048) 
+         reach_length_ft = LengthKM * 1000 / 0.3048)
 
 # slopes and endpoint elevations
 flowline_slopes <- 
@@ -592,6 +700,10 @@ nf <-
 ``` r
 # A selection of potentially useful flow frequency metrics. There are many other potential options
 nf_ffm <- reduce(list(
+  # dry season baseflow in a dry water year
+  nf |> 
+    filter(ffm=="ds_mag_50" & source=="model" & wyt=="dry") |> 
+    select(comid, nf_bfl_dry_cfs_dry = p50),
   # dry season baseflow in moderate water year
   nf |> 
     filter(ffm=="ds_mag_50" & source=="model" & wyt=="moderate") |> 
@@ -684,13 +796,13 @@ geomorph_class <-
     ## Rows: 31,073
     ## Columns: 8
     ## $ comid             <dbl> 7918025, 7918031, 7918595, 7918019, 7918027, 7918039…
-    ## $ geomorph_class    <fct> "Partly-confined, low width-to-depth ratio, gravel-c…
-    ## $ geomorph_confined <fct> Partly-confined, Confined, Confined, Confined, Confi…
-    ## $ geomorph_uniform  <lgl> FALSE, TRUE, TRUE, TRUE, FALSE, FALSE, FALSE, FALSE,…
-    ## $ geomorph_steppool <lgl> FALSE, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE, FALS…
-    ## $ geomorph_riffles  <lgl> TRUE, FALSE, FALSE, FALSE, FALSE, TRUE, TRUE, TRUE, …
-    ## $ geomorph_gravel   <lgl> TRUE, TRUE, TRUE, TRUE, FALSE, TRUE, TRUE, TRUE, TRU…
-    ## $ geomorph_spawning <lgl> TRUE, FALSE, FALSE, FALSE, TRUE, TRUE, TRUE, TRUE, F…
+    ## $ geomorph_class    <fct> "Unconfined, gravel-cobble, riffle-pool", "Confined,…
+    ## $ geomorph_confined <fct> Unconfined, Confined, Confined, Confined, Confined, …
+    ## $ geomorph_uniform  <lgl> FALSE, TRUE, TRUE, TRUE, TRUE, TRUE, FALSE, FALSE, T…
+    ## $ geomorph_steppool <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FAL…
+    ## $ geomorph_riffles  <lgl> TRUE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE, FALSE…
+    ## $ geomorph_gravel   <lgl> TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE…
+    ## $ geomorph_spawning <lgl> TRUE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE, FALSE…
 
 #### HQT boundaries
 
@@ -921,7 +1033,7 @@ flowline_attributes <-
                                      coalesce(lateral_levee_confinement_ft*0.3048, vb_width_transect),
                                      vb_width_transect),
          vb_bf_w_ratio = vb_width_transect / chan_width_m,) |>
-  mutate(da_scalar_maf = (da_area_sq_km * 247.1053815) * (da_ppt_mean_mm / 304.8) / 1E6)
+  mutate(da_scalar_maf = (da_area_sq_km_tot * 247.1053815) * (da_ppt_mean_mm / 304.8) / 1E6)
 
 flowline_attributes |> saveRDS(here::here("data-raw", "results", "flowline_attributes.Rds"))
 
@@ -957,7 +1069,7 @@ waterbodies <-
   st_transform(habistat::const_proj_crs())
 ```
 
-    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/NHDWaterbody.zip already exists and will be used...
+    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/NHDWaterbody.shp.zip already exists and will be used...
 
 ## Maps of attribute data (exploratory)
 
@@ -1252,7 +1364,8 @@ flowlines |>
   scale_color_viridis_c(trans = "log")
 ```
 
-    ## Warning: Transformation introduced infinite values in discrete y-axis
+    ## Warning in scale_color_viridis_c(trans = "log"): log-2.718282 transformation
+    ## introduced infinite values.
 
 ![](data-discovery_files/figure-gfm/plot-width-combined-1.png)<!-- -->
 
@@ -1282,7 +1395,8 @@ flowlines |>
   scale_color_viridis_c(direction=1, trans="log10")
 ```
 
-    ## Warning: Transformation introduced infinite values in discrete y-axis
+    ## Warning in scale_color_viridis_c(direction = 1, trans = "log10"): log-10
+    ## transformation introduced infinite values.
 
 ![](data-discovery_files/figure-gfm/plot-vb_width_transect-1.png)<!-- -->
 

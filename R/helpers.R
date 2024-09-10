@@ -197,6 +197,32 @@ oom_range <- function(from, to) {
   return(if (from == 0) c(0, result) else result)
 }
 
+#' Logarithmic Sequence
+#'
+#' @param from An integer defining the start of the sequence
+#' @param to An integer defining the end of the sequence
+#' @param by A number defining the exponent of 10 to increment by. Defaults to 0.1.
+#' @param snap An optional integer defining a midpoint of the sequence that should be preserved exactly in the range. If not defined, then `from` will be preserved exactly.
+#'
+#' @returns An integer vector sequence
+#' @md
+#'
+#' @examples
+#' seq_log10(from = 50, to = 15000, by = 0.1, snap = 100)
+#'
+#' @export
+#' @keywords internal
+
+seq_log10 <- function(from, to, by = 0.1, snap) {
+  if(missing(snap)) {
+    10^(seq(log10(from), log10(to), by))
+  } else {
+    10^(c(seq(log10(from) + ( (log10(snap) - log10(from)) %% by), log10(snap), by),
+          seq(log10(snap), log10(to), by))) |>
+      unique() |> sort()
+  }
+}
+
 #' Hex Color Blend
 #'
 #' @param x A character string describing a color in the form `"#000000"`

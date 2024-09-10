@@ -4,7 +4,7 @@
 \alias{raster_dvhsi_spawning}
 \title{Raster Habitat Suitability Index (HSI) function: Fall-Run Chinook Spawning}
 \usage{
-raster_dvhsi_spawning(d, v, run = "max")
+raster_dvhsi_spawning(d, v, run = "max", strict = T)
 }
 \arguments{
 \item{d}{a \code{terra} raster layer for depth in feet}

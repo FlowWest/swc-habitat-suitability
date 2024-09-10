@@ -82,13 +82,13 @@ vector_dvhsi_lyr <- function(d, v) {
 #' @param d a vector of depths in feet
 #' @param v a vector of velocities in feet per second
 #' @param run identifier for the salmon run of interest (one of `fall`, `late_fall`, `winter`, `spring`) or `max` to use the outer envelope of all runs. Defaults to `max`.
-#'
+#' @param strict specify whether both criteria must strictly be met (minimum operation) or whether the factors are combined using a geometric mean
 #' @return A vector of habitat suitability index values between 0 and 1.
 #' @md
 #' @examples
 #'
 #' @export
-vector_dvhsi_spawning <- function(d, v, run="max") {
+vector_dvhsi_spawning <- function(d, v, run="max", strict=T) {
   # if_else(d>0 & d<=6.56 & v>0 & v<=5.9, 1, 0)
 
   fct_dep <-
@@ -99,8 +99,12 @@ vector_dvhsi_spawning <- function(d, v, run="max") {
     approx(x = habistat::suitability_hsi_vel_spawning[[run]]$velocity,
            y = habistat::suitability_hsi_vel_spawning[[run]]$hsi,
            xout = v, yleft = 0, yright = 0)$y
-
-  return(fct_dep * fct_vel)
+  if (strict) {
+    # must strictly meet both criteria
+    return(pmin(fct_dep, fct_vel))
+  } else {
+    return(sqrt(fct_dep * fct_vel)) # geometric mean
+  }
 
 }
 

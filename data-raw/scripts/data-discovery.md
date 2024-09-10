@@ -1,7 +1,7 @@
 Predictor Data Preparation and Consolidation
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-09-04
+2024-09-09
 
 - [Case study geographic scope](#case-study-geographic-scope)
   - [Import Flowline Geometry](#import-flowline-geometry)
@@ -66,7 +66,7 @@ flowline_geom <-
   st_zm()
 ```
 
-    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/NHDFlowline.zip already exists and will be used...
+    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/NHDFlowline.shp.zip already exists and will be used...
 
 ``` r
 # note that these are in NAD83, not the project CRS
@@ -146,7 +146,115 @@ flowline_table <-
          rc_huc_10 = substr(reachcode, 1, 10),
          rc_huc_12 = substr(reachcode, 1, 12)) |>
   inner_join(fcodes |> select(fcode, ftype_desc))
+
+flowline_table$ftype |> unique()
 ```
+
+    ## [1] StreamRiver    Connector      ArtificialPath Coastline      Pipeline      
+    ## [6] CanalDitch    
+    ## 6 Levels: ArtificialPath CanalDitch Coastline Connector ... StreamRiver
+
+Fill in info for artificial paths
+
+``` r
+nhd_flowlines <- 
+  drive_file_by_id("1UiG8AeMr6mFOw7Jx--LyNRzez7GsDhzK") |>
+  read_sf() |>
+  janitor::clean_names() |>
+  st_zm() |>
+  st_transform(habistat::const_proj_crs())
+```
+
+    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/NHDFlowline.shp.zip already exists and will be used...
+
+``` r
+nhd_water_bodies <- 
+  drive_file_by_id("1ZGS3M97xTPb87k-78sGPJx_c1QkSq3AZ") |>
+  read_sf() |>
+  janitor::clean_names() |>
+  st_zm() |>
+  st_transform(habistat::const_proj_crs())
+```
+
+    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/NHDWaterbody.shp.zip already exists and will be used...
+
+``` r
+nhd_areas <- 
+  drive_file_by_id("13FxQuW56rBNNYvneOJ2mFjEmRYpgNBhK") |>
+  read_sf() |>
+  janitor::clean_names() |>
+  st_zm() |>
+  st_transform(habistat::const_proj_crs())
+```
+
+    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/NHDArea.shp.zip already exists and will be used...
+
+``` r
+artificial_path_midpoints <- 
+  nhd_flowlines |>
+  filter(fcode == 55800) |>
+  st_point_on_surface() 
+```
+
+    ## Warning: st_point_on_surface assumes attributes are constant over geometries
+
+``` r
+polygon_features <-
+  bind_rows(NHDArea = nhd_areas |> 
+            select(comid, gnis_id, gnis_name, ftype, fcode, geometry),
+          NHDWaterbody = nhd_water_bodies |> 
+            select(comid, gnis_id, gnis_name, ftype, fcode, geometry),
+          .id = "nhd_dataset") |>
+  rename_with(function(x) paste0("ply_", x), c(everything(), -geometry))
+
+artificial_paths_joined <- 
+  artificial_path_midpoints |>
+  st_join(polygon_features, join = st_nearest_feature) |>
+  st_drop_geometry() |>
+  select(comid, ply_comid,
+         ftype, ply_ftype,
+         fcode, ply_fcode,
+         gnis_id, ply_gnis_id,
+         gnis_name, ply_gnis_name) |>
+  glimpse()
+```
+
+    ## Rows: 14,360
+    ## Columns: 10
+    ## $ comid         <int> 22227074, 22227072, 22227056, 22227058, 22227060, 222270…
+    ## $ ply_comid     <int> 22226572, 22226562, 22226556, 22226556, 22226556, 222265…
+    ## $ ftype         <chr> "ArtificialPath", "ArtificialPath", "ArtificialPath", "A…
+    ## $ ply_ftype     <chr> "LakePond", "LakePond", "LakePond", "LakePond", "LakePon…
+    ## $ fcode         <int> 55800, 55800, 55800, 55800, 55800, 55800, 55800, 55800, …
+    ## $ ply_fcode     <int> 39004, 39004, 39004, 39004, 39004, 39009, 39009, 39009, …
+    ## $ gnis_id       <chr> NA, NA, NA, "253899", "253899", NA, NA, NA, NA, NA, NA, …
+    ## $ ply_gnis_id   <chr> NA, NA, NA, NA, NA, "222843", "222843", "222843", "22284…
+    ## $ gnis_name     <chr> NA, NA, NA, "Smith River", "Smith River", NA, NA, NA, NA…
+    ## $ ply_gnis_name <chr> NA, NA, NA, NA, NA, "Lake Earl", "Lake Earl", "Lake Earl…
+
+``` r
+flowline_table <-
+  flowline_table |>
+  mutate(artificial_path = (fcode == 55800)) |>
+  left_join(artificial_paths_joined) |>
+  mutate(ftype = coalesce(ply_ftype, ftype) |> as_factor(),
+         fcode = coalesce(ply_fcode, fcode) |> as_factor()) |>
+  select(-ply_ftype, -ply_fcode)
+```
+
+    ## Joining with `by = join_by(comid, gnis_id, gnis_name, ftype, fcode)`
+
+``` r
+flowline_table$ftype |> unique()
+```
+
+    ##  [1] StreamRiver          Connector            LakePond            
+    ##  [4] Coastline            Pipeline             CanalDitch          
+    ##  [7] SwampMarsh           Reservoir            Inundation Area     
+    ## [10] Area to be Submerged Wash                 Submerged Stream    
+    ## [13] Rapids               Spillway             Playa               
+    ## [16] SeaOcean            
+    ## 16 Levels: StreamRiver Connector LakePond Coastline Pipeline ... SeaOcean
 
 #### WBD (HUC-12) Watersheds
 
@@ -961,7 +1069,7 @@ waterbodies <-
   st_transform(habistat::const_proj_crs())
 ```
 
-    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/NHDWaterbody.zip already exists and will be used...
+    ## C:/Users/skylerlewis/Github/swc-habitat-suitability/data-raw/temp/NHDWaterbody.shp.zip already exists and will be used...
 
 ## Maps of attribute data (exploratory)
 

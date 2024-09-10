@@ -108,6 +108,67 @@ flowline_table <-
          rc_huc_10 = substr(reachcode, 1, 10),
          rc_huc_12 = substr(reachcode, 1, 12)) |>
   inner_join(fcodes |> select(fcode, ftype_desc))
+
+flowline_table$ftype |> unique()
+```
+
+Fill in info for artificial paths
+
+```{r}
+nhd_flowlines <- 
+  drive_file_by_id("1UiG8AeMr6mFOw7Jx--LyNRzez7GsDhzK") |>
+  read_sf() |>
+  janitor::clean_names() |>
+  st_zm() |>
+  st_transform(habistat::const_proj_crs())
+
+nhd_water_bodies <- 
+  drive_file_by_id("1ZGS3M97xTPb87k-78sGPJx_c1QkSq3AZ") |>
+  read_sf() |>
+  janitor::clean_names() |>
+  st_zm() |>
+  st_transform(habistat::const_proj_crs())
+
+nhd_areas <- 
+  drive_file_by_id("13FxQuW56rBNNYvneOJ2mFjEmRYpgNBhK") |>
+  read_sf() |>
+  janitor::clean_names() |>
+  st_zm() |>
+  st_transform(habistat::const_proj_crs())
+
+artificial_path_midpoints <- 
+  nhd_flowlines |>
+  filter(fcode == 55800) |>
+  st_point_on_surface() 
+
+polygon_features <-
+  bind_rows(NHDArea = nhd_areas |> 
+            select(comid, gnis_id, gnis_name, ftype, fcode, geometry),
+          NHDWaterbody = nhd_water_bodies |> 
+            select(comid, gnis_id, gnis_name, ftype, fcode, geometry),
+          .id = "nhd_dataset") |>
+  rename_with(function(x) paste0("ply_", x), c(everything(), -geometry))
+
+artificial_paths_joined <- 
+  artificial_path_midpoints |>
+  st_join(polygon_features, join = st_nearest_feature) |>
+  st_drop_geometry() |>
+  select(comid, ply_comid,
+         ftype, ply_ftype,
+         fcode, ply_fcode,
+         gnis_id, ply_gnis_id,
+         gnis_name, ply_gnis_name) |>
+  glimpse()
+
+flowline_table <-
+  flowline_table |>
+  mutate(artificial_path = (fcode == 55800)) |>
+  left_join(artificial_paths_joined) |>
+  mutate(ftype = coalesce(ply_ftype, ftype) |> as_factor(),
+         fcode = coalesce(ply_fcode, fcode) |> as_factor()) |>
+  select(-ply_ftype, -ply_fcode)
+
+flowline_table$ftype |> unique()
 ```
 
 #### WBD (HUC-12) Watersheds

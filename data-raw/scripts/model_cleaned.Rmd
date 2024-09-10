@@ -502,6 +502,12 @@ pd <- pd_attr |>
   expand_grid(flow_cfs = interp_flows_pred) |>
   mutate(flow_idx = as.integer(flow_cfs),
          flow_norm_cfs = coalesce(flow_cfs / da_scalar_maf, 0)) |> 
+#  # TODO: Potential model improvement
+#  # used total drainage area for the training dataset
+#  # because there were some improperly classified flow lines in the training dataset
+#  # but, use the divergence-routed drainage area for predictions
+#  # so we aren't over-attributing habitat value to various diversion channels, etc.:
+#  mutate(da_area_sq_km = da_area_sq_km_div) |>
   arrange(comid, flow_cfs) |>
   filter(flow_norm_cfs > 0)
 
@@ -523,6 +529,8 @@ v <- row$model_variant[[1]]
 
 alpha_ci <- 0.90
 alpha_pi <- 0.90
+
+if(!file.exists(here::here("data-raw", "results", "model_predicted.Rds"))) {
 
 model_predicted <-  
   model_result |>
@@ -611,11 +619,13 @@ model_predicted <-
 #model_predicted_test |>
 #  inner_join(habistat::wua_hydraulic, by=join_by(comid, model_hab == habitat, flow_cfs))
 
-
-
-
-
 model_predicted |> saveRDS(here::here("data-raw", "results", "model_predicted.Rds"))
+
+} else {
+  
+model_predicted <- readRDS(here::here("data-raw", "results", "model_predicted.Rds"))
+
+}
 ```
 
 
@@ -662,8 +672,9 @@ flowlines_pred <-
   #filter((range_pisces == "extant") | (comid %in% ms$comid)) |>
   # filter based on size of the stream
   # filter((stream_order >= 4) | (da_area_sq_km >= 100) | (comid %in% habistat::cv_mainstems$comid)) #|>
-  filter((((stream_order >= 4) & (da_area_sq_km > 1)) | ((stream_order >= 3) & (da_area_sq_km >= 50))) | 
-           (comid %in% habistat::cv_mainstems$comid))
+  filter(((((stream_order >= 4) & (da_area_sq_km_div > 1)) | ((stream_order >= 3) & (da_area_sq_km_div >= 50))) & (divergence_ratio > 0.5)) | 
+           (comid %in% habistat::cv_mainstems$comid)) |>
+  filter(ftype %in% c("StreamRiver"))
   #filter((stream_order >= 4) | (comid %in% ms$comid)) |>
   #filter((da_area_sq_km >= 100) | (comid %in% ms$comid)) |>
 
@@ -703,7 +714,9 @@ spawning_context <- readRDS(here::here("data-raw", "results", "spawning_context.
 flowlines_pred_spawning <- 
   habistat::flowline_geom_proj |>
   left_join(spawning_context, by=join_by(comid)) |>
-  filter(spawning_geographic_context)
+  filter(spawning_geographic_context) |>
+  inner_join(habistat::flowline_attr |> select(comid, ftype, divergence_ratio), by=join_by(comid)) |>
+  filter(ftype %in% c("StreamRiver") & divergence_ratio > 0.5)
   
 flowlines_pred_spawning |> 
   ggplot() + 

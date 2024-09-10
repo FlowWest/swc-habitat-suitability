@@ -65,10 +65,10 @@ function(input, output, session){
 
   active_predictions <- reactive({
     # predictions_table |>
-    #   filter(flow_cfs == input$active_flow) |>
+    #   filter(flow_cfs == active_map_params$flow) |>
     #   mutate(wua_per_lf = !!sym(input$wua_var))
     predictions |>
-      filter(flow_idx == as.integer(input$active_flow)) |>
+      filter(flow_idx == as.integer(active_map_params$flow)) |>
       filter(habitat == input$habitat_type) |>
       glimpse() #|>
     # TODO could also filter for selected model and bfc removed/not removed
@@ -553,16 +553,25 @@ selected_watershed <- reactiveValues(object_id = NA,
 
   # REACTIVE FLOW FILTER (WATERSHED AND MAINSTEM) ------------------------------
 
+  active_flow_applied <- eventReactive(input$activeFlowApplyButton, {
+    input$active_flow
+  })
+
+  active_map_params <- reactiveValues(flow = 1000) # make sure this matches the value specified in the "selected" attribute on sliderTextInput in ui.R
+  observe({
+    active_map_params$flow <- active_flow_applied()
+  })
+
   active_predictions_watershed <- reactive({
     predictions_watershed |>
-      filter(flow_idx == as.integer(input$active_flow)) |>
+      filter(flow_idx == as.integer(active_map_params$flow)) |>
       filter(habitat == input$habitat_type) |>
       glimpse()
   })
 
   active_predictions_mainstem <- reactive({
     predictions_mainstem |>
-      filter(flow_idx == as.integer(input$active_flow)) |>
+      filter(flow_idx == as.integer(active_map_params$flow)) |>
       filter(habitat == input$habitat_type) |>
       glimpse()
   })

@@ -20,15 +20,16 @@ get_data <- function(...) {
 
 predictions <- get_data(wua_predicted, package = "habistat") |>
   #filter(habitat == "rearing") |>
-  mutate(model_id = if_else((habitat=="rearing" & model_bfc),
-                            paste0(model_name, "_ph_bfc_rm"), # post-hoc baseflow channel removal
-                            model_name)) |>
-  select(comid, flow_idx, flow_cfs, habitat, model_id, wua_per_lf_pred, river_cvpia, watershed_level_3, reach_length_ft) |>
+  #mutate(
+                           #if_else((habitat=="rearing" & model_bfc),
+                           #paste0(model_name, "_ph_bfc_rm"), # post-hoc baseflow channel removal
+                           #model_name)) |>
+  select(comid, flow_idx, flow_cfs, habitat, model_id = model_name, wua_per_lf_pred, river_cvpia, watershed_level_3, reach_length_ft) |>
   pivot_wider(names_from = model_id,
               values_from = wua_per_lf_pred,
               names_glue = c("wua_per_lf_pred_{model_id}")) |>
   left_join(get_data(wua_hydraulic_interp, package = "habistat") |>
-              filter((habitat=="rearing" & !bfc) | (habitat=="spawning")) |> # only showing the actuals with prior bfc removed for now
+              # filter((habitat=="rearing" & !bfc) | (habitat=="spawning")) |> # only showing the actuals with prior bfc removed for now
               select(habitat, comid, flow_cfs, wua_per_lf_actual = wua_per_lf),
             by = join_by(habitat, comid, flow_cfs)) |>
   left_join(get_data(flowline_attr, package = "habistat") |>
@@ -44,12 +45,12 @@ gc() # garbage collect after loading from habistat package
 
 all_flows <- unique(predictions$flow_cfs)
 all_flows_idx <- unique(predictions$flow_idx)
-message(paste(all_flows_idx))
 
 attr <- get_data(flowline_attr, package = "habistat") |>
-  filter(comid %in% predictions$comid) |>
+  filter(comid %in% predictions$comid)# |>
   # stream size filter -- make sure this matches model_cleaned.Rmd
-  filter(((stream_order >= 4) & (da_area_sq_km > 1)) | ((stream_order >= 3) & (da_area_sq_km >= 50)))
+  # filter(((stream_order >= 4) & (da_area_sq_km > 1)) | ((stream_order >= 3) & (da_area_sq_km >= 50))) |>
+  # filter(ftype == "StreamRiver")
 
 gc() # garbage collect after loading from habistat package
 

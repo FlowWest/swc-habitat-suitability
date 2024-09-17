@@ -111,7 +111,7 @@ cv_mainstems <-
   janitor::clean_names() |>
   st_zm() |>
   st_transform(habistat::const_proj_crs()) |>
-  select(river, comid) |>
+  select(river, comid, habitat) |>
   rename(river_cvpia = river)
 
 # ADD UC DAVIS PISCES ----------------------------------------------------------

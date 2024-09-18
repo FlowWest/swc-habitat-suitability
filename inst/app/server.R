@@ -219,20 +219,19 @@ function(input, output, session){
       scale_linetype_manual(name = "Duration Analysis",
                             values = palette_linetypes)
     } else if (most_recent_map_click$type == "watershed") {
-      #TODO: For watersheds, plot total acreage rather than WUA/LF
       predictions_watershed |>
         filter(watershed_level_3 == selected_watershed$watershed_name) |>
         filter(habitat == input$habitat_type) |>
         ggplot(aes(x = flow_cfs)) +
-        geom_line(aes(y = wua_per_lf_pred_SD, color="Scale-Dependent", linetype = "Unscaled")) + #, linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
+        geom_line(aes(y = !!sym(paste0(input$wua_units,"_pred_SD")), color="Scale-Dependent", linetype = "Unscaled")) + #, linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
         #geom_line(aes(y = wua_per_lf_pred_SD_ph_bfc_rm, color="Scale-Dependent", linetype="Post-Model BFC Removal")) +
-        geom_line(aes(y = wua_per_lf_pred_SN, color="Scale-Normalized", linetype = "Unscaled")) + #, linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
+        geom_line(aes(y = !!sym(paste0(input$wua_units,"_pred_SN")), color="Scale-Normalized", linetype = "Unscaled")) + #, linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
         #geom_line(aes(y = wua_per_lf_pred_SN_ph_bfc_rm, color="Scale-Normalized", linetype="Post-Model BFC Removal")) +
         #geom_line(data=duration_curve(), aes(x = q, y = durwua, linetype="Duration Analysis")) +
         scale_x_log10(labels = scales::label_comma()) + annotation_logticks(sides = "b") +
         scale_y_continuous(limits = c(0, NA)) +
         theme_minimal() + theme(panel.grid.minor = element_blank(), legend.position = "top", legend.box="vertical", text=element_text(size=21)) +
-        xlab("Flow (cfs)") + ylab("WUA (ft2) per linear ft") +
+        xlab("Flow (cfs)") + ylab(wua_lab()) +
         scale_color_manual(name = "Model Type",
                            values = palette_colors) +
         scale_linetype_manual(name = "Duration Analysis",
@@ -242,9 +241,9 @@ function(input, output, session){
         filter(river_cvpia == selected_mainstem$river_name) |>
         filter(habitat == input$habitat_type) |>
         ggplot(aes(x = flow_cfs)) +
-        geom_line(aes(y = wua_per_lf_pred_SD, color="Scale-Dependent", linetype="Unscaled")) + # linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
+        geom_line(aes(y = !!sym(paste0(input$wua_units,"_pred_SD")), color="Scale-Dependent", linetype="Unscaled")) + # linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
        # geom_line(aes(y = wua_per_lf_pred_SD_ph_bfc_rm, color="Scale-Dependent", linetype="Post-Model BFC Removal")) +
-        geom_line(aes(y = wua_per_lf_pred_SN, color="Scale-Normalized", linetype="Unscaled")) + # linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
+        geom_line(aes(y = !!sym(paste0(input$wua_units,"_pred_SN")), color="Scale-Normalized", linetype="Unscaled")) + # linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
         #geom_line(aes(y = wua_per_lf_pred_SN_ph_bfc_rm, color="Scale-Normalized", linetype="Post-Model BFC Removal")) +
         geom_line(data=duration_curve(), aes(x = q, y = durwua, linetype="Duration Scaled", color = case_when(
           input$wua_var == "wua_per_lf_pred_SD" ~ "Scale-Dependent",
@@ -253,7 +252,7 @@ function(input, output, session){
         scale_x_log10(labels = scales::label_comma()) + annotation_logticks(sides = "b") +
         scale_y_continuous(limits = c(0, NA)) +
         theme_minimal() + theme(panel.grid.minor = element_blank(), legend.position = "top", legend.box="vertical", text=element_text(size=21)) +
-        xlab("Flow (cfs)") + ylab("WUA (ft2) per linear ft") +
+        xlab("Flow (cfs)") + ylab(wua_lab()) +
         scale_color_manual(name = "Model Type",
                            values = palette_colors) +
         scale_linetype_manual(name = "Duration Analysis",

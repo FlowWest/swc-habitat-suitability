@@ -91,14 +91,14 @@ wua_hydraulic_spawning |> saveRDS(here::here("data-raw", "results", "fsa_combine
 
 # bfc attribute indicates whether the data *has* the baseflow channel
 wua_hydraulic <- 
-  bind_rows(wua_hydraulic_rearing_bfc_removed |> mutate(bfc = FALSE, habitat = "rearing"),
-            wua_hydraulic_spawning |> mutate(bfc = TRUE, habitat = "spawning")) |>
+  bind_rows(wua_hydraulic_rearing_bfc_removed |> mutate(habitat = "rearing"),
+            wua_hydraulic_spawning |> mutate(habitat = "spawning")) |>
   mutate(habitat = as_factor(habitat))
 
 # ensure no duplicates
 wua_hydraulic <- 
   wua_hydraulic |> 
-  group_by(comid, flow_cfs, bfc, habitat) |> 
+  group_by(comid, flow_cfs, habitat) |> 
     filter(row_number() == 1) |>
     ungroup()
 
@@ -125,9 +125,9 @@ print(interp_flows |> round(-1) |> signif(2))
 ``` r
 flow_to_suitable_area <- 
   wua_hydraulic |>
-  group_by(habitat, bfc, dataset, comid, length_ft) |>
+  group_by(habitat, dataset, comid, length_ft) |>
   complete(flow_cfs = interp_flows) |>
-  arrange(habitat, bfc, dataset, comid, flow_cfs, length_ft) |>
+  arrange(habitat, dataset, comid, flow_cfs, length_ft) |>
   mutate(across(c(area_tot, area_wua, area_pct, wua_per_lf, ind_per_lf), 
                 function(var) zoo::na.approx(var, x = flow_cfs, na.rm=F))) |>
   filter(flow_cfs %in% interp_flows) |>
@@ -166,7 +166,7 @@ Combine training dataset, selecting the variables we will be using
 ``` r
 model_data_flat <- flowline_attr_mod |>
   filter(comid %in% habistat::flowline_geom$comid) |>
-  inner_join(flow_to_suitable_area, by=join_by("comid"), relationship="one-to-many") |>
+  inner_join(flow_to_suitable_area |> rename(model_hab = habitat), by=join_by("comid"), relationship="one-to-many") |>
   mutate(case_wt = hardhat::importance_weights(length_ft)) |>
   transmute(dataset, comid, 
             flow_idx = as.integer(flow_cfs),
@@ -196,7 +196,7 @@ model_data_flat <- flowline_attr_mod |>
             # fixed effects
             hqt_gradient_class=droplevels(hqt_gradient_class), hyd_cls=droplevels(hyd_cls),
             # auxiliary
-            da_scalar_maf, model_bfc = bfc, model_hab = habitat) |> 
+            da_scalar_maf, model_hab) |> 
   drop_na()
 ```
 
@@ -206,7 +206,7 @@ model_data_flat <- flowline_attr_mod |>
 model_data <- 
   model_data_flat |>
   # CREATE NESTED TRAINING DATASET DATA FRAMES ---------------------------------
-  nest(.by = c(model_bfc, model_hab), .key = "td") |> # NOW NEED TO ADD HABITAT EVERY TIME WE GROUP BY 
+  nest(.by = c(model_hab), .key = "td") |> # NOW NEED TO ADD HABITAT EVERY TIME WE GROUP BY 
   # SPLIT TRAINING AND TESTING DATA --------------------------------------------
   mutate(tts = map(td, function(x) {
          set.seed(47)
@@ -227,10 +227,9 @@ model_data <-
 ```
 
     ## Rows: 8
-    ## Columns: 8
-    ## $ model_bfc  <lgl> FALSE, FALSE, FALSE, FALSE, TRUE, TRUE, TRUE, TRUE
+    ## Columns: 7
     ## $ model_hab  <fct> rearing, rearing, rearing, rearing, spawning, spawning, spa…
-    ## $ td         <list> [<tbl_df[5937 x 40]>], [<tbl_df[5937 x 40]>], [<tbl_df[5937…
+    ## $ td         <list> [<tbl_df[5937 x 40]>], [<tbl_df[5937 x 40]>], [<tbl_df[593…
     ## $ in_ids     <list> <1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17…
     ## $ training   <list> [<tbl_df[5590 x 39]>], [<tbl_df[5590 x 39]>], [<tbl_df[559…
     ## $ testing    <list> [<tbl_df[1229 x 39]>], [<tbl_df[1229 x 39]>], [<tbl_df[122…
@@ -1151,28 +1150,30 @@ model_predicted_filtered <-
   model_predicted |> 
   filter(comid %in% flowlines_pred$comid) |>
   left_join(habistat::flowline_attr |>
-              select(comid, river_cvpia, starts_with("watershed_"), reach_length_ft), by=join_by(comid)) |>
+              select(comid, river_group, river_cvpia, starts_with("watershed_"), reach_length_ft), by=join_by(comid)) |>
   # select just the desired rows and columns for saving and reporting
   # pick the best variant of SD and SN models
   filter((model_type == "RF") & (model_hab == "rearing")) |>
   transmute(comid, model_name, flow_idx, flow_cfs, wua_per_lf_pred, 
+         river_group = as.factor(river_group),
          river_cvpia = as.factor(river_cvpia),
          watershed_level_3 = as.factor(watershed_level_3),
          reach_length_ft) |>
   # don't flow range filter here -- do it later
   # inner_join(flow_ranges, by=join_by(comid)) |>
   # filter((flow_cfs >= flowrange_min) & (flow_cfs <= flowrange_max)) |>
-  select(-starts_with("flowrange_")) |>
+  # select(-starts_with("flowrange_")) |>
   glimpse()
 ```
 
-    ## Rows: 862,400
-    ## Columns: 8
+    ## Rows: 857,400
+    ## Columns: 9
     ## $ comid             <dbl> 342455, 342455, 342455, 342455, 342455, 342455, 3424…
     ## $ model_name        <chr> "SD", "SD", "SD", "SD", "SD", "SD", "SD", "SD", "SD"…
     ## $ flow_idx          <int> 50, 56, 63, 70, 79, 89, 100, 112, 125, 141, 158, 177…
     ## $ flow_cfs          <dbl> 50.11872, 56.23413, 63.09573, 70.79458, 79.43282, 89…
     ## $ wua_per_lf_pred   <dbl> 0.02766613, 0.02902734, 0.02954483, 0.03133276, 0.03…
+    ## $ river_group       <fct> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, …
     ## $ river_cvpia       <fct> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, …
     ## $ watershed_level_3 <fct> Stanislaus River, Stanislaus River, Stanislaus River…
     ## $ reach_length_ft   <dbl> 291.9948, 291.9948, 291.9948, 291.9948, 291.9948, 29…
@@ -1208,11 +1209,12 @@ model_predicted_spawning <-
   model_predicted |> 
   filter(comid %in% flowlines_pred_spawning$comid) |>
   left_join(habistat::flowline_attr |>
-              select(comid, river_cvpia, starts_with("watershed_"), reach_length_ft), by=join_by(comid)) |>
+              select(comid, river_group, river_cvpia, starts_with("watershed_"), reach_length_ft), by=join_by(comid)) |>
   # select just the desired rows and columns for saving and reporting
   # pick the best variant of SD and SN models
   filter((model_type == "RF") & (model_hab == "spawning")) |>
   transmute(comid, model_name, flow_idx, flow_cfs, wua_per_lf_pred, 
+         river_group = as.factor(river_group),
          river_cvpia = as.factor(river_cvpia),
          watershed_level_3 = as.factor(watershed_level_3),
          reach_length_ft) |>
@@ -1223,13 +1225,14 @@ model_predicted_spawning <-
   glimpse()
 ```
 
-    ## Rows: 280,500
-    ## Columns: 8
+    ## Rows: 276,700
+    ## Columns: 9
     ## $ comid             <dbl> 343009, 343009, 343009, 343009, 343009, 343009, 3430…
     ## $ model_name        <chr> "SD", "SD", "SD", "SD", "SD", "SD", "SD", "SD", "SD"…
     ## $ flow_idx          <int> 50, 56, 63, 70, 79, 89, 100, 112, 125, 141, 158, 177…
     ## $ flow_cfs          <dbl> 50.11872, 56.23413, 63.09573, 70.79458, 79.43282, 89…
     ## $ wua_per_lf_pred   <dbl> 41.07026, 41.05419, 41.19025, 40.86327, 40.73626, 40…
+    ## $ river_group       <fct> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, …
     ## $ river_cvpia       <fct> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, …
     ## $ watershed_level_3 <fct> Stanislaus River, Stanislaus River, Stanislaus River…
     ## $ reach_length_ft   <dbl> 423.2283, 423.2283, 423.2283, 423.2283, 423.2283, 42…
@@ -1249,16 +1252,16 @@ mainstems_comid <-
   mutate(length_ft = st_length(geometry) |> units::set_units("ft") |> units::drop_units()) |>
   filter(str_detect(habitat, "rearing")) |>
   left_join(habistat::flowline_attr |> select(comid, hqt_gradient_class), by=join_by(comid)) |>
-  filter(!(river %in% c("Sacramento River", "San Joaquin River")))
+  filter(!(watershed %in% c("Sacramento River", "San Joaquin River")))
 
 mainstems <-
   mainstems_comid |>
-  group_by(river, hqt_gradient_class) |>
+  group_by(watershed, river, hqt_gradient_class) |>
   summarize() 
 ```
 
-    ## `summarise()` has grouped output by 'river'. You can override using the
-    ## `.groups` argument.
+    ## `summarise()` has grouped output by 'watershed', 'river'. You can override
+    ## using the `.groups` argument.
 
 ``` r
 mainstems_comid |> 
@@ -1271,14 +1274,14 @@ mainstems_comid |>
 
 ``` r
 #remotes::install_github("CVPIA-OSC/DSMhabitat")
-watersheds <- mainstems |> pull(river) |> unique()
+watersheds <- mainstems |> pull(watershed) |> unique()
 watershed_name <- tolower(gsub(pattern = "-| ", replacement = "_", x = watersheds))
 watershed_rda_name <- paste(watershed_name, "floodplain", sep = "_")
 
 dsm_habitat_floodplain <- map_df(watershed_rda_name, function(watershed) {
   df <- as.data.frame(do.call(`::`, list(pkg = "DSMhabitat", name = watershed)))
 }) |> 
-  transmute(river = watershed,
+  transmute(river_group = watershed,
             flow_cfs,
             FR_floodplain_m2 = FR_floodplain_acres * 4046.86,
             FR_floodplain_m2_suitable = DSMhabitat::apply_suitability(FR_floodplain_m2),
@@ -1288,31 +1291,31 @@ dsm_habitat_instream <- map_df(paste(watershed_name, "instream", sep = "_"),
                                possibly(function(watershed) {
                                  df <- as.data.frame(do.call(`::`, list(pkg = "DSMhabitat", name = watershed)))
                                  }, otherwise = NULL)) |> 
-  transmute(river = watershed,
+  transmute(river_group = watershed,
             flow_cfs,
             FR_juv_wua) 
 
 dsm_flows <- bind_rows(dsm_habitat_floodplain, dsm_habitat_instream) |>
-  group_by(river, flow_cfs) |>
+  group_by(river_group, flow_cfs) |>
   summarize() |>
   ungroup() |>
-  arrange(river, flow_cfs)
+  arrange(river_group, flow_cfs)
 ```
 
-    ## `summarise()` has grouped output by 'river'. You can override using the
+    ## `summarise()` has grouped output by 'river_group'. You can override using the
     ## `.groups` argument.
 
 ``` r
 dsm_flow_ranges <- 
   dsm_flows |> 
-  group_by(river) |> 
+  group_by(river_group) |> 
   summarize(min_flow_cfs = min(flow_cfs), max_flow_cfs = max(flow_cfs))
 
 mainstems_comid |> 
   st_zm() |> 
   filter(comid %in% mainstems_comid$comid) |>
   ggplot() + 
-  geom_sf(aes(color=river)) + 
+  geom_sf(aes(color=watershed)) + 
   theme(legend.key.height = unit(12, "point"))
 ```
 
@@ -1322,15 +1325,15 @@ mainstems_comid |>
 # combining both floodplain and instream rearing acreages/WUAs for comparison
 dsm_habitat_combined <- mainstems |> 
   mutate(length_ft = st_length(geometry) |> units::set_units("ft") |> units::drop_units()) |>
-  group_by(river) |> 
+  group_by(watershed) |> 
   summarize(length_ft = sum(length_ft)) |>
   st_drop_geometry() |>
-  inner_join(full_join(dsm_habitat_instream, dsm_habitat_floodplain, by=join_by(river, flow_cfs)), by=join_by(river)) |>
-  group_by(river) |>
-  arrange(river, flow_cfs) |>
+  inner_join(full_join(dsm_habitat_instream, dsm_habitat_floodplain, by=join_by(river_group, flow_cfs)), by=join_by(watershed==river_group)) |>
+  group_by(watershed) |>
+  arrange(watershed, flow_cfs) |>
   mutate(FR_juv_wua = zoo::na.approx(FR_juv_wua, flow_cfs, na.rm=F),
          FR_floodplain_acres_suitable = zoo::na.approx(FR_floodplain_acres_suitable, flow_cfs, na.rm=F)) |>
-  transmute(river, flow_cfs, 
+  transmute(watershed, flow_cfs, 
             instream_wua_per_lf = coalesce(FR_juv_wua/1000,0),
             instream_suitable_ac = coalesce(FR_juv_wua/1000,0)*length_ft/43560,
             floodplain_wua_per_lf = coalesce(FR_floodplain_acres_suitable,0)*43560/length_ft,
@@ -1343,20 +1346,20 @@ dsm_habitat_combined <- mainstems |>
     ## Warning: There was 1 warning in `mutate()`.
     ## ℹ In argument: `FR_floodplain_acres_suitable =
     ##   zoo::na.approx(FR_floodplain_acres_suitable, flow_cfs, na.rm = F)`.
-    ## ℹ In group 20: `river = "Stanislaus River"`.
+    ## ℹ In group 20: `watershed = "Stanislaus River"`.
     ## Caused by warning in `regularize.values()`:
     ## ! collapsing to unique 'x' values
 
 ``` r
 dsm_habitat_wua_per_lf <- dsm_habitat_combined |>
-  select(river, flow_cfs, instream_wua_per_lf, floodplain_wua_per_lf) |>
+  select(watershed, flow_cfs, instream_wua_per_lf, floodplain_wua_per_lf) |>
 #  mutate(combined_wua_per_lf = pmax(instream_wua_per_lf, floodplain_wua_per_lf)) |>
   pivot_longer(cols=c(instream_wua_per_lf, floodplain_wua_per_lf)) |>
   mutate(name = paste("DSMhabitat", str_replace(name, "_wua_per_lf", "")),
          value = if_else(value>0, value, NA))
 
 dsm_habitat_suitable_ac <- dsm_habitat_combined |>
-  select(river, flow_cfs, instream_suitable_ac, floodplain_suitable_ac) |>
+  select(watershed, flow_cfs, instream_suitable_ac, floodplain_suitable_ac) |>
 #  mutate(combined_suitable_ac = pmax(instream_suitable_ac, floodplain_suitable_ac)) |>
   pivot_longer(cols=c(instream_suitable_ac, floodplain_suitable_ac)) |>
   mutate(value = if_else(value>0, value, NA)) |>
@@ -1370,7 +1373,7 @@ model_predicted_filtered |>
   filter(flow_cfs <= 15000) |>
   #filter(model_type == "RF") |>
   #group_by(model_bfc, model_variant, river_cvpia, flow_cfs) |>
-  group_by(model_name, river_cvpia, flow_cfs) |>
+  group_by(model_name, river_group, flow_cfs) |>
   summarize(wua_per_lf_pred = sum(wua_per_lf_pred * reach_length_ft) / sum(reach_length_ft)) |>
   ggplot(aes(x = flow_cfs)) + 
   geom_line(aes(y = wua_per_lf_pred, 
@@ -1379,9 +1382,10 @@ model_predicted_filtered |>
                 #linetype = if_else(model_bfc, "Post-Model BFC Removal", "Prior BFC Removal")
                 )) +
   geom_line(data=dsm_habitat_wua_per_lf |> 
-              rename(river_cvpia = river), 
+              rename(river_group = watershed) |>
+              filter(flow_cfs <= 15000), 
             aes(x = flow_cfs, y = value, color = name)) +
-  facet_wrap(~river_cvpia, scales = "free_y") +
+  facet_wrap(~river_group, scales = "free_y") +
   scale_x_continuous(limits = c(0,15000)) +
   #scale_y_log10() + scale_x_log10()  +
   scale_color_brewer(name = "Model Type", palette ="Paired") + 
@@ -1390,10 +1394,10 @@ model_predicted_filtered |>
   guides(color = guide_legend(nrow = 2))
 ```
 
-    ## `summarise()` has grouped output by 'model_name', 'river_cvpia'. You can
+    ## `summarise()` has grouped output by 'model_name', 'river_group'. You can
     ## override using the `.groups` argument.
 
-    ## Warning: Removed 30 rows containing missing values or values outside the scale range
+    ## Warning: Removed 20 rows containing missing values or values outside the scale range
     ## (`geom_line()`).
 
 ![](model_cleaned_files/figure-gfm/dsmhabitat-filtered-1.png)<!-- -->
@@ -1467,14 +1471,14 @@ usethis::use_data(wua_predicted_cv_watersheds, overwrite = TRUE)
 wua_predicted_cv_mainstems <- 
   wua_predicted |>
   filter(!is.na(river_cvpia)) |>
-  group_by(habitat, model_name, river_cvpia, flow_idx, flow_cfs) |>
+  group_by(habitat, model_name, river_group, river_cvpia, flow_idx, flow_cfs) |>
   summarize(wua_per_lf_pred = sum(wua_per_lf_pred * reach_length_ft) / sum(reach_length_ft),
             wua_acres_pred = sum(wua_per_lf_pred * reach_length_ft) / 43560) |>
   ungroup()
 ```
 
-    ## `summarise()` has grouped output by 'habitat', 'model_name', 'river_cvpia',
-    ## 'flow_idx'. You can override using the `.groups` argument.
+    ## `summarise()` has grouped output by 'habitat', 'model_name', 'river_group',
+    ## 'river_cvpia', 'flow_idx'. You can override using the `.groups` argument.
 
 ``` r
 usethis::use_data(wua_predicted_cv_mainstems, overwrite = TRUE)
@@ -1482,6 +1486,19 @@ usethis::use_data(wua_predicted_cv_mainstems, overwrite = TRUE)
 
     ## ✔ Saving "wua_predicted_cv_mainstems" to "data/wua_predicted_cv_mainstems.rda".
     ## ☐ Document your data (see <https://r-pkgs.org/data.html>).
+
+``` r
+wua_predicted_cv_mainstems_grouped <- 
+  wua_predicted |>
+  filter(!is.na(river_group)) |>
+  group_by(habitat, model_name, river_group, flow_idx, flow_cfs) |>
+  summarize(wua_per_lf_pred = sum(wua_per_lf_pred * reach_length_ft) / sum(reach_length_ft),
+            wua_acres_pred = sum(wua_per_lf_pred * reach_length_ft) / 43560) |>
+  ungroup()
+```
+
+    ## `summarise()` has grouped output by 'habitat', 'model_name', 'river_group',
+    ## 'flow_idx'. You can override using the `.groups` argument.
 
 ``` r
 wua_predicted_cv_mainstems |>
@@ -1510,17 +1527,17 @@ wua_predicted_cv_mainstems |>
 ```
 
 ``` r
-wua_predicted_cv_mainstems |>
-  mutate(river_cvpia_short = if_else((str_length(river_cvpia) >= 12) & !str_detect(river_cvpia, "Bear "),
-                                     river_cvpia  |> str_replace(" Creek", "") |> str_replace(" River", ""),
-                                     river_cvpia)) |>
+wua_predicted_cv_mainstems_grouped |>
+  mutate(river_group_short = if_else((str_length(river_group) >= 12) & !str_detect(river_group, "Bear "),
+                                     river_group  |> str_replace(" Creek", "") |> str_replace(" River", ""),
+                                     river_group)) |>
   filter(habitat == "spawning") |>
   filter(flow_cfs <= 15000) |>
   ggplot(aes(x = flow_cfs)) + 
   geom_line(aes(y = wua_per_lf_pred, 
                 color = case_when(model_name=="SD" ~ "Scale-Dependent", 
                                   model_name=="SN" ~ "Scale-Normalized"))) +
-  facet_wrap(~river_cvpia_short, scales = "free_y") +
+  facet_wrap(~river_group_short, scales = "free_y") +
   scale_x_continuous(limits = c(0,15000)) +
   #scale_y_log10() + scale_x_log10()  +
   scale_color_discrete(name = "Model Type") + 

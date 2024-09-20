@@ -141,23 +141,33 @@ function(input, output, session){
     #if (!is.null(selected_point$object_id)) {
     if (most_recent_map_click$type == "comid") {
       active_predictions() |>
+        select(any_of(names(var_names))) |>
         filter(comid == selected_point$comid) |>
-        select(where(is.numeric)) |>
+        mutate(across(where(is.numeric), function(x) signif(x, 3) |> as.character(x))) |>
         pivot_longer(everything()) |>
-        mutate(across(value, function(x) round(x, 2)))
+        mutate(name = var_names[name])
     } else if (most_recent_map_click$type == "watershed") {
       active_predictions_watershed() |>
+        select(any_of(names(var_names))) |>
         filter(watershed_level_3 == selected_watershed$watershed_id) |>
-        select(where(is.numeric)) |>
+        mutate(across(where(is.numeric), function(x) signif(x, 3) |> as.character(x))) |>
         pivot_longer(everything()) |>
-        mutate(across(value, function(x) round(x, 2)))
+        mutate(name = var_names[name])
+    } else if (most_recent_map_click$type == "mainstem") {
+      active_predictions_mainstem() |>
+        select(any_of(names(var_names))) |>
+        filter(river_cvpia == selected_mainstem$river_name) |>
+        mutate(across(where(is.numeric), function(x) signif(x, 3) |> as.character(x))) |>
+        pivot_longer(everything()) |>
+        mutate(name = var_names[name])
     }
   })
 
   output$pred_table <- DT::renderDT({
-    if (most_recent_map_click$type == "none") {
+    if (most_recent_map_click$type != "none") {
       DT::datatable(active_pred_table(),
-                    options = list(paging = F, searching = F))
+                    options = list(paging = F, searching = F),
+                    selection = "none")
     }
   })
 
@@ -167,17 +177,19 @@ function(input, output, session){
      if (most_recent_map_click$type == "comid") {
      result <- attr |>
        filter(comid == selected_point$comid) |>
-       select(where(is.numeric)) |>
-       pivot_longer(everything())
-       #gc()
+       mutate(across(where(is.numeric), function(x) signif(x, 3) |> as.character(x))) |>
+       pivot_longer(everything()) |>
+       mutate(name = var_names[name])
+     #gc()
      return(result)
-   }
+     }
   })
 
   output$attr_table <- DT::renderDT({
      if (most_recent_map_click$type == "comid") {
         DT::datatable(active_attr_table(),
-                      options = list(paging = F, searching = F))
+                      options = list(paging = F, searching = F),
+                      selection = "none")
       }
     })
 
@@ -461,7 +473,7 @@ selected_watershed <- reactiveValues(object_id = NA,
       if(substr(input$main_map_shape_click$id, 1, 9) == "mainstem_") {
         most_recent_map_click$type <- "mainstem"
         selected_mainstem$object_id <- input$main_map_shape_click$id
-        selected_mainstem$river_name <-mainstems$mainstem_label[[which(mainstems$mainstem_id==input$main_map_shape_click$id)]]
+        selected_mainstem$river_name <-mainstems$river_cvpia[[which(mainstems$mainstem_id==input$main_map_shape_click$id)]]
         most_recent_map_click$lng <- input$main_map_shape_click$lng
         most_recent_map_click$lat <- input$main_map_shape_click$lat
       }
@@ -619,13 +631,17 @@ selected_watershed <- reactiveValues(object_id = NA,
 
   # ACTIVE STREAMGAGE SELECTOR
   active_reach_info <- reactiveValues(is_mainstem = FALSE,
-                                      watershed_name = NA)
+                                      watershed_name = NA,
+                                      river_name = NA)
 
   observe({
     if (most_recent_map_click$type == "comid") {
       active_reach_info$watershed_name <- (attr |>
                                         filter(comid == selected_point$comid) |>
                                         pull(watershed_level_3))[[1]]
+      active_reach_info$watershed_name <- (attr |>
+                                             filter(comid == selected_point$comid) |>
+                                             pull(river_cvpia))[[1]]
       active_reach_info$is_mainstem <- !is.na((attr |>
                                      filter(comid == selected_point$comid) |>
                                      pull(river_cvpia))[[1]])
@@ -633,14 +649,14 @@ selected_watershed <- reactiveValues(object_id = NA,
       active_reach_info$watershed_name <- selected_watershed$watershed_name
       active_reach_info$is_mainstem <- FALSE
     } else if (most_recent_map_click$type == "mainstem"){
-      active_reach_info$watershed_name <- selected_mainstem$river_name
+      active_reach_info$river_name <- selected_mainstem$river_name
       active_reach_info$is_mainstem <- TRUE
     }
   })
 
   streamgage_options <- reactive({
     if(active_reach_info$is_mainstem) {
-      streamgages[[active_reach_info$watershed_name]]
+      streamgages[[active_reach_info$river_name]]
     } else {
       list()
     }

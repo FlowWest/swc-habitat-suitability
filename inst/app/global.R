@@ -97,6 +97,7 @@ gc() # garbage collect after loading from habistat package
 
 geom <- get_data(flowline_geom, package = "habistat") |>
   st_set_crs("+proj=longlat +datum=WGS84") |> # for display purposes only
+  select(comid, geometry) |>
   inner_join(attr |> transmute(comid, gnis_name), by = join_by(comid)) |>
   mutate(object_id = paste0("comid_", comid))
 

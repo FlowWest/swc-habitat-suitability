@@ -176,11 +176,13 @@ cdec_station_sensors_selected <- cdec_station_sensors |>
                                  has_event ~ "event")) |>
   inner_join(st_drop_geometry(cdec_station_sensors))
 
-cdec_filenames <-
+cdec_queries <-
   cdec_station_sensors_selected |>
     st_drop_geometry() |>
-    filter(!is.na(section)) |>
-    #head(5) |>
+    filter(!is.na(section))
+  
+cdec_filenames <-
+    cdec_queries |>
     mutate(filename = pmap(list(station_id, 
                               sensor_number, 
                               case_when(duration=="event"~"E",
@@ -199,12 +201,13 @@ cdec_filenames <-
 #               flow_cfs = mean(value))
 # }
 
-streamgage_attr <- cdec_filenames |>
-  select(-filename, -notes, -selected) |>
+streamgage_attr <- cdec_queries |>
+  select(-notes, -selected) |>
   # make sure these watershed definitions match watershed_level_3 in cv_mainstems/cv_watersheds
-  mutate(watershed = case_when(channel == "Sacramento River" ~ "Sacramento River",
-                                       section == "Lower San Joaquin River" ~ "San Joaquin River",
-                                       TRUE ~ section))
+  # mutate(watershed = case_when(channel == "Sacramento River" ~ "Sacramento River",
+  #                                      section == "Lower San Joaquin River" ~ "San Joaquin River",
+  #                                      TRUE ~ section))
+  mutate(river_group = watershed, river_cvpia = section)
 
 streamgage_attr |> usethis::use_data(overwrite=T)
 

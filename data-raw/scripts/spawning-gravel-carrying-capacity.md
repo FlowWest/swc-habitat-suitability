@@ -1,7 +1,10 @@
 Spawning Gravel Carrying Capacity
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-09-12
+2024-09-24
+
+- [Compare against estimates in the Yuba relicensing
+  study](#compare-against-estimates-in-the-yuba-relicensing-study)
 
 ``` r
 library(tidyverse)
@@ -28,174 +31,174 @@ library(sf)
 library(habistat)
 library(patchwork)
 theme_set(theme_minimal())
+glimpse_plot <- function(x, ...) {
+  plot(x, ...)
+  invisible(x)
+}
 ```
 
-CVPIA stream “Yuba River” is just the Lower Yuba River
+Map current and historical habitat reaches of the Yuba and its major
+tributaries
 
 ``` r
-habistat::cv_mainstems |> filter(str_detect(river_cvpia, "Yuba")) |> plot()
+habistat::cv_mainstems |> 
+  filter(river_group == "Yuba River") |>
+  filter(!is.na(habitat)) |>
+  glimpse_plot()
 ```
 
 ![](spawning-gravel-carrying-capacity_files/figure-gfm/unnamed-chunk-1-1.png)<!-- -->
 
-Take all Yuba River mainstems instead
+Map full lengths of Yuba and its major tributaries, and join in spawning
+context layer
 
 ``` r
+spawning_context <- 
+  readRDS(here::here("data-raw", "results", "spawning_context.Rds"))
+
 selected_streams <- 
-habistat::flowline_geom_proj |> 
-  inner_join(habistat::flowline_attr |> select(comid, watershed_level_3, gnis_name, river_cvpia)) |>
+  habistat::flowline_geom_proj |> 
+  inner_join(habistat::flowline_attr |> select(comid, watershed_level_3, gnis_name), by=join_by(comid)) |>
+  left_join(habistat::cv_mainstems |> st_drop_geometry() |> select(comid, habitat), by=join_by(comid)) |>
   filter(watershed_level_3 == "Yuba River") |> 
-  filter(gnis_name %in% c("Yuba River", "Middle Yuba River", "North Yuba River", "South Yuba River")) 
-```
-
-    ## Joining with `by = join_by(comid)`
-
-``` r
-selected_streams |> plot()
+  filter(gnis_name %in% c("Yuba River", "Middle Yuba River", "North Yuba River", "South Yuba River")) |> 
+  mutate(river_name = if_else(str_detect(coalesce(habitat,""), "rearing"), "Lower Yuba River", gnis_name)) |>
+#  mutate(gnis_name = if_else(str_detect(coalesce(habitat,""), "rearing"), "Lower Yuba River", gnis_name) |>
+#           factor(levels = c("North Yuba River", "Middle Yuba River", "South Yuba River", "Yuba River", "Lower Yuba River"))) |>
+  left_join(spawning_context, by=join_by(comid)) |>
+  mutate(across(starts_with("spawning"), function(x) coalesce(x, FALSE))) |>
+  mutate(current_spawning_reach = coalesce(str_detect(habitat, "spawning"), FALSE)) |>
+  glimpse_plot()
 ```
 
 ![](spawning-gravel-carrying-capacity_files/figure-gfm/unnamed-chunk-2-1.png)<!-- -->
 
-Filter for spawning context (likely spawning gravels)
+Look at predictions
 
 ``` r
-spawning_context <- readRDS(here::here("data-raw", "results", "spawning_context.Rds")) |>
-  glimpse()
-```
+lower_yuba_river <-
+  habistat::cv_mainstems |>
+  filter(river_cvpia == "Yuba River" & str_detect(habitat, "rearing"))
 
-    ## Rows: 178,868
-    ## Columns: 5
-    ## $ comid                        <dbl> 20245062, 24085230, 22226684, 22226720, 2…
-    ## $ spawning_geographic_context  <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE,…
-    ## $ spawning_gravel_via_sediment <lgl> NA, NA, FALSE, FALSE, FALSE, TRUE, TRUE, …
-    ## $ spawning_gravel_via_geomorph <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE,…
-    ## $ spawning_filter_all          <lgl> FALSE, FALSE, FALSE, FALSE, FALSE, FALSE,…
-
-``` r
-selected_streams |>
-  filter(comid %in% filter(spawning_context, spawning_filter_all)$comid) |>
-  plot()
-```
-
-![](spawning-gravel-carrying-capacity_files/figure-gfm/unnamed-chunk-3-1.png)<!-- -->
-
-\*\*These are weird at the margins because of the flow range filter.
-Need to use unfiltered version in `wua_predicted` – filter only for map
-display not for calculations.
-
-``` r
 spawning_predictions_comid <- 
-habistat::wua_predicted |>
-  filter(comid %in% selected_streams$comid) |>
+  habistat::wua_predicted |>
+  inner_join(selected_streams |> select(comid, current_spawning_reach)) |>
   filter(habitat == "spawning") |>
+  filter(model_name == "SD") |>
   filter(comid %in% filter(spawning_context, spawning_filter_all)$comid) |>
   inner_join(habistat::flowline_attr |> select(comid, gnis_name)) |>
-  filter(gnis_name %in% c("Yuba River", "Middle Yuba River", "North Yuba River", "South Yuba River"))
+  filter(gnis_name %in% c("Yuba River", "Middle Yuba River", "North Yuba River", "South Yuba River")) |>
+  mutate(river_name = if_else(comid %in% lower_yuba_river$comid, "Lower Yuba River", gnis_name)) 
 ```
 
     ## Joining with `by = join_by(comid)`
+    ## Joining with `by = join_by(comid)`
 
 ``` r
+#  mutate(gnis_name = if_else(str_detect(coalesce(habitat,""), "rearing"), "Lower Yuba River", gnis_name) |>
+#         factor(levels = c("North Yuba River", "Middle Yuba River", "South Yuba River", "Yuba River", "Lower Yuba River")))
+
+# total_reach_lengths <-
+#   habistat::flowline_attr |>
+#   mutate(river_name = if_else(str_detect(coalesce(habitat,""), "rearing"), "Lower Yuba River", gnis_name)) |> 
+#   group_by(river_name) |> 
+#   summarize(reach_length_ft = sum(reach_length_ft), .groups="drop")
+# 
+# spawning_predictions <- 
+#   spawning_predictions_comid |>
+#   group_by(river_name, gnis_name, flow_cfs) |>
+#   mutate(total_wua_ft2 = wua_per_lf_pred * reach_length_ft) |>
+#   summarize(total_wua_ft2 = sum(total_wua_ft2)) |>
+#   inner_join(total_reach_lengths, by=join_by(river_name)) |>
+#   mutate(wua_ft2_per_lf = total_wua_ft2 / reach_length_ft)
+
 spawning_predictions <- 
   spawning_predictions_comid |>
-  group_by(gnis_name, flow_cfs) |>
-  mutate(total_wua_ft2 = wua_per_lf_pred * reach_length_ft) |>
-  summarize(total_wua_ft2 = sum(total_wua_ft2)) |>
-  inner_join(habistat::flowline_attr |> 
-               group_by(gnis_name) |> 
-               summarize(reach_length_ft = sum(reach_length_ft))) |>
-  mutate(wua_ft2_per_lf = total_wua_ft2 / reach_length_ft)
-```
-
-    ## `summarise()` has grouped output by 'gnis_name'. You can override using the
-    ## `.groups` argument.
-    ## Joining with `by = join_by(gnis_name)`
-
-``` r
-spawning_predictions <- 
-  spawning_predictions_comid |>
-  group_by(gnis_name, flow_cfs) |>
+  group_by(river_name, flow_cfs) |>
   mutate(total_wua_ft2 = wua_per_lf_pred * reach_length_ft) |>
   summarize(total_length_ft = sum(reach_length_ft),
             total_wua_ft2 = sum(total_wua_ft2),
             wua_ft2_per_lf = total_wua_ft2 / total_length_ft) 
 ```
 
-    ## `summarise()` has grouped output by 'gnis_name'. You can override using the
+    ## `summarise()` has grouped output by 'river_name'. You can override using the
     ## `.groups` argument.
 
 ``` r
 plt_wua <- spawning_predictions |>
-  ggplot() + geom_line(aes(x = flow_cfs, y = wua_ft2_per_lf, color = gnis_name)) + 
-  scale_x_log10()
+  ggplot() + geom_line(aes(x = flow_cfs, y = wua_ft2_per_lf, color = river_name)) + 
+  scale_x_log10(breaks = scales::breaks_log(10)) + annotation_logticks(sides="b") +
+  ylab("Spawning Habitat\n(ft2 per LF)") + guides(color = "none") +
+  scale_y_continuous(sec.axis = sec_axis(name = "Redds\n(per 1000 LF)", transform = ~./94*1000)) +
+  scale_color_brewer(name = "Spawning/Reach", aesthetics = c("color", "fill"), palette="Paired")
+
 plt_tot <- spawning_predictions |>
-  ggplot() + geom_line(aes(x = flow_cfs, y = total_wua_ft2 / 43560, color = gnis_name)) + 
-  scale_x_log10()
-(plt_wua / plt_tot) + plot_layout(axes = "collect", guides = "collect")
+  ggplot() + geom_area(aes(x = flow_cfs, y = total_wua_ft2 / 43560, fill = river_name), color = "white") + 
+  scale_x_log10(breaks = scales::breaks_log(10)) + annotation_logticks(sides="b") +
+  ylab("Spawning Habitat\n(total acres)") + guides(color = "none", fill = "none") + 
+  scale_y_continuous(sec.axis = sec_axis(name = "Redds\n(total)", transform = ~./94*43560)) + 
+  scale_color_brewer(name = "Spawning/Reach", aesthetics = c("color", "fill"), palette="Paired")
+
+plt_map <- selected_streams |>
+  filter(comid %in% spawning_predictions_comid$comid) |>
+  ggplot() + geom_sf(data=selected_streams, color="lightgray") + 
+  geom_sf(aes(color = river_name), linewidth=1) +
+  theme(panel.grid = element_blank(), axis.text = element_blank()) + 
+  scale_color_brewer(name = "Spawning/Reach", aesthetics = c("color", "fill"), palette="Paired")
+
+((plt_wua / plt_tot) + 
+    plot_layout(axes = "collect") & 
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.ticks.y = element_line())) | 
+  (guide_area() / plt_map) +
+  plot_layout(guides = "collect") 
 ```
 
-![](spawning-gravel-carrying-capacity_files/figure-gfm/unnamed-chunk-4-1.png)<!-- -->
+![](spawning-gravel-carrying-capacity_files/figure-gfm/unnamed-chunk-3-1.png)<!-- -->
 
 ``` r
 carrying_capacity <- 
-spawning_predictions |>
-  mutate(ccap_redds = total_wua_ft2 / 94) 
-# 01_YSF-Habitat-Matrices-Report estimate: 94ft^2/redd
+  spawning_predictions |>
+  mutate(ccap_redds = total_wua_ft2 / 94) # 01_YSF-Habitat-Matrices-Report estimate: 94ft^2/redd
 
-plt_ccap <- carrying_capacity |>
-  ggplot() + #geom_line(aes(x = flow_cfs, y = ccap_redds, color = gnis_name)) + 
-  scale_x_log10() + geom_hline(data = carrying_capacity |> 
-                                 group_by(gnis_name) |> 
-                                 summarize(ccap_redds = max(ccap_redds)), 
-                               aes(yintercept = ccap_redds, color = gnis_name)) 
+carrying_capacity_summary <- 
+  carrying_capacity |> 
+  mutate(ccap_redds = total_wua_ft2 / 94) |>
+  group_by(river_name) |> 
+  summarize(at_flow = flow_cfs[which.max(ccap_redds)],
+            ccap_redds = max(ccap_redds), .groups="drop") 
 
-(plt_wua / plt_tot / plt_ccap) + plot_layout(axes = "collect", guides = "collect")
+carrying_capacity_summary |> knitr::kable()
 ```
 
-![](spawning-gravel-carrying-capacity_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
+| river_name        |    at_flow | ccap_redds |
+|:------------------|-----------:|-----------:|
+| Lower Yuba River  |   316.2278 |   55177.78 |
+| Middle Yuba River | 14125.3754 |   26286.72 |
+| North Yuba River  | 14125.3754 |   92507.25 |
+| South Yuba River  | 14125.3754 |   58621.43 |
+| Yuba River        |  7943.2823 |   20698.51 |
 
 Length of spawning habitat
 
-Calculated just using the elevation/gradient filter
-
 ``` r
-stream_lengths <- 
-selected_streams |>
-  group_by(gnis_name) |>
-  summarize(length_ft = sum(st_length(geometry)) |> units::set_units("ft") |> units::drop_units(),
-            length_mi = length_ft / 5280) |>
-  st_drop_geometry()
-
-stream_lengths |> knitr::kable()
-```
-
-| gnis_name         | length_ft | length_mi |
-|:------------------|----------:|----------:|
-| Middle Yuba River |  285162.7 |  54.00809 |
-| North Yuba River  |  318645.8 |  60.34958 |
-| South Yuba River  |  335796.8 |  63.59787 |
-| Yuba River        |  208890.4 |  39.56258 |
-
-Calculated using the sediment transport filters too
-
-``` r
-stream_lengths_filtered <- 
+stream_lengths_spawning_habitat <- 
   selected_streams |>
-  filter(comid %in% filter(spawning_context, spawning_filter_all)$comid) |>
-  group_by(gnis_name) |>
+  filter(spawning_filter_all) |>
+  group_by(river_name) |>
   summarize(length_ft = sum(st_length(geometry)) |> units::set_units("ft") |> units::drop_units(),
             length_mi = length_ft / 5280) |>
   st_drop_geometry()
 
-stream_lengths_filtered |> knitr::kable()
+stream_lengths_spawning_habitat |> knitr::kable()
 ```
 
-| gnis_name         | length_ft | length_mi |
+| river_name        | length_ft | length_mi |
 |:------------------|----------:|----------:|
-| Middle Yuba River |  67309.20 |  12.74796 |
-| North Yuba River  | 177490.65 |  33.61565 |
-| South Yuba River  | 124733.39 |  23.62375 |
-| Yuba River        |  99689.98 |  18.88068 |
+| Lower Yuba River  |  63167.75 | 11.963589 |
+| Middle Yuba River |  67309.20 | 12.747955 |
+| North Yuba River  | 177490.65 | 33.615653 |
+| South Yuba River  | 124733.39 | 23.623749 |
+| Yuba River        |  36522.23 |  6.917089 |
 
 Amount of spawning gravel and number of redds
 
@@ -204,8 +207,8 @@ Using the max value across all flows
 ``` r
 stream_spawning_areas <- 
   spawning_predictions |>
-  group_by(gnis_name) |>
-  summarize(across(c(total_length_ft, total_wua_ft2, wua_ft2_per_lf), max)) |>
+  group_by(river_name) |>
+  summarize(across(c(total_length_ft, total_wua_ft2, wua_ft2_per_lf), max), .groups="drop") |>
   mutate(spawn_area_ft2_1000 = total_wua_ft2 / 1000,
          spawn_area_acres = total_wua_ft2 / 43560,
          n_redds = total_wua_ft2 / 94) # 94 ft2 per redd
@@ -213,34 +216,30 @@ stream_spawning_areas <-
 stream_spawning_areas |> knitr::kable()
 ```
 
-| gnis_name         | total_length_ft | total_wua_ft2 | wua_ft2_per_lf | spawn_area_ft2_1000 | spawn_area_acres |   n_redds |
-|:------------------|----------------:|--------------:|---------------:|--------------------:|-----------------:|----------:|
-| Middle Yuba River |        134619.4 |       4191477 |       31.13575 |            4191.477 |         96.22307 |  44590.18 |
-| North Yuba River  |        323530.2 |      12513843 |       38.67906 |           12513.843 |        287.27831 | 133125.99 |
-| South Yuba River  |        249455.4 |      14061713 |       56.36965 |           14061.713 |        322.81252 | 149592.69 |
-| Yuba River        |        180964.6 |      13562229 |       75.93282 |           13562.229 |        311.34593 | 144279.03 |
+| river_name        | total_length_ft | total_wua_ft2 | wua_ft2_per_lf | spawn_area_ft2_1000 | spawn_area_acres |  n_redds |
+|:------------------|----------------:|--------------:|---------------:|--------------------:|-----------------:|---------:|
+| Lower Yuba River  |        63044.62 |       5186711 |       82.27048 |            5186.711 |        119.07051 | 55177.78 |
+| Middle Yuba River |        67309.71 |       2470952 |       36.71018 |            2470.952 |         56.72524 | 26286.72 |
+| North Yuba River  |       177500.00 |       8695682 |       48.98976 |            8695.682 |        199.62539 | 92507.25 |
+| South Yuba River  |       124727.69 |       5510415 |       44.17956 |            5510.415 |        126.50171 | 58621.43 |
+| Yuba River        |        36525.59 |       1945660 |       53.26840 |            1945.660 |         44.66620 | 20698.51 |
 
-Compare against estimates in the Yuba relicensing study
+## Compare against estimates in the Yuba relicensing study
+
+Import data
 
 ``` r
-read_csv(here::here("data-raw", "source", "spawning_data", "01_YSF-Habitat-Matrices-Report_table8_data.csv"), col_types = "cnnnnnnnnnnn") |>
+spawning_matrix_data <- read_csv(here::here("data-raw", "source", "spawning_data", "01_YSF-Habitat-Matrices-Report_table8_data.csv"), col_types = "cnnnnnnnnnnn") |>
   mutate(gnis_name = case_when(str_detect(reach, "North Yuba") ~ "North Yuba River",
                                str_detect(reach, "Middle Yuba") ~ "Middle Yuba River",
                                str_detect(reach, "South Yuba") ~ "South Yuba River",
                                TRUE ~ "Yuba River")) |>
-  group_by(gnis_name, year) |>
-  summarize(across(c(starts_with("length_"), starts_with("gravel_"), starts_with("redds_")), function(x) sum(x, na.rm=T))) |>
-  select(gnis_name, year, ends_with("_UT")) |>
-  group_by(gnis_name) |>
-  summarize(across(c(starts_with("length_"), starts_with("gravel_"), starts_with("redds_")), mean)) |>
-  transmute(gnis_name,
-            actual_length_mi = length_UT, # units are miles
-            actual_gravel_ac = gravel_UT * 1000 / 43560) |> # convert 1000 ft2 to ft2 to acres) |>
-  inner_join(stream_lengths_filtered |> transmute(gnis_name, predicted_length_mi = length_mi)) |>
-  inner_join(stream_spawning_areas |> select(gnis_name, predicted_spawning_ac = spawn_area_acres)) |>
-  mutate(ratio_length = (actual_length_mi / predicted_length_mi) |> num(digits = 2),
-         ratio_gravel = (actual_gravel_ac / predicted_spawning_ac) |> num(digits = 2)) |>
-  knitr::kable()
+  mutate(river_name = case_when(str_detect(reach, "North Yuba") ~ "North Yuba River",
+                               str_detect(reach, "Middle Yuba") ~ "Middle Yuba River",
+                               str_detect(reach, "South Yuba") ~ "South Yuba River",
+                               str_detect(reach, "Lower Yuba") ~ "Lower Yuba River",
+                               TRUE ~ "Yuba River")) |>
+  glimpse()
 ```
 
     ## Warning: One or more parsing issues, call `problems()` on your data frame for details,
@@ -248,14 +247,70 @@ read_csv(here::here("data-raw", "source", "spawning_data", "01_YSF-Habitat-Matri
     ##   dat <- vroom(...)
     ##   problems(dat)
 
-    ## `summarise()` has grouped output by 'gnis_name'. You can override using the
-    ## `.groups` argument.
-    ## Joining with `by = join_by(gnis_name)`
-    ## Joining with `by = join_by(gnis_name)`
+    ## Rows: 28
+    ## Columns: 13
+    ## $ reach           <chr> "North Yuba River above New Bullards Bar Reservoir", "…
+    ## $ year            <dbl> 2008, 2009, 2010, 2011, 2008, 2009, 2010, 2011, 2008, …
+    ## $ length_UO       <dbl> 0.0, 0.0, 6.6, 23.4, 3.3, 3.7, 4.6, 5.7, 0.0, 0.0, 0.0…
+    ## $ length_UT       <dbl> 7.7, 7.6, 24.0, 33.7, 7.5, 7.2, 9.8, 12.3, 0.0, 0.0, 0…
+    ## $ length_UT_butte <dbl> 11.4, 11.2, 25.5, 33.7, 8.5, 8.1, 11.4, 14.8, 0.0, 0.0…
+    ## $ gravel_UO       <dbl> 0, 0, 12, 195, 4, 5, 5, 10, 0, 0, 0, 0, NA, NA, NA, NA…
+    ## $ gravel_UT       <dbl> 17, 17, 197, 316, 19, 18, 25, 42, 0, 0, 0, 4, NA, NA, …
+    ## $ gravel_UT_butte <dbl> 29, 29, 202, 316, 22, 21, 36, 57, 0, 0, 0, 5, NA, NA, …
+    ## $ redds_UO        <dbl> 0, 0, 129, 2069, 44, 51, 55, 110, 0, 0, 0, 0, NA, NA, …
+    ## $ redds_UT        <dbl> 183, 179, 2094, 3358, 206, 190, 264, 451, 0, 0, 0, 40,…
+    ## $ redds_UT_butte  <dbl> 305, 304, 2153, 3358, 238, 224, 379, 606, 0, 0, 0, 48,…
+    ## $ gnis_name       <chr> "North Yuba River", "North Yuba River", "North Yuba Ri…
+    ## $ river_name      <chr> "North Yuba River", "North Yuba River", "North Yuba Ri…
 
-| gnis_name         | actual_length_mi | actual_gravel_ac | predicted_length_mi | predicted_spawning_ac | ratio_length | ratio_gravel |
-|:------------------|-----------------:|-----------------:|--------------------:|----------------------:|-------------:|-------------:|
-| Middle Yuba River |             9.20 |        0.5968779 |            12.74796 |              96.22307 |         0.72 |         0.01 |
-| North Yuba River  |            20.55 |        3.1393480 |            33.61565 |             287.27831 |         0.61 |         0.01 |
-| South Yuba River  |             0.75 |        0.0229568 |            23.62375 |             322.81252 |         0.03 |         0.00 |
-| Yuba River        |            25.70 |      175.8551423 |            18.88068 |             311.34593 |         1.36 |         0.56 |
+Summarize
+
+``` r
+spawning_matrix_summary <- 
+  spawning_matrix_data |>
+  group_by(river_name, year) |>
+  summarize(across(c(starts_with("length_"), starts_with("gravel_"), starts_with("redds_")), function(x) sum(x, na.rm=T)), .groups="drop") |>
+  select(river_name, year, ends_with("_UT")) |>
+  group_by(river_name) |>
+  summarize(across(c(starts_with("length_"), starts_with("gravel_"), starts_with("redds_")), mean)) |>
+  transmute(river_name,
+            actual_length_mi = length_UT, # units are miles
+            actual_gravel_ac = gravel_UT * 1000 / 43560) # convert 1000 ft2 to ft2 to acres) |>
+spawning_matrix_summary |> knitr::kable()
+```
+
+| river_name        | actual_length_mi | actual_gravel_ac |
+|:------------------|-----------------:|-----------------:|
+| Lower Yuba River  |            24.00 |      175.7174013 |
+| Middle Yuba River |             9.20 |        0.5968779 |
+| North Yuba River  |            20.55 |        3.1393480 |
+| South Yuba River  |             0.75 |        0.0229568 |
+| Yuba River        |             1.70 |        0.1377410 |
+
+Compare
+
+``` r
+spawning_matrix_summary |>
+  inner_join(stream_lengths_spawning_habitat |> 
+               group_by(river_name) |> 
+               summarize(predicted_length_mi = sum(length_mi), .groups="drop"), 
+             by=join_by(river_name)) |>
+  inner_join(stream_spawning_areas |> 
+               group_by(river_name) |> 
+               summarize(predicted_spawning_ac = sum(spawn_area_acres), .groups="drop"), 
+             by=join_by(river_name)) |>
+  mutate(ratio_length = (predicted_length_mi / actual_length_mi) |> num(digits = 2),
+         ratio_gravel = (predicted_spawning_ac / actual_gravel_ac) |> num(digits = 2)) |>
+  select(river_name, 
+         actual_length_mi, predicted_length_mi, ratio_length,
+         actual_gravel_ac, predicted_spawning_ac, ratio_gravel) |>
+  knitr::kable()
+```
+
+| river_name        | actual_length_mi | predicted_length_mi | ratio_length | actual_gravel_ac | predicted_spawning_ac | ratio_gravel |
+|:------------------|-----------------:|--------------------:|-------------:|-----------------:|----------------------:|-------------:|
+| Lower Yuba River  |            24.00 |           11.963589 |         0.50 |      175.7174013 |             119.07051 |         0.68 |
+| Middle Yuba River |             9.20 |           12.747955 |         1.39 |        0.5968779 |              56.72524 |        95.04 |
+| North Yuba River  |            20.55 |           33.615653 |         1.64 |        3.1393480 |             199.62539 |        63.59 |
+| South Yuba River  |             0.75 |           23.623749 |        31.50 |        0.0229568 |             126.50171 |      5510.41 |
+| Yuba River        |             1.70 |            6.917089 |         4.07 |        0.1377410 |              44.66620 |       324.28 |

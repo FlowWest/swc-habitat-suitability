@@ -600,13 +600,18 @@ selected_watershed <- reactiveValues(object_id = NA,
 
   # for comid only
   streamgage_drc <- reactive({
-    # TODO SCALE THIS BASED ON COMID DA
+    # TODO: SCALE THIS BASED ON COMID DA
 
     if (most_recent_map_click$type == "comid") {
 
-      active_reach_gradient_class <- (attr |>
-                                        filter(comid == selected_point$comid) |>
-                                        pull(hqt_gradient_class))[[1]]
+      active_reach_attr <- attr |>
+        filter(comid == selected_point$comid) |>
+        as.list()
+
+      active_streamgage_attr <-
+        streamgage_attr |>
+        filter(station_id == input$streamgage_id) |>
+        as.list()
 
       message(paste0("pulling streamgage_drc for ", input$streamgage_id,
               " ", input$selected_run,
@@ -619,22 +624,30 @@ selected_watershed <- reactiveValues(object_id = NA,
                  (run == input$selected_run) &
                  (habitat == input$habitat_type) &
                  (wy_group == input$selected_wyt)) |>
+        unnest(data) |>
         glimpse()
 
-      message(paste("=", nrow(active_streamgage_data), "rows"))
 
-      if (nrow(active_streamgage_data) > 0) {
+      if (length(active_streamgage_data) > 0) {
 
-          (active_streamgage_data |> pull(data))[[1]] |>
+        active_reach_info$multiplier <-
+          (active_reach_attr$da_area_sq_km / active_streamgage_attr$da_gage) *
+          (active_reach_attr$da_ppt_mean_mm / active_streamgage_attr$pc_gage)
+
+        multiplier <- if (input$scale_flow) active_reach_info$multiplier else 1
+
+          message(paste("scaling streamgage flow data by", multiplier))
+
+        active_streamgage_data |>
+            mutate(model_q = model_q * multiplier) |>
             mutate(dhsi_selected = case_when(
               input$habitat_type == "spawning" ~ durhsi_spawning,
-              active_reach_gradient_class == "Valley Lowland" ~ durhsi_rearing_vl,
-              TRUE ~ durhsi_rearing_vf)) |>
-            glimpse()
+              active_reach_attr$hqt_gradient_class == "Valley Lowland" ~ durhsi_rearing_vl,
+              TRUE ~ durhsi_rearing_vf))
 
         } else {
 
-          tibble(model_q = list(), dhsi_selected = list(), avg_max_days_inundated = list())
+          tibble(q = list(), dhsi_selected = list(), avg_max_days_inundated = list())
 
         }
       }
@@ -644,7 +657,8 @@ selected_watershed <- reactiveValues(object_id = NA,
   # ACTIVE STREAMGAGE SELECTOR
   active_reach_info <- reactiveValues(is_mainstem = FALSE,
                                       watershed_name = NA,
-                                      river_name = NA)
+                                      river_name = NA,
+                                      multiplier = NA)
 
   observe({
     if (most_recent_map_click$type == "comid") {
@@ -709,6 +723,13 @@ selected_watershed <- reactiveValues(object_id = NA,
       message("no stream gages")
     }
   })
+
+    output$flowscale_toggle <- renderUI({
+      if (most_recent_map_click$type == "comid") {
+        title <- paste0("Scale Flow by Drainage Area and Precipitation Ratio = ", round(active_reach_info$multiplier, 2))
+        checkboxInput("scale_flow", title, value=T)
+      }
+    })
 
     streamgage_options_geom_labelled <- reactive({
       if((nrow(streamgage_options_geom()) > 0) & (length(input$streamgage_id) > 0)){

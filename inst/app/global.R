@@ -206,16 +206,17 @@ flow_scale_breaks <- list(rearing = c(0, 1, 3, 10, 30, 100, 300),
 
 pal <- function(x, type = "rearing") {
   if(type == "rearing") {
-    breaks_scaled <- scales::rescale(habistat::semiIHS(flow_scale_breaks[[type]]))
-    values_scaled <- scales::rescale(habistat::semiIHS(x))
+    breaks_scaled <- scales::rescale(habistat::semiIHS(flow_scale_breaks$rearing))
+    values_scaled <- scales::rescale(habistat::semiIHS(x), from = range(habistat::semiIHS(flow_scale_breaks$rearing)))
   } else if(type == "spawning") {
-    breaks_scaled <- scales::rescale(flow_scale_breaks[[type]])
-    values_scaled <- scales::rescale(x)
+    breaks_scaled <- scales::rescale(flow_scale_breaks$spawning)
+    values_scaled <- scales::rescale(x, from = range(flow_scale_breaks$spawning))
   }
   cut(x = values_scaled,
       breaks = c(-Inf, breaks_scaled[2:length(breaks_scaled)], Inf),
       labels = flow_scale_colors[[type]]) |> as.character()
 }
+
 
 add_color_scale <- function(g, type="rearing", ...) {
   g + scale_color_gradientn(name = "WUA per LF",

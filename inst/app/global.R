@@ -103,10 +103,6 @@ geom <- get_data(flowline_geom, package = "habistat") |>
 
 gc() # garbage collect after loading from habistat package
 
-#predictions_summary <- predictions |>
-#  group_by(watershed_level_3, flow_cfs, reach_length_ft) |>
-#  summarize(across(starts_with("wua_per_lf_pred_"), function(x) sum(x * reach_length_ft) / sum(reach_length_ft)))
-
 watersheds <- get_data(cv_watersheds, package = "habistat") |>
   group_by(watershed_level_1, watershed_level_2, watershed_level_3) |> #, range_pisces) |>
   summarize(.groups = "drop") |>
@@ -122,14 +118,18 @@ watersheds <- get_data(cv_watersheds, package = "habistat") |>
                                           paste0("<br />", watershed_level_3, " Subwatershed"),
                                           "")))
 
+cv_watersheds_flow_xw <- get_data(cv_watersheds_flow_xw, package = "habistat")
+
 mainstems <- get_data(cv_mainstems, package = "habistat") |>
-  group_by(river_group,river_cvpia) |> #, range_pisces) |>
+  group_by(river_group, river_cvpia) |> #, range_pisces) |>
   summarize(.groups = "drop") |>
   st_union(by_feature=T) |>
   st_transform("+proj=longlat +datum=NAD83") |>
   st_set_crs("+proj=longlat +datum=WGS84") |> # for display purposes only
   mutate(mainstem_id = paste0("mainstem_", row_number()),
          mainstem_label = paste0(river_cvpia))
+
+cv_mainstems_flow_xw <- get_data(cv_mainstems_flow_xw, package = "habistat")
 
 gc()
 
@@ -153,7 +153,9 @@ gc() # garbage collect after loading from habistat package
 # STREAMGAGES ------------------------------------------------------------------
 
 streamgage_attr <- get_data(streamgage_attr, package = "habistat") |>
+  inner_join(get_data(streamgage_da_attr, package = "habistat"), by = join_by(station_id)) |>
   transmute(river_group, river_cvpia, station_id,
+            gage_comid, da_gage, pc_gage,
             station_label = glue::glue("{str_to_upper(station_id)}: {str_to_upper(name)} ({min_wy}-{max_wy})"))
 
 streamgage_pts <- get_data(streamgage_geom, package = "habistat") |>
@@ -163,6 +165,13 @@ streamgage_pts <- get_data(streamgage_geom, package = "habistat") |>
 
 streamgages <- streamgage_attr |>
   select(river_cvpia, station_id, station_label) |>
+  nest(data = c(station_id, station_label)) |>
+  mutate(data = map(data, function(x) deframe(x) |> as.list())) |>
+  deframe()
+
+streamgages_by_watershed <- streamgage_attr |>
+  inner_join(attr |> select(comid, watershed_level_3), by=join_by(gage_comid == comid)) |>
+  select(watershed_level_3, station_id, station_label) |>
   nest(data = c(station_id, station_label)) |>
   mutate(data = map(data, function(x) deframe(x) |> as.list())) |>
   deframe()
@@ -196,10 +205,11 @@ flow_scale_breaks <- list(rearing = c(0, 1, 3, 10, 30, 100, 300),
                           spawning = c(0, 20, 40, 60, 80, 100, 120))
 
 pal <- function(x, type = "rearing") {
-    breaks_scaled <- scales::rescale(flow_scale_breaks[[type]])
   if(type == "rearing") {
+    breaks_scaled <- scales::rescale(habistat::semiIHS(flow_scale_breaks[[type]]))
     values_scaled <- scales::rescale(habistat::semiIHS(x))
   } else if(type == "spawning") {
+    breaks_scaled <- scales::rescale(flow_scale_breaks[[type]])
     values_scaled <- scales::rescale(x)
   }
   cut(x = values_scaled,
@@ -223,3 +233,15 @@ add_color_scale <- function(g, type="rearing", ...) {
 # before deploying shiny app, install package from github:
 # options(timeout=600)
 # devtools::install_github("FlowWest/swc-habitat-suitability@26-shiny-app-interface-fixes")
+
+scale_fsa <- function(data, multiplier, .wua_var = selected_wua, .flow_var = flow_cfs) {
+  data |>
+    expand_grid(scaled = c(FALSE, TRUE)) |>
+    mutate({{.flow_var}} := if_else(scaled, {{.flow_var}} * multiplier, {{.flow_var}})) |>
+    arrange({{.flow_var}}) |>
+    mutate({{.wua_var}} := if_else(scaled, NA, {{.wua_var}})) |>
+    mutate({{.wua_var}} := zoo::na.approx({{.wua_var}}, x = {{.flow_var}}, na.rm=F, rule=2)) |>
+    filter(scaled) |>
+    select(-scaled) |>
+    ungroup()
+}

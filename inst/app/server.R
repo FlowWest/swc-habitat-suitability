@@ -245,6 +245,10 @@ function(input, output, session){
         geom_line(aes(y = !!sym(paste0(input$wua_units,"_pred_SN")), color="Scale-Normalized", linetype = "Unscaled")) + #, linetype=if_else(habitat=="rearing","Prior BFC Removal", "No BFC Removal"))) +
         #geom_line(aes(y = wua_per_lf_pred_SN_ph_bfc_rm, color="Scale-Normalized", linetype="Post-Model BFC Removal")) +
         #geom_line(data=duration_curve(), aes(x = q, y = durwua, linetype="Duration Analysis")) +
+        geom_line(data=duration_curve(), aes(x = q, y = durwua, linetype="Duration Scaled", color = case_when(
+          input$wua_var == "wua_per_lf_pred_SD" ~ "Scale-Dependent",
+          input$wua_var == "wua_per_lf_pred_SN" ~ "Scale-Normalized",
+          input$wua_var == "wua_per_lf_actual" ~ "Actual"))) +
         scale_x_log10(labels = scales::label_comma()) + annotation_logticks(sides = "b") +
         scale_y_continuous(limits = c(0, NA)) +
         theme_minimal() + theme(panel.grid.minor = element_blank(), legend.position = "top", legend.box="vertical", text=element_text(size=21)) +
@@ -594,44 +598,46 @@ selected_watershed <- reactiveValues(object_id = NA,
 
   # DURATION ANALYSIS ----------------------------------------------------------
 
+  # for comid only
   streamgage_drc <- reactive({
+    # TODO SCALE THIS BASED ON COMID DA
+
     if (most_recent_map_click$type == "comid") {
-    active_reach_gradient_class <- (attr |>
-                                      filter(comid == selected_point$comid) |>
-                                      pull(hqt_gradient_class))[[1]]
-    } else if (most_recent_map_click$type == "mainstem") {
-      # TODO: FIX (this is a placeholder using VF for all)
-      active_reach_gradient_class <- "Valley Foothill"
-    }
 
-    message(paste0("pulling streamgage_drc for ", input$streamgage_id,
-            " ", input$selected_run,
-            " ", input$habitat_type,
-            " ", input$selected_wyt))
+      active_reach_gradient_class <- (attr |>
+                                        filter(comid == selected_point$comid) |>
+                                        pull(hqt_gradient_class))[[1]]
 
-    active_streamgage_data <-
-      get_data(streamgage_duration_rating_curves, package = "habistat") |>
-      filter((station_id == input$streamgage_id) &
-               (run == input$selected_run) &
-               (habitat == input$habitat_type) &
-               (wy_group == input$selected_wyt)) |>
-      glimpse()
-    message(paste("=", nrow(active_streamgage_data), "rows"))
+      message(paste0("pulling streamgage_drc for ", input$streamgage_id,
+              " ", input$selected_run,
+              " ", input$habitat_type,
+              " ", input$selected_wyt))
 
-    if (nrow(active_streamgage_data) > 0) {
-
-      (active_streamgage_data |> pull(data))[[1]] |>
-        mutate(dhsi_selected = case_when(
-          input$habitat_type == "spawning" ~ durhsi_spawning,
-          active_reach_gradient_class == "Valley Lowland" ~ durhsi_rearing_vl,
-          TRUE ~ durhsi_rearing_vf)) |>
+      active_streamgage_data <-
+        get_data(streamgage_duration_rating_curves, package = "habistat") |>
+        filter((station_id == input$streamgage_id) &
+                 (run == input$selected_run) &
+                 (habitat == input$habitat_type) &
+                 (wy_group == input$selected_wyt)) |>
         glimpse()
 
-    } else {
+      message(paste("=", nrow(active_streamgage_data), "rows"))
 
-      tibble(model_q = list(), dhsi_selected = list(), avg_max_days_inundated = list())
+      if (nrow(active_streamgage_data) > 0) {
 
-    }
+          (active_streamgage_data |> pull(data))[[1]] |>
+            mutate(dhsi_selected = case_when(
+              input$habitat_type == "spawning" ~ durhsi_spawning,
+              active_reach_gradient_class == "Valley Lowland" ~ durhsi_rearing_vl,
+              TRUE ~ durhsi_rearing_vf)) |>
+            glimpse()
+
+        } else {
+
+          tibble(model_q = list(), dhsi_selected = list(), avg_max_days_inundated = list())
+
+        }
+      }
 
   })
 
@@ -664,6 +670,9 @@ selected_watershed <- reactiveValues(object_id = NA,
     if(active_reach_info$is_mainstem) {
       message(paste("pulling streamgage options for", active_reach_info$river_name))
       streamgages[[active_reach_info$river_name]]
+    } else if (most_recent_map_click$type == "watershed") {
+      message(paste("pulling streamgage options for", active_reach_info$watershed_name))
+      streamgages_by_watershed[[active_reach_info$watershed_name]]
     } else {
       list()
     }
@@ -688,7 +697,7 @@ selected_watershed <- reactiveValues(object_id = NA,
   })
 
     output$streamgage_selector <- renderUI({
-    if(active_reach_info$is_mainstem & length(streamgage_options_geom()$station_id) > 0) {
+    if(length(streamgage_options_geom()$station_id) > 0) {
       selectInput(inputId = "streamgage_id",
                   label = "Select Gage for Duration Analysis",
                   choices = setNames(names(streamgage_options()), streamgage_options()),
@@ -742,60 +751,133 @@ selected_watershed <- reactiveValues(object_id = NA,
   # DURATION CURVE CALCULATION
 
   duration_curve <- reactive({
-    #TODO add error handling that returns empty data frame if streamgage is not selected, rahter than erroring out
-
-    message("fsa")
+    #TODO: When the comid resets, reset the streamgage selection don't keep using the old one
+    if (length(input$streamgage_id) > 0) {
 
     if (most_recent_map_click$type == "comid") {
+
       fsa <-
         predictions |>
         filter(comid == selected_point$comid) |>
         filter(habitat == input$habitat_type) |>
         transmute(flow_cfs, selected_wua = !!sym(wua_var())) |>
         glimpse()
+
+        if (nrow(streamgage_drc()) > 0) {
+
+          message("duration hsi curve")
+
+          duration_curve_result <-
+            habistat::duration_apply_dhsi_to_fsa_curve(
+            fsa = fsa,
+            fsa_q = flow_cfs,
+            fsa_wua = selected_wua,
+            drc = streamgage_drc(),
+            drc_q = model_q,
+            drc_dhsi = dhsi_selected) |>
+            glimpse()
+
+        } else {
+
+          duration_curve_result <- tibble(q = list(), durwua = list())
+
+        }
+
     } else if (most_recent_map_click$type == "mainstem") {
-      fsa <-
-        predictions_mainstem |>
-        filter(river_cvpia == selected_mainstem$river_name) |>
-        filter(habitat == input$habitat_type) |>
-        transmute(flow_cfs, selected_wua = !!sym(wua_var())) |>
-        glimpse()
+
+      # fsa <-
+      #   predictions_mainstem |>
+      #   filter(river_cvpia == selected_mainstem$river_name) |>
+      #   filter(habitat == input$habitat_type) |>
+      #   transmute(flow_cfs, selected_wua = !!sym(wua_var())) |>
+      #   glimpse()
+
     } else if (most_recent_map_click$type == "watershed") {
-      fsa <-
-        predictions_watershed |>
+
+      fsas <-
+        predictions |>
         filter(watershed_level_3 == selected_watershed$watershed_name) |>
         filter(habitat == input$habitat_type) |>
-        transmute(flow_cfs, selected_wua = !!sym(wua_var())) |>
-        glimpse()
+        transmute(watershed_level_3, comid, flow_idx, flow_cfs, reach_length_ft, selected_wua = !!sym(wua_var())) |>
+        nest(fsa_raw = c(flow_idx, flow_cfs, reach_length_ft, selected_wua), .by = c(watershed_level_3, comid)) |>
+        inner_join(cv_watersheds_flow_xw, by=join_by(watershed_level_3, comid)) |>
+        mutate(fsa_scaled = pmap(list(fsa_raw, multiplier), function(x, y) scale_fsa(x, y, .wua_var = selected_wua, .flow_var = flow_cfs)))
+
+      drcs <-
+        get_data(streamgage_duration_rating_curves, package = "habistat") |>
+        filter((station_id == input$streamgage_id) &
+                 (run == input$selected_run) &
+                 (habitat == input$habitat_type) &
+                 (wy_group == input$selected_wyt)) |>
+        rename(drc_raw = data) |>
+        inner_join(streamgage_attr, by=join_by(station_id)) |>
+        expand_grid(comid = fsas$comid) |>
+        inner_join(cv_watersheds_flow_xw |>
+                     select(comid, watershed_level_3, da_reach, pc_reach),
+                   by=join_by(comid)) |>
+        mutate(multiplier = (da_reach / da_gage) * (pc_reach / pc_gage)) |>
+        mutate(drc_scaled =
+                 pmap(list(drc_raw, multiplier),
+                      function(drc_raw, multiplier) {
+                        drc_raw |> mutate(model_q = model_q * multiplier)
+                      }))
+
+      joined <- inner_join(fsas, drcs, by=join_by(comid, watershed_level_3, da_reach, pc_reach)) |>
+        inner_join(attr |> select(comid, hqt_gradient_class), by=join_by(comid)) |>
+        mutate(result = pmap(list(fsa_scaled, drc_scaled, hqt_gradient_class),
+                             function(fsa, drc, hqt) {
+          duration_applied <-
+            habistat::duration_apply_dhsi_to_fsa_curve(
+              fsa = fsa,
+              fsa_q = flow_cfs,
+              fsa_wua = selected_wua,
+              drc = drc,
+              drc_q = model_q,
+              drc_dhsi = durhsi_rearing_vl) #!!sym(case_when(
+                                            # input$habitat_type == "spawning" ~ "durhsi_spawning",
+                                            # hqt == "Valley Lowland" ~ "durhsi_rearing_vl",
+                                            # TRUE ~ "durhsi_rearing_vf")))
+              # TODO: Fix vl/vf lookup
+
+          fsa |>
+            left_join(duration_applied |> select(flow_cfs = q, durwua), by=join_by(flow_cfs)) |>
+            mutate(durwua = zoo::na.approx(durwua, x = flow_cfs, na.rm=F, rule=2))
+
+        })) |>
+        select(-fsa_raw, -drc_raw, -fsa_scaled, -drc_scaled) |>
+        unnest(result)
+
+      message(paste("aggregated duration curve for watershed", active_reach_info$watershed_name))
+
+      duration_curve_result <-
+        joined |>
+        group_by(habitat, run, wy_group,
+                 watershed_level_3, q = flow_idx) |> # better to use the float version
+        summarize(durwua = sum(durwua * reach_length_ft) / sum(reach_length_ft),
+                  #wua_per_lf_pred = sum(wua_per_lf_pred * reach_length_ft) / sum(reach_length_ft),
+                  #wua_acres_pred = sum(wua_per_lf_pred * reach_length_ft) / 43560,
+                  #wua_per_lf_pred_dur = sum(wua_per_lf_pred_dur * reach_length_ft) / sum(reach_length_ft),
+                  #wua_acres_pred_dur = sum(wua_per_lf_pred_dur * reach_length_ft) / 43560,
+                  .groups="drop")
+
     } else {
+
       fsa <- tibble(flow_cfs = c(),
                     selected_wua = c())
     }
-
-    if (length(input$streamgage_id) > 0) {
-    if (nrow(streamgage_drc()) > 0) {
-
-      message("duration hsi curve")
-      habistat::duration_apply_dhsi_to_fsa_curve(
-        fsa = fsa,
-        fsa_q = flow_cfs,
-        fsa_wua = selected_wua,
-        drc = streamgage_drc(),
-        drc_q = model_q,
-        drc_dhsi = dhsi_selected) |>
-        glimpse()
-
     } else {
 
-        tibble(q = list(), durwua = list())
+      duration_curve_result <- tibble(q = list(), durwua = list())
 
-    }} else {
-      tibble(q = list(), durwua = list())
     }
+
+  return(duration_curve_result)
+
   })
 
   output$dur_plot <- renderPlot({
-    if((nrow(streamgage_drc())>0) & (nrow(duration_curve()) > 0)) {
+    if(most_recent_map_click$type == "comid") {
+      if((nrow(streamgage_drc())>0) & (nrow(duration_curve()) > 0)) {
       bind_rows("days" = streamgage_drc() |> transmute(x = model_q, y = avg_max_days_inundated),
                 "dhsi" = streamgage_drc() |> transmute(x = model_q, y = dhsi_selected),
                 "wua" = bind_rows("wua" = duration_curve() |> transmute(x = q, y = wua),
@@ -826,8 +908,12 @@ selected_watershed <- reactiveValues(object_id = NA,
                                          "ref" = "dashed",
                                          "Original" = "solid",
                                          "Duration-Weighted" = "dashed"))
-    } else {
-      ggplot()
+      } else {
+        ggplot()
+      }
+    } else if(most_recent_map_click$type == "watershed") {
+      duration_curve() |>
+        ggplot() + geom_line(aes(x = q, y = durwua))
     }
 
 #    plt_days <-

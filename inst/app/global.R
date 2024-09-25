@@ -143,7 +143,7 @@ predictions_watershed <- get_data(wua_predicted_cv_watersheds, package = "habist
 predictions_mainstem <- get_data(wua_predicted_cv_mainstems, package = "habistat") |>
   ungroup() |>
 #  select(watershed_level_3, flow_idx, flow_cfs, habitat, model_id = model_name, wua_per_lf_pred, wua_acres_pred) |>
-  select(river_group, river_cvpia, flow_idx, flow_cfs, habitat, model_id = model_name, wua_per_lf_pred, wua_acres_pred) |>
+  select(river_cvpia, flow_idx, flow_cfs, habitat, model_id = model_name, wua_per_lf_pred, wua_acres_pred) |>
   pivot_wider(names_from = model_id,
               values_from = c(wua_per_lf_pred, wua_acres_pred),
               names_glue = c("{.value}_{model_id}"))

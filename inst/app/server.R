@@ -153,7 +153,7 @@ function(input, output, session){
     } else if (most_recent_map_click$type == "watershed") {
       active_predictions_watershed() |>
         select(any_of(names(var_names))) |>
-        filter(watershed_level_3 == selected_watershed$watershed_id) |>
+        filter(watershed_level_3 == selected_watershed$watershed_name) |>
         mutate(across(where(is.numeric), function(x) signif(x, 3) |> as.character(x))) |>
         pivot_longer(everything()) |>
         mutate(name = var_names[name])

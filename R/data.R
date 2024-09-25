@@ -46,6 +46,26 @@
 #' cv_watersheds |> ggplot2::ggplot() + ggplot2::geom_sf()
 "cv_watersheds"
 
+#' @name wua_predicted_cv_mainstems
+#' @title WUA/LF by CV Mainstem by Flow (predicted by statistical model)
+#' @examples
+#' wua_predicted_cv_mainstems |> pillar::glimpse()
+"wua_predicted_cv_mainstems"
+
+#' @name wua_predicted_cv_watersheds
+#' @title WUA/LF by CV Watershed by Flow (predicted by statistical model)
+#' @examples
+#' wua_predicted_cv_watersheds |> pillar::glimpse()
+"wua_predicted_cv_watersheds"
+
+#' @name cv_mainstems_flow_xw
+#' @title Flow Area Crosswalk for CV Mainstems
+"cv_mainstems_flow_xw"
+
+#' @name cv_watersheds_flow_xw
+#' @title Flow Area Crosswalk for CV Watersheds
+"cv_watersheds_flow_xw"
+
 #' @name streamgage_attr
 #' @title CDEC Mainstem Streamgage Attributes
 "streamgage_attr"
@@ -57,6 +77,10 @@
 #' @name streamgage_duration_rating_curves
 #' @title CDEC Mainstem Streamgage Duration Rating Curves
 "streamgage_duration_rating_curves"
+
+#' @name streamgage_da_attr
+#' @title CDEC Mainstem Streamgage Drainage Area Attributes
+"streamgage_da_attr"
 
 #' @name suitability_hsi_vel_spawning
 #' @title Velocity suitability criteria for spawning by run

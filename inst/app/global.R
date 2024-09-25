@@ -123,7 +123,7 @@ watersheds <- get_data(cv_watersheds, package = "habistat") |>
                                           "")))
 
 mainstems <- get_data(cv_mainstems, package = "habistat") |>
-  group_by(river_group,river_cvpia) |> #, range_pisces) |>
+  group_by(river_group, river_cvpia) |> #, range_pisces) |>
   summarize(.groups = "drop") |>
   st_union(by_feature=T) |>
   st_transform("+proj=longlat +datum=NAD83") |>
@@ -143,7 +143,7 @@ predictions_watershed <- get_data(wua_predicted_cv_watersheds, package = "habist
 predictions_mainstem <- get_data(wua_predicted_cv_mainstems, package = "habistat") |>
   ungroup() |>
 #  select(watershed_level_3, flow_idx, flow_cfs, habitat, model_id = model_name, wua_per_lf_pred, wua_acres_pred) |>
-  select(river_group, river_cvpia, flow_idx, flow_cfs, habitat, model_id = model_name, wua_per_lf_pred, wua_acres_pred) |>
+  select(river_cvpia, flow_idx, flow_cfs, habitat, model_id = model_name, wua_per_lf_pred, wua_acres_pred) |>
   pivot_wider(names_from = model_id,
               values_from = c(wua_per_lf_pred, wua_acres_pred),
               names_glue = c("{.value}_{model_id}"))
@@ -196,11 +196,12 @@ flow_scale_breaks <- list(rearing = c(0, 1, 3, 10, 30, 100, 300),
                           spawning = c(0, 20, 40, 60, 80, 100, 120))
 
 pal <- function(x, type = "rearing") {
-    breaks_scaled <- scales::rescale(flow_scale_breaks[[type]])
   if(type == "rearing") {
-    values_scaled <- scales::rescale(habistat::semiIHS(x))
+    breaks_scaled <- scales::rescale(habistat::semiIHS(flow_scale_breaks$rearing))
+    values_scaled <- scales::rescale(habistat::semiIHS(x), from = range(habistat::semiIHS(flow_scale_breaks$rearing)))
   } else if(type == "spawning") {
-    values_scaled <- scales::rescale(x)
+    breaks_scaled <- scales::rescale(flow_scale_breaks$spawning)
+    values_scaled <- scales::rescale(x, from = range(flow_scale_breaks$spawning))
   }
   cut(x = values_scaled,
       breaks = c(-Inf, breaks_scaled[2:length(breaks_scaled)], Inf),

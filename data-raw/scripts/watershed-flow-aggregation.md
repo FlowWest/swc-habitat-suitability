@@ -39,6 +39,7 @@ library(sf)
 
 ``` r
 library(habistat)
+library(patchwork)
 theme_set(theme_minimal())
 ```
 
@@ -353,8 +354,122 @@ habistat::duration_apply_dhsi_to_fsa_curve(
 ### Example application to watershed-level flow-to-suitable-area curve
 
 ``` r
-# CONTINUE HERE
+scale_fsa <- function(data, multiplier, .wua_var = wua_per_lf_pred, .flow_var = flow_cfs) {
+  data |> 
+  expand_grid(scaled = c(FALSE, TRUE)) |>
+  mutate({{.flow_var}} := if_else(scaled, {{.flow_var}} * multiplier, {{.flow_var}})) |>
+  arrange({{.flow_var}}) |>
+  mutate({{.wua_var}} := if_else(scaled, NA, {{.wua_var}})) |>
+  mutate({{.wua_var}} := zoo::na.approx({{.wua_var}}, x = {{.flow_var}}, na.rm=F, rule=2)) |>
+  filter(scaled) |>
+  select(-scaled) |>
+  ungroup() 
+}
 ```
+
+``` r
+selected_watershed <- "Deer Creek"
+selected_gage <- "dcv"
+selected_habitat <- "rearing"
+selected_model <- "SD"
+selected_run <- "fall"
+selected_wy_type <- "Dry"
+
+fsas <-
+  habistat::wua_predicted |>
+  filter((watershed_level_3 == selected_watershed) &
+           (model_name == selected_model) & 
+           (habitat == selected_habitat)) |>
+  nest(fsa_raw = c(flow_idx, flow_cfs, reach_length_ft, wua_per_lf_pred)) |>
+  inner_join(cv_watersheds_flow_xw, by=join_by(watershed_level_3, comid)) |>
+  mutate(fsa_scaled = pmap(list(fsa_raw, multiplier), scale_fsa))
+
+drcs <-
+  habistat::streamgage_duration_rating_curves |>
+  filter((station_id == selected_gage) & 
+           (habitat == selected_habitat) & 
+           (run == selected_run) & 
+           (wy_group == selected_wy_type)) |>
+    rename(drc_raw = data) |>
+    inner_join(streamgage_da_attr, by=join_by(station_id)) |>
+    expand_grid(comid = fsas$comid) |>
+    inner_join(cv_watersheds_flow_xw |> 
+                 select(comid, watershed_level_3, da_reach, pc_reach), 
+               by=join_by(comid)) |>
+    mutate(drc_scaled = 
+             pmap(list(drc_raw, da_gage, pc_gage), 
+                  function(drc_raw, da_gage, pc_gage) {
+                        drc_raw |>
+                          mutate(model_q = model_q * 
+                                   (da_reach / da_gage) * 
+                                   (pc_reach / pc_gage))
+                    }))
+```
+
+    ## Warning: There were 57 warnings in `mutate()`.
+    ## The first warning was:
+    ## ℹ In argument: `model_q = model_q * (da_reach/da_gage) * (pc_reach/pc_gage)`.
+    ## Caused by warning:
+    ## ! There were 2 warnings in `mutate()`.
+    ## The first warning was:
+    ## ℹ In argument: `model_q = model_q * (da_reach/da_gage) * (pc_reach/pc_gage)`.
+    ## Caused by warning in `model_q * (da_reach / da_gage)`:
+    ## ! longer object length is not a multiple of shorter object length
+    ## ℹ Run `dplyr::last_dplyr_warnings()` to see the 1 remaining warning.
+    ## ℹ Run `dplyr::last_dplyr_warnings()` to see the 56 remaining warnings.
+
+``` r
+joined <- inner_join(fsas, drcs, by=join_by(comid, watershed_level_3, habitat, da_reach, pc_reach)) |>
+  mutate(result = map2(fsa_scaled, drc_scaled, function(fsa, drc) {
+    duration_applied <- 
+      habistat::duration_apply_dhsi_to_fsa_curve(
+        fsa = fsa,
+        fsa_q = flow_cfs,
+        fsa_wua = wua_per_lf_pred,
+        drc = drc,
+        drc_q = model_q,
+        drc_dhsi = durhsi_rearing_vf)
+    fsa |>
+      left_join(duration_applied |> 
+                   select(flow_cfs = q, wua_per_lf_pred_dur = durwua),
+                 by=join_by(flow_cfs)) |>
+      mutate(wua_per_lf_pred_dur = zoo::na.approx(wua_per_lf_pred_dur, x = flow_cfs, na.rm=F, rule=2))
+  })) |>
+  select(-fsa_raw, -drc_raw, -fsa_scaled, -drc_scaled) |>
+  unnest(result)
+
+joined |>
+  ggplot(aes(x = flow_cfs)) +
+  facet_wrap(~paste0(comid,"\n",round(da_reach), " km2"), scales = "free_x") +
+  geom_line(aes(y = wua_per_lf_pred, color = "original")) +
+  geom_line(aes(y = wua_per_lf_pred_dur, color = "duration")) +
+  theme(panel.grid.minor = element_blank()) +
+  xlab("Flow (cfs)") + scale_x_continuous(breaks = scales::breaks_extended(n=3)) + ylab("Suitable Habitat Area (ft2) per LF")
+```
+
+![](watershed-flow-aggregation_files/figure-gfm/example-watershed-1.png)<!-- -->
+
+``` r
+summarized <-
+  joined |> 
+  group_by(model_name, habitat, run, wy_group,
+           watershed_level_3, flow_idx) |>
+  summarize(wua_per_lf_pred = sum(wua_per_lf_pred * reach_length_ft) / sum(reach_length_ft),
+            wua_acres_pred = sum(wua_per_lf_pred * reach_length_ft) / 43560, 
+            wua_per_lf_pred_dur = sum(wua_per_lf_pred_dur * reach_length_ft) / sum(reach_length_ft),
+            wua_acres_pred_dur = sum(wua_per_lf_pred_dur * reach_length_ft) / 43560, 
+            .groups="drop")
+
+summarized |>
+  ggplot(aes(x = flow_idx)) +
+  geom_line(aes(y = wua_acres_pred, color = "original")) +
+  geom_line(aes(y = wua_acres_pred_dur, color = "duration")) +
+  ggtitle(glue::glue("{selected_watershed} watershed total calculated using gage {selected_gage}")) +
+  scale_x_log10() + theme(panel.grid.minor = element_blank()) +
+  xlab("Flow (cfs) at Outlet") + ylab("Suitable Habitat Area (acres)")
+```
+
+![](watershed-flow-aggregation_files/figure-gfm/example-watershed-summary-1.png)<!-- -->
 
 ``` r
 knitr::knit_exit()

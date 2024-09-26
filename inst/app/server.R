@@ -837,16 +837,21 @@ selected_watershed <- reactiveValues(object_id = NA,
                      select(comid, watershed_level_3, da_reach, pc_reach),
                    by=join_by(comid)) |>
         mutate(multiplier = (da_reach / da_gage) * (pc_reach / pc_gage)) |>
+        inner_join(attr |> select(comid, hqt_gradient_class), by=join_by(comid)) |>
         mutate(drc_scaled =
-                 pmap(list(drc_raw, multiplier),
-                      function(drc_raw, multiplier) {
-                        drc_raw |> mutate(model_q = model_q * multiplier)
+                 pmap(list(drc_raw, multiplier, hqt_gradient_class),
+                      function(drc_raw, multiplier, hqt_gradient_class) {
+                        drc_raw |>
+                          mutate(model_q = model_q * multiplier) |>
+                          mutate(dhsi_selected = case_when(input$habitat_type == "spawning" ~ durhsi_spawning,
+                                                           hqt_gradient_class == "Valley Lowland" ~ durhsi_rearing_vl,
+                                                           TRUE ~ durhsi_rearing_vf))
                       }))
 
       joined <- inner_join(fsas, drcs, by=join_by(comid, watershed_level_3, da_reach, pc_reach)) |>
-        inner_join(attr |> select(comid, hqt_gradient_class), by=join_by(comid)) |>
-        mutate(result = pmap(list(fsa_scaled, drc_scaled, hqt_gradient_class),
-                             function(fsa, drc, hqt) {
+        mutate(result = pmap(list(fsa_scaled, drc_scaled),
+                             function(fsa, drc) {
+
           duration_applied <-
             habistat::duration_apply_dhsi_to_fsa_curve(
               fsa = fsa,
@@ -854,11 +859,7 @@ selected_watershed <- reactiveValues(object_id = NA,
               fsa_wua = selected_wua,
               drc = drc,
               drc_q = model_q,
-              drc_dhsi = durhsi_rearing_vl) #!!sym(case_when(
-                                            # input$habitat_type == "spawning" ~ "durhsi_spawning",
-                                            # hqt == "Valley Lowland" ~ "durhsi_rearing_vl",
-                                            # TRUE ~ "durhsi_rearing_vf")))
-              # TODO: Fix vl/vf lookup
+              drc_dhsi = dhsi_selected)
 
           fsa |>
             left_join(duration_applied |> select(flow_cfs = q, durwua), by=join_by(flow_cfs)) |>

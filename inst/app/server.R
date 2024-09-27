@@ -821,24 +821,26 @@ selected_watershed <- reactiveValues(object_id = NA,
 
         }
 
-    } else if (most_recent_map_click$type == "mainstem") {
+    } else if (most_recent_map_click$type %in% c("mainstem", "watershed")) {
 
-      # fsa <-
-      #   predictions_mainstem |>
-      #   filter(river_cvpia == selected_mainstem$river_name) |>
-      #   filter(habitat == input$habitat_type) |>
-      #   transmute(flow_cfs, selected_wua = !!sym(wua_var())) |>
-      #   glimpse()
+      group_var <- switch(most_recent_map_click$type,
+                          "mainstem" = "river_cvpia",
+                          "watershed" = "watershed_level_3")
 
-    } else if (most_recent_map_click$type == "watershed") {
+      predictions_filtered <- switch(most_recent_map_click$type,
+                               "mainstem" = predictions |> filter(river_cvpia == selected_mainstem$river_name),
+                               "watershed" = predictions |> filter(watershed_level_3 == selected_watershed$watershed_name))
+
+      flow_xw <- switch(most_recent_map_click$type,
+                        "mainstem" = cv_mainstems_flow_xw,
+                        "watershed" = cv_watersheds_flow_xw)
 
       fsas <-
-        predictions |>
-        filter(watershed_level_3 == selected_watershed$watershed_name) |>
+        predictions_filtered |>
         filter(habitat == input$habitat_type) |>
-        transmute(watershed_level_3, comid, flow_idx, flow_cfs, reach_length_ft, selected_wua = !!sym(wua_var())) |>
-        nest(fsa_raw = c(flow_idx, flow_cfs, reach_length_ft, selected_wua), .by = c(watershed_level_3, comid)) |>
-        inner_join(cv_watersheds_flow_xw, by=join_by(watershed_level_3, comid)) |>
+        transmute(!!sym(group_var), comid, flow_idx, flow_cfs, reach_length_ft, selected_wua = !!sym(wua_var())) |>
+        nest(fsa_raw = c(flow_idx, flow_cfs, reach_length_ft, selected_wua), .by = c(!!sym(group_var), comid)) |>
+        inner_join(flow_xw, by=join_by(!!sym(group_var), comid)) |>
         mutate(fsa_scaled = pmap(list(fsa_raw, multiplier), function(x, y) scale_fsa(x, y, .wua_var = selected_wua, .flow_var = flow_cfs)))
 
       drcs <-
@@ -848,10 +850,10 @@ selected_watershed <- reactiveValues(object_id = NA,
                  (habitat == input$habitat_type) &
                  (wy_group == input$selected_wyt)) |>
         rename(drc_raw = data) |>
-        inner_join(streamgage_attr, by=join_by(station_id)) |>
+        inner_join(streamgage_attr |> select(station_id, da_gage, pc_gage), by=join_by(station_id)) |>
         expand_grid(comid = fsas$comid) |>
-        inner_join(cv_watersheds_flow_xw |>
-                     select(comid, watershed_level_3, da_reach, pc_reach),
+        inner_join(flow_xw |>
+                     select(comid, !!sym(group_var), da_reach, pc_reach),
                    by=join_by(comid)) |>
         mutate(multiplier = (da_reach / da_gage) * (pc_reach / pc_gage)) |>
         inner_join(attr |> select(comid, hqt_gradient_class), by=join_by(comid)) |>
@@ -863,9 +865,10 @@ selected_watershed <- reactiveValues(object_id = NA,
                           mutate(dhsi_selected = case_when(input$habitat_type == "spawning" ~ durhsi_spawning,
                                                            hqt_gradient_class == "Valley Lowland" ~ durhsi_rearing_vl,
                                                            TRUE ~ durhsi_rearing_vf))
-                      }))
+                      })) |>
+        glimpse()
 
-      joined <- inner_join(fsas, drcs, by=join_by(comid, watershed_level_3, da_reach, pc_reach)) |>
+      joined <- inner_join(fsas, drcs, by=join_by(comid, !!sym(group_var), da_reach, pc_reach)) |>
         mutate(result = pmap(list(fsa_scaled, drc_scaled),
                              function(fsa, drc) {
 
@@ -886,12 +889,12 @@ selected_watershed <- reactiveValues(object_id = NA,
         select(-fsa_raw, -drc_raw, -fsa_scaled, -drc_scaled) |>
         unnest(result)
 
-      message(paste("aggregated duration curve for watershed", active_reach_info$watershed_name))
+      message(paste("aggregated duration curve for", most_recent_map_click$type))
 
       duration_curve_result <-
         joined |>
         group_by(habitat, run, wy_group,
-                 watershed_level_3, q = flow_idx) |> # better to use the float version
+                 !!sym(group_var), q = flow_idx) |> # better to use the float version
         summarize(durwua = sum(durwua * reach_length_ft) / sum(reach_length_ft),
                   #wua_per_lf_pred = sum(wua_per_lf_pred * reach_length_ft) / sum(reach_length_ft),
                   #wua_acres_pred = sum(wua_per_lf_pred * reach_length_ft) / 43560,
@@ -950,9 +953,12 @@ selected_watershed <- reactiveValues(object_id = NA,
       } else {
         ggplot()
       }
-    } else if(most_recent_map_click$type == "watershed") {
+    } else if (most_recent_map_click$type %in% c("mainstem", "watershed")) {
       duration_curve() |>
-        ggplot() + geom_line(aes(x = q, y = durwua))
+        ggplot() +
+        geom_line(aes(x = q, y = durwua)) +
+        ylab(paste0("Suitable Habitat Area (", wua_suf(),")")) +
+        xlab("Flow (cfs)")
     }
 
 #    plt_days <-

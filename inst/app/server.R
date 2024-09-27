@@ -838,7 +838,7 @@ selected_watershed <- reactiveValues(object_id = NA,
       fsas <-
         predictions_filtered |>
         filter(habitat == input$habitat_type) |>
-        transmute(!!sym(group_var), comid, flow_idx, flow_cfs, reach_length_ft, selected_wua = !!sym(wua_var())) |>
+        transmute(!!sym(group_var), comid, flow_idx, flow_cfs, reach_length_ft, selected_wua = !!sym(input$wua_var)) |>
         nest(fsa_raw = c(flow_idx, flow_cfs, reach_length_ft, selected_wua), .by = c(!!sym(group_var), comid)) |>
         inner_join(flow_xw, by=join_by(!!sym(group_var), comid)) |>
         mutate(fsa_scaled = pmap(list(fsa_raw, multiplier), function(x, y) scale_fsa(x, y, .wua_var = selected_wua, .flow_var = flow_cfs)))
@@ -898,7 +898,6 @@ selected_watershed <- reactiveValues(object_id = NA,
         summarize(across(c(wua, durwua), switch(input$wua_units,
                                                 wua_per_lf = function(y) sum(y * reach_length_ft) / sum(reach_length_ft),
                                                 wua_acres = function(y) sum(y * reach_length_ft) / 43560)),
-                  # TODO: wua_per_lf is correct but wua_acres is yielding results inconsistent with wua_predicted_mainstems
                   .groups="drop")
 
     } else {

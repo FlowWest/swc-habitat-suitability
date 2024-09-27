@@ -882,8 +882,8 @@ selected_watershed <- reactiveValues(object_id = NA,
               drc_dhsi = dhsi_selected)
 
           fsa |>
-            left_join(duration_applied |> select(flow_cfs = q, durwua), by=join_by(flow_cfs)) |>
-            mutate(durwua = zoo::na.approx(durwua, x = flow_cfs, na.rm=F, rule=2))
+            left_join(duration_applied |> select(flow_cfs = q, wua, durwua), by=join_by(flow_cfs)) |>
+            mutate(across(c(wua, durwua), function(y) zoo::na.approx(y, x = flow_cfs, na.rm=F, rule=2)))
 
         })) |>
         select(-fsa_raw, -drc_raw, -fsa_scaled, -drc_scaled) |>
@@ -895,11 +895,10 @@ selected_watershed <- reactiveValues(object_id = NA,
         joined |>
         group_by(habitat, run, wy_group,
                  !!sym(group_var), q = flow_idx) |> # better to use the float version
-        summarize(durwua = sum(durwua * reach_length_ft) / sum(reach_length_ft),
-                  #wua_per_lf_pred = sum(wua_per_lf_pred * reach_length_ft) / sum(reach_length_ft),
-                  #wua_acres_pred = sum(wua_per_lf_pred * reach_length_ft) / 43560,
-                  #wua_per_lf_pred_dur = sum(wua_per_lf_pred_dur * reach_length_ft) / sum(reach_length_ft),
-                  #wua_acres_pred_dur = sum(wua_per_lf_pred_dur * reach_length_ft) / 43560,
+        summarize(across(c(wua, durwua), switch(input$wua_units,
+                                                wua_per_lf = function(y) sum(y * reach_length_ft) / sum(reach_length_ft),
+                                                wua_acres = function(y) sum(y * reach_length_ft) / 43560)),
+                  # TODO: wua_per_lf is correct but wua_acres is yielding results inconsistent with wua_predicted_mainstems
                   .groups="drop")
 
     } else {
@@ -956,9 +955,19 @@ selected_watershed <- reactiveValues(object_id = NA,
     } else if (most_recent_map_click$type %in% c("mainstem", "watershed")) {
       duration_curve() |>
         ggplot() +
-        geom_line(aes(x = q, y = durwua)) +
+        geom_line(aes(x = q, y = wua, linetype="Original")) +
+        geom_line(aes(x = q, y = durwua, linetype="Duration-Weighted")) +
         ylab(paste0("Suitable Habitat Area (", wua_suf(),")")) +
-        xlab("Flow (cfs)")
+        xlab("Flow (cfs) at Outlet") +
+        scale_x_log10(breaks = scales::breaks_log(8), labels = scales::label_comma()) +
+        scale_y_continuous(breaks = scales::breaks_extended(8), labels = scales::label_comma(), limits=c(0, NA)) +
+        annotation_logticks(sides = "b") +
+        theme(legend.position = "top",
+              panel.grid.minor = element_blank()) +
+        scale_linetype_manual(name = "",
+                              values = c("Original" = "solid",
+                                         "Duration-Weighted" = "dashed")) +
+        labs(caption = "Aggregated from duration-scaled habitat curves for outlet comid (at nominal cfs) and other comids (at cfs downscaled by drainage area and precipitation ratio).")
     }
 
 #    plt_days <-

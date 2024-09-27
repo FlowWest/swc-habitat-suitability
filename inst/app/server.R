@@ -34,6 +34,16 @@ function(input, output, session){
                  disabled = is.null(input$main_map_shape_click$id))
   })
 
+  #input_parms <- reactiveValues(spawning_filter = FALSE)
+  output$spawning_toggle <- renderUI({
+    if (input$flowline_scope=="comid" & input$habitat_type=="spawning") {
+      checkboxInput("spawning_toggle", "Use geomorphic spawning gravel likelihood", value = TRUE)
+    }
+  })
+  #observe({
+  #  input_parms$spawning_filter <- input$spawning_toggle
+  #})
+
   # IDENTIFIERS FOR CLICKED ELEMENT --------------------------------------------
 
   most_recent_map_click <- reactiveValues(type = "none",
@@ -68,16 +78,21 @@ function(input, output, session){
   message(paste(names(predictions), collapse = ", "))
 
   active_predictions <- reactive({
-    # predictions_table |>
-    #   filter(flow_cfs == active_map_params$flow) |>
-    #   mutate(wua_per_lf = !!sym(input$wua_var))
-    predictions |>
+
+    active_predictions <- predictions |>
       filter(flow_idx == as.integer(active_map_params$flow)) |>
       filter(habitat == input$habitat_type) |>
+      inner_join(attr |> select(comid, spawning_gravel_either_method), by=join_by(comid)) |>
+      #mutate(across(starts_with("wua_"), function(x) if_else(habitat == "spawning" & input_parms$spawning_filter & !spawning_gravel_either_method, 0, x))) |>
+      #filter(!((habitat == "spawning") & (input_parms$spawning_filter) & (!(spawning_gravel_either_method)))) |>
       glimpse() #|>
-    # TODO could also filter for selected model and bfc removed/not removed
-    #message(nrow(result), " result rows")
-    #return(result)
+
+    if(isTRUE(input$spawning_toggle)) {
+      active_predictions <- active_predictions |>
+        mutate(across(starts_with("wua_") & contains("_pred"), function(x) if_else((habitat == "spawning") & (!spawning_gravel_either_method), 0, x)))
+    }
+
+    return(active_predictions)
   })
 
   active_geom <- reactive({
@@ -142,12 +157,12 @@ function(input, output, session){
   # PREDICTION TABLES, ATTRIBUTES, PLOTS ---------------------------------------
 
   active_pred_table <- reactive({
-    #if (!is.null(selected_point$object_id)) {
     if (most_recent_map_click$type == "comid") {
       active_predictions() |>
         select(any_of(names(var_names))) |>
         filter(comid == selected_point$comid) |>
         mutate(across(where(is.numeric), function(x) signif(x, 3) |> as.character(x))) |>
+        mutate(across(-where(is.character), as.character)) |>
         pivot_longer(everything()) |>
         mutate(name = var_names[name])
     } else if (most_recent_map_click$type == "watershed") {
@@ -155,6 +170,7 @@ function(input, output, session){
         select(any_of(names(var_names))) |>
         filter(watershed_level_3 == selected_watershed$watershed_name) |>
         mutate(across(where(is.numeric), function(x) signif(x, 3) |> as.character(x))) |>
+        mutate(across(-where(is.character), as.character)) |>
         pivot_longer(everything()) |>
         mutate(name = var_names[name])
     } else if (most_recent_map_click$type == "mainstem") {
@@ -162,6 +178,7 @@ function(input, output, session){
         select(any_of(names(var_names))) |>
         filter(river_cvpia == selected_mainstem$river_name) |>
         mutate(across(where(is.numeric), function(x) signif(x, 3) |> as.character(x))) |>
+        mutate(across(-where(is.character), as.character)) |>
         pivot_longer(everything()) |>
         mutate(name = var_names[name])
     }

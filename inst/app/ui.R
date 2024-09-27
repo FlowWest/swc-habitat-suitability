@@ -28,7 +28,8 @@ shinyUI(
                          style="display:inline-block; width:85%"),
                      div(id = "control_active_flow_apply",
                          actionButton("activeFlowApplyButton" ,"Apply"),
-                         style="display:inline-block; width:10%; vertical-align: bottom;")
+                         style="display:inline-block; width:10%; vertical-align: bottom;"),
+                     uiOutput("spawning_toggle"),
                  ),
                  h3("Results for Selected Item"),
                  uiOutput("clicked_item_heading"),

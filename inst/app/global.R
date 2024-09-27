@@ -84,9 +84,12 @@ var_names <- c(
           wua_acres_pred_SD = "Predicted Suitable Habitat (acres) (SD Model)",
           wua_acres_pred_SN = "Predicted Suitable Habitat (acres) (SN Model)",
           wua_acres_actual = "Actual Suitable Habitat (acres)",
-          baseflow_cfs = "Estimated Baseflow (cfs)")
+          baseflow_cfs = "Estimated Baseflow (cfs)",
+          spawning_geographic_context = "Spawning: Within Geographic Range",
+          spawning_gravel_either_method = "Spawning: Likely Geomorphic Suitability")
 
 attr <- get_data(flowline_attr, package = "habistat") |>
+  left_join(get_data(flowline_spawning_attr, package = "habistat"), by=join_by(comid)) |>
   filter(comid %in% predictions$comid) |>
   select(any_of(names(var_names)))
   # stream size filter -- make sure this matches model_cleaned.Rmd

@@ -16,6 +16,12 @@
 #' flowline_attr |> pillar::glimpse()
 "flowline_attr"
 
+#' @name flowline_spawning_attr
+#' @title NHD Flowline (ComID) Spawning Suitability Flags
+#' @examples
+#' flowline_spawning_attr |> pillar::glimpse()
+"flowline_spawning_attr"
+
 #' @name wua_hydraulic
 #' @title WUA/LF by ComID by Flow (training dataset)
 #' @examples

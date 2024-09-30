@@ -662,22 +662,91 @@ flow_ranges <-
 
 ### Rearing
 
-```{r fig.height=8}
+```{r}
 flowlines_pred <-
   habistat::flowline_geom_proj |>
   inner_join(habistat::flowline_attr, by=join_by(comid)) |>
   # filter for just the Sacramento and San Joaquin Basins
   filter(watershed_level_1 %in% c("Sacramento River", "San Joaquin River")) |>
-  # filter for just known extant spawning habitat
-  #filter((range_pisces == "extant") | (comid %in% ms$comid)) |>
   # filter based on size of the stream
-  # filter((stream_order >= 4) | (da_area_sq_km >= 100) | (comid %in% habistat::cv_mainstems$comid)) #|>
   filter(((((stream_order >= 4) & (da_area_sq_km_div > 1)) | ((stream_order >= 3) & (da_area_sq_km_div >= 50))) & (divergence_ratio > 0.5)) | 
            (comid %in% habistat::cv_mainstems$comid)) |>
-  filter(ftype %in% c("StreamRiver"))
-  #filter((stream_order >= 4) | (comid %in% ms$comid)) |>
-  #filter((da_area_sq_km >= 100) | (comid %in% ms$comid)) |>
+  filter(ftype %in% c("StreamRiver")) 
+```
 
+Investigate the selected rearing streams network (this is done separately for spawning in spawning-expl.Rmd)
+
+```{r rearing-trib-net-search, fig.width=8, fig.height=8, dpi=300}
+list_upstream_comids <- function(comid) {
+  # USGS upstream trib search service
+  # e.g. https://labs.waterdata.usgs.gov/api/nldi/linked-data/comid/12074740/navigation/UT/flowlines?f=json&distance=9999
+  result <- nhdplusTools::navigate_nldi(list(featureSource = "comid", 
+                                        featureID = comid), 
+                                        mode = "upstreamTributaries", 
+                                        distance_km = 9999)
+  # returns a geojson, want just the list of comids
+  return(as.integer(result$UT$nhdplus_comid))
+}
+
+# DETERMINE OUTLETS OF REARING STREAMS
+rearing_outlets <- 
+  habistat::flowline_attr |>
+  filter(!is.na(river_cvpia)) |>
+  filter(!(river_cvpia %in% c("Sacramento River", "San Joaquin River"))) |> 
+  select(comid, da_area_sq_km, watershed_level_3, river_cvpia) |>
+  # group by watershed and habitat type
+  inner_join(readRDS(here::here("data-raw", "results", "cv_mainstems.Rds")) |> select(comid, habitat), by=join_by(comid)) |>
+  filter(!is.na(habitat)) |>
+  group_by(river_cvpia, habitat) |>
+  # keep just the farthest DS to minimize amount of searching needed
+  filter(da_area_sq_km == max(da_area_sq_km)) |> 
+  ungroup()
+
+# MAP ALL REARING REACHES AND THEIR OUTLETS
+ggplot() + 
+  geom_sf(data=habistat::cv_mainstems,
+          aes(color = river_cvpia)) + 
+  geom_point(data = rearing_outlets,
+             aes(geometry = geometry,
+                 color = river_cvpia,
+                 shape = habitat), stat = "sf_coordinates") + 
+  guides(color="none")
+  
+# LIST COMIDS MATCHING NETWORK SEARCH
+rearing_tributaries <-
+  rearing_outlets |>
+  # get tributary network using USGS service
+  mutate(trib_comids = map(comid, list_upstream_comids)) |>
+  unnest(trib_comids) 
+
+rearing_tributaries_summarized <- 
+  rearing_tributaries |>
+  group_by(outlet_comid = comid, comid = trib_comids, river_cvpia, watershed_level_3) |>
+  summarize(habitats = list(unique(habitat))) |>
+  mutate(habitat = map_chr(habitats, function(x) case_when(any(str_detect("spawning", x)) ~ "rearing and spawning",
+                                                           any(str_detect("rearing", x)) ~ "rearing",
+                                                           any(str_detect("historical", x)) ~ "historical"))) |>
+  select(-habitats) 
+
+# MAP ALL COMIDS UPSTREAM OF REARING REACHES
+ggplot() + 
+  geom_sf(data=habistat::flowline_geom_proj |>
+            inner_join(rearing_tributaries_summarized %>%
+                         inner_join(. |> 
+                                      group_by(outlet_comid) |> 
+                                      summarize(outlet_sort = n()), 
+                                    by=join_by(outlet_comid))) |>
+            filter(comid %in% flowlines_pred$comid) |>
+            arrange(-outlet_sort),
+          aes(color = river_cvpia), alpha=0.5) +
+  geom_point(data = rearing_outlets,
+          aes(geometry = geometry,
+              color = river_cvpia,
+              shape = habitat), stat = "sf_coordinates") + 
+  guides(color="none")
+```
+
+```{r fig.height=8}
 flowlines_pred |> 
   ggplot() + 
   geom_sf(data=habistat::cv_watersheds,#  |> filter(range_pisces == "extant"), 

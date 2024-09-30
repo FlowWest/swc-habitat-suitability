@@ -111,8 +111,8 @@ cv_mainstems <-
   janitor::clean_names() |>
   st_zm() |>
   st_transform(habistat::const_proj_crs()) |>
-  select(river, comid) |>
-  rename(river_cvpia = river)
+  select(river_group = watershed, river_cvpia = river, comid, habitat) |>
+  filter(!is.na(river_group) & !is.na(river_cvpia))
 
 # ADD UC DAVIS PISCES ----------------------------------------------------------
 
@@ -236,14 +236,6 @@ cv_watersheds |> usethis::use_data(overwrite = T)
 
 cv_mainstems |> saveRDS(here::here("data-raw", "results", "cv_mainstems.Rds"))
 cv_mainstems |> usethis::use_data(overwrite = T)
-
-# DONE: union in BYPASS and DELTA regions
-# TODO: join into flowline_attributes table so that range and river are accessible
-# DONE: add coalesced level1/2/3 attributes that can be used for filtering/symbology
-# TODO: add selector to the shiny app to filter by "pisces_range" and by CVPIA "watershed" (incl. tributaries) and "river" (mainstem) and by lev1/2/3
-# TODO: create stream_order filter so that only ~HUC-12 order streams are included in prediction dataset. Shreve or strahler??
-# TODO: document cv_watersheds and cv_mainstems
-# DONE: move st_identity to helpers.R
 
 ggplot() +
   geom_sf(data = cv_watersheds, aes(fill = watershed_cvpia)) +

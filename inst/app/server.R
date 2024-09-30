@@ -56,7 +56,11 @@ function(input, output, session){
   })
 
   output$clicked_item_heading <- renderUI({
-    h4(clicked_item_label())
+    if (length(clicked_item_label()) > 0) {
+      h4(clicked_item_label())
+    } else {
+      h4(paste0("no ",input$flowline_scope," selected"))
+    }
   })
 
   # REACTIVE FLOW FILTER (COMID) -----------------------------------------------
@@ -141,23 +145,33 @@ function(input, output, session){
     #if (!is.null(selected_point$object_id)) {
     if (most_recent_map_click$type == "comid") {
       active_predictions() |>
+        select(any_of(names(var_names))) |>
         filter(comid == selected_point$comid) |>
-        select(where(is.numeric)) |>
+        mutate(across(where(is.numeric), function(x) signif(x, 3) |> as.character(x))) |>
         pivot_longer(everything()) |>
-        mutate(across(value, function(x) round(x, 2)))
+        mutate(name = var_names[name])
     } else if (most_recent_map_click$type == "watershed") {
       active_predictions_watershed() |>
+        select(any_of(names(var_names))) |>
         filter(watershed_level_3 == selected_watershed$watershed_id) |>
-        select(where(is.numeric)) |>
+        mutate(across(where(is.numeric), function(x) signif(x, 3) |> as.character(x))) |>
         pivot_longer(everything()) |>
-        mutate(across(value, function(x) round(x, 2)))
+        mutate(name = var_names[name])
+    } else if (most_recent_map_click$type == "mainstem") {
+      active_predictions_mainstem() |>
+        select(any_of(names(var_names))) |>
+        filter(river_cvpia == selected_mainstem$river_name) |>
+        mutate(across(where(is.numeric), function(x) signif(x, 3) |> as.character(x))) |>
+        pivot_longer(everything()) |>
+        mutate(name = var_names[name])
     }
   })
 
   output$pred_table <- DT::renderDT({
-    if (most_recent_map_click$type == "none") {
+    if (most_recent_map_click$type != "none") {
       DT::datatable(active_pred_table(),
-                    options = list(paging = F, searching = F))
+                    options = list(paging = F, searching = F),
+                    selection = "none")
     }
   })
 
@@ -167,17 +181,19 @@ function(input, output, session){
      if (most_recent_map_click$type == "comid") {
      result <- attr |>
        filter(comid == selected_point$comid) |>
-       select(where(is.numeric)) |>
-       pivot_longer(everything())
-       #gc()
+       mutate(across(where(is.numeric), function(x) signif(x, 3) |> as.character(x))) |>
+       pivot_longer(everything()) |>
+       mutate(name = var_names[name])
+     #gc()
      return(result)
-   }
+     }
   })
 
   output$attr_table <- DT::renderDT({
      if (most_recent_map_click$type == "comid") {
         DT::datatable(active_attr_table(),
-                      options = list(paging = F, searching = F))
+                      options = list(paging = F, searching = F),
+                      selection = "none")
       }
     })
 
@@ -190,11 +206,12 @@ function(input, output, session){
     #var_not_selected <- switch(input$wua_var,
     #                           "wua_per_lf_pred_SD"="wua_per_lf_pred_SN",
     #                           "wua_per_lf_pred_SN"="wua_per_lf_pred_SD")
-
+    message("!!!", selected_point$comid)
     if (most_recent_map_click$type == "comid") { #& (length(selected_point$comid)>0)) {
     predictions |>
       filter(comid == selected_point$comid) |>
       filter(habitat == input$habitat_type) |>
+        glimpse() |>
       ggplot(aes(x = flow_cfs)) + #|> add_color_scale(type = input$habitat_type) +
       geom_line(aes(y = !!sym(paste0(input$wua_units,"_actual")), color="Actual", linetype = "Unscaled")) +
       geom_line(aes(y = !!sym(paste0(input$wua_units,"_pred_SD")), color="Scale-Dependent", linetype = "Unscaled")) +
@@ -461,7 +478,7 @@ selected_watershed <- reactiveValues(object_id = NA,
       if(substr(input$main_map_shape_click$id, 1, 9) == "mainstem_") {
         most_recent_map_click$type <- "mainstem"
         selected_mainstem$object_id <- input$main_map_shape_click$id
-        selected_mainstem$river_name <-mainstems$mainstem_label[[which(mainstems$mainstem_id==input$main_map_shape_click$id)]]
+        selected_mainstem$river_name <-mainstems$river_cvpia[[which(mainstems$mainstem_id==input$main_map_shape_click$id)]]
         most_recent_map_click$lng <- input$main_map_shape_click$lng
         most_recent_map_click$lat <- input$main_map_shape_click$lat
       }
@@ -587,10 +604,10 @@ selected_watershed <- reactiveValues(object_id = NA,
       active_reach_gradient_class <- "Valley Foothill"
     }
 
-    message("streamgage_drc for ", input$streamgage_id,
+    message(paste0("pulling streamgage_drc for ", input$streamgage_id,
             " ", input$selected_run,
             " ", input$habitat_type,
-            " ", input$selected_wyt)
+            " ", input$selected_wyt))
 
     active_streamgage_data <-
       get_data(streamgage_duration_rating_curves, package = "habistat") |>
@@ -599,6 +616,7 @@ selected_watershed <- reactiveValues(object_id = NA,
                (habitat == input$habitat_type) &
                (wy_group == input$selected_wyt)) |>
       glimpse()
+    message(paste("=", nrow(active_streamgage_data), "rows"))
 
     if (nrow(active_streamgage_data) > 0) {
 
@@ -619,13 +637,17 @@ selected_watershed <- reactiveValues(object_id = NA,
 
   # ACTIVE STREAMGAGE SELECTOR
   active_reach_info <- reactiveValues(is_mainstem = FALSE,
-                                      watershed_name = NA)
+                                      watershed_name = NA,
+                                      river_name = NA)
 
   observe({
     if (most_recent_map_click$type == "comid") {
       active_reach_info$watershed_name <- (attr |>
                                         filter(comid == selected_point$comid) |>
                                         pull(watershed_level_3))[[1]]
+      active_reach_info$river_name <- (attr |>
+                                             filter(comid == selected_point$comid) |>
+                                             pull(river_cvpia))[[1]]
       active_reach_info$is_mainstem <- !is.na((attr |>
                                      filter(comid == selected_point$comid) |>
                                      pull(river_cvpia))[[1]])
@@ -633,14 +655,15 @@ selected_watershed <- reactiveValues(object_id = NA,
       active_reach_info$watershed_name <- selected_watershed$watershed_name
       active_reach_info$is_mainstem <- FALSE
     } else if (most_recent_map_click$type == "mainstem"){
-      active_reach_info$watershed_name <- selected_mainstem$river_name
+      active_reach_info$river_name <- selected_mainstem$river_name
       active_reach_info$is_mainstem <- TRUE
     }
   })
 
   streamgage_options <- reactive({
     if(active_reach_info$is_mainstem) {
-      streamgages[[active_reach_info$watershed_name]]
+      message(paste("pulling streamgage options for", active_reach_info$river_name))
+      streamgages[[active_reach_info$river_name]]
     } else {
       list()
     }
@@ -665,7 +688,7 @@ selected_watershed <- reactiveValues(object_id = NA,
   })
 
     output$streamgage_selector <- renderUI({
-    if(active_reach_info$is_mainstem) {
+    if(active_reach_info$is_mainstem & length(streamgage_options_geom()$station_id) > 0) {
       selectInput(inputId = "streamgage_id",
                   label = "Select Gage for Duration Analysis",
                   choices = setNames(names(streamgage_options()), streamgage_options()),
@@ -674,15 +697,17 @@ selected_watershed <- reactiveValues(object_id = NA,
       selectInput(inputId = "streamgage_id",
                   label = "Select Gage for Duration Analysis",
                   choices = c())
+      message("no stream gages")
     }
   })
 
     streamgage_options_geom_labelled <- reactive({
-      if(length(streamgage_options()) > 0){
+      if((nrow(streamgage_options_geom()) > 0) & (length(input$streamgage_id) > 0)){
         streamgage_options_geom() |>
           mutate(selected = (station_id == input$streamgage_id))
       } else {
-        st_sf(st_sfc())
+        streamgage_options_geom() |>
+          mutate(selected = FALSE) #st_sf(st_sfc())
       }
     })
 
@@ -717,6 +742,7 @@ selected_watershed <- reactiveValues(object_id = NA,
   # DURATION CURVE CALCULATION
 
   duration_curve <- reactive({
+    #TODO add error handling that returns empty data frame if streamgage is not selected, rahter than erroring out
 
     message("fsa")
 
@@ -742,9 +768,11 @@ selected_watershed <- reactiveValues(object_id = NA,
         transmute(flow_cfs, selected_wua = !!sym(wua_var())) |>
         glimpse()
     } else {
-      fsa <- tibble()
+      fsa <- tibble(flow_cfs = c(),
+                    selected_wua = c())
     }
 
+    if (length(input$streamgage_id) > 0) {
     if (nrow(streamgage_drc()) > 0) {
 
       message("duration hsi curve")
@@ -761,6 +789,8 @@ selected_watershed <- reactiveValues(object_id = NA,
 
         tibble(q = list(), durwua = list())
 
+    }} else {
+      tibble(q = list(), durwua = list())
     }
   })
 

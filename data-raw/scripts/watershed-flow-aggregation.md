@@ -1,12 +1,13 @@
 Predictor Data Preparation and Consolidation
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-09-25
+2024-09-30
 
 - [Basic Flow Crosswalk via Drainage Area and
   Precipitation](#basic-flow-crosswalk-via-drainage-area-and-precipitation)
   - [Applying the crosswalk to aggregate model
     results](#applying-the-crosswalk-to-aggregate-model-results)
+- [DSMHabitat Comparison](#dsmhabitat-comparison)
 - [Applying this method to the duration
   analyis](#applying-this-method-to-the-duration-analyis)
   - [Streamgage drainage area
@@ -174,6 +175,30 @@ wua_predicted_cv_mainstems |> usethis::use_data(overwrite=T)
     ## ✔ Saving "wua_predicted_cv_mainstems" to "data/wua_predicted_cv_mainstems.rda".
     ## ☐ Document your data (see <https://r-pkgs.org/data.html>).
 
+``` r
+# these are the mainstems grouped for CVPIA model comparison
+wua_predicted_cv_mainstems_grouped <- 
+  habistat::wua_predicted |> 
+  inner_join(cv_mainstems_flow_xw, 
+             by=join_by(river_cvpia, comid)) |>
+  expand_grid(scaled = c(FALSE, TRUE)) |>
+  mutate(flow_cfs = if_else(scaled, flow_cfs * multiplier, flow_cfs)) |>
+  arrange(habitat, model_name, comid, flow_cfs) |>
+  group_by(habitat, model_name, comid) |>
+  mutate(wua_per_lf_pred = if_else(scaled, NA, wua_per_lf_pred)) |>
+  mutate(wua_per_lf_pred = zoo::na.approx(wua_per_lf_pred, x = flow_cfs, na.rm=F, rule=2)) |>
+  filter(scaled) |>
+  select(-scaled) |>
+  ungroup() |>
+  group_by(habitat, model_name, river_group, flow_idx) |>
+  summarize(wua_per_lf_pred = sum(wua_per_lf_pred * reach_length_ft) / sum(reach_length_ft),
+            wua_acres_pred = sum(wua_per_lf_pred * reach_length_ft) / 43560, .groups="drop") |>
+  inner_join(habistat::wua_predicted |> 
+               group_by(flow_idx) |> 
+               summarize(flow_cfs = first(flow_cfs), .groups="drop"),
+             by = join_by(flow_idx))
+```
+
 Plotting the output
 
 ``` r
@@ -184,10 +209,39 @@ wua_predicted_cv_watersheds |>
   scale_x_log10() +
   theme(legend.position = "top", panel.grid.minor = element_blank()) + 
   scale_color_brewer(palette = "Paired") +
-  ylab("Predicted Total Habitat (acres)") + xlab("Flow at Outlet (cfs)")
+  ylab("Predicted Total Habitat (acres)") + xlab("Flow at Outlet (cfs)") + 
+  ggtitle("Watersheds (incl. tributaries)")
 ```
 
 ![](watershed-flow-aggregation_files/figure-gfm/pred-watersheds-new-1.png)<!-- -->
+
+``` r
+wua_predicted_cv_mainstems |>
+  ggplot(aes(x = flow_cfs)) + 
+  facet_wrap(~river_cvpia, scales="free") + 
+  geom_line(aes(y = wua_acres_pred, color = paste(habitat, model_name))) +
+  scale_x_log10() +
+  theme(legend.position = "top", panel.grid.minor = element_blank()) + 
+  scale_color_brewer(palette = "Paired") +
+  ylab("Predicted Total Habitat (acres)") + xlab("Flow at Outlet (cfs)") + 
+  ggtitle("Mainstems")
+```
+
+![](watershed-flow-aggregation_files/figure-gfm/pred-watersheds-new-2.png)<!-- -->
+
+``` r
+wua_predicted_cv_mainstems_grouped |>
+  ggplot(aes(x = flow_cfs)) + 
+  facet_wrap(~river_group, scales="free") + 
+  geom_line(aes(y = wua_acres_pred, color = paste(habitat, model_name))) +
+  scale_x_log10() +
+  theme(legend.position = "top", panel.grid.minor = element_blank()) + 
+  scale_color_brewer(palette = "Paired") +
+  ylab("Predicted Total Habitat (acres)") + xlab("Flow at Outlet (cfs)") + 
+  ggtitle("Mainstems (grouped by watershed)")
+```
+
+![](watershed-flow-aggregation_files/figure-gfm/pred-watersheds-new-3.png)<!-- -->
 
 Versus the “naive” method
 
@@ -207,6 +261,159 @@ wua_predicted |>
 ```
 
 ![](watershed-flow-aggregation_files/figure-gfm/pred-watersheds-old-1.png)<!-- -->
+
+## DSMHabitat Comparison
+
+Moved this over from model_cleaned.Rmd
+
+``` r
+mainstems_comid <- 
+  read_sf(file.path("/vsizip", here::here("data-raw", "source", "rearing_spatial_data", "nhdplusv2_comid_habitat_xw.shp.zip"))) |>
+  janitor::clean_names() |>
+  st_zm() |>
+  st_transform(st_crs(habistat::flowline_geom_proj)) |>
+  mutate(length_ft = st_length(geometry) |> units::set_units("ft") |> units::drop_units()) |>
+  filter(str_detect(habitat, "rearing")) |>
+  left_join(habistat::flowline_attr |> select(comid, hqt_gradient_class), by=join_by(comid)) |>
+  filter(!(watershed %in% c("Sacramento River", "San Joaquin River")))
+
+mainstems <-
+  mainstems_comid |>
+  group_by(watershed, river, hqt_gradient_class) |>
+  summarize() 
+```
+
+    ## `summarise()` has grouped output by 'watershed', 'river'. You can override
+    ## using the `.groups` argument.
+
+``` r
+mainstems_comid |> 
+  ggplot() + 
+  geom_sf(aes(group=river, color=hqt_gradient_class)) + 
+  theme(legend.key.height = unit(12, "point"))
+```
+
+![](watershed-flow-aggregation_files/figure-gfm/dsmhabitat-prep-1.png)<!-- -->
+
+``` r
+#remotes::install_github("CVPIA-OSC/DSMhabitat")
+watersheds <- mainstems |> pull(watershed) |> unique()
+watershed_name <- tolower(gsub(pattern = "-| ", replacement = "_", x = watersheds))
+watershed_rda_name <- paste(watershed_name, "floodplain", sep = "_")
+
+dsm_habitat_floodplain <- map_df(watershed_rda_name, function(watershed) {
+  df <- as.data.frame(do.call(`::`, list(pkg = "DSMhabitat", name = watershed)))
+}) |> 
+  transmute(river_group = watershed,
+            flow_cfs,
+            FR_floodplain_m2 = FR_floodplain_acres * 4046.86,
+            FR_floodplain_m2_suitable = DSMhabitat::apply_suitability(FR_floodplain_m2),
+            FR_floodplain_acres_suitable = FR_floodplain_m2_suitable / 4046.86)
+
+dsm_habitat_instream <- map_df(paste(watershed_name, "instream", sep = "_"), 
+                               possibly(function(watershed) {
+                                 df <- as.data.frame(do.call(`::`, list(pkg = "DSMhabitat", name = watershed)))
+                                 }, otherwise = NULL)) |> 
+  transmute(river_group = watershed,
+            flow_cfs,
+            FR_juv_wua) 
+
+dsm_flows <- bind_rows(dsm_habitat_floodplain, dsm_habitat_instream) |>
+  group_by(river_group, flow_cfs) |>
+  summarize() |>
+  ungroup() |>
+  arrange(river_group, flow_cfs)
+```
+
+    ## `summarise()` has grouped output by 'river_group'. You can override using the
+    ## `.groups` argument.
+
+``` r
+dsm_flow_ranges <- 
+  dsm_flows |> 
+  group_by(river_group) |> 
+  summarize(min_flow_cfs = min(flow_cfs), max_flow_cfs = max(flow_cfs))
+
+mainstems_comid |> 
+  st_zm() |> 
+  filter(comid %in% mainstems_comid$comid) |>
+  ggplot() + 
+  geom_sf(aes(color=watershed)) + 
+  theme(legend.key.height = unit(12, "point"))
+```
+
+![](watershed-flow-aggregation_files/figure-gfm/dsmhabitat-join-1.png)<!-- -->
+
+``` r
+# combining both floodplain and instream rearing acreages/WUAs for comparison
+dsm_habitat_combined <- mainstems |> 
+  mutate(length_ft = st_length(geometry) |> units::set_units("ft") |> units::drop_units()) |>
+  group_by(watershed) |> 
+  summarize(length_ft = sum(length_ft)) |>
+  st_drop_geometry() |>
+  inner_join(full_join(dsm_habitat_instream, dsm_habitat_floodplain, by=join_by(river_group, flow_cfs)), by=join_by(watershed==river_group)) |>
+  group_by(watershed) |>
+  arrange(watershed, flow_cfs) |>
+  mutate(FR_juv_wua = zoo::na.approx(FR_juv_wua, flow_cfs, na.rm=F),
+         FR_floodplain_acres_suitable = zoo::na.approx(FR_floodplain_acres_suitable, flow_cfs, na.rm=F)) |>
+  transmute(watershed, flow_cfs, 
+            instream_wua_per_lf = coalesce(FR_juv_wua/1000,0),
+            instream_suitable_ac = coalesce(FR_juv_wua/1000,0)*length_ft/43560,
+            floodplain_wua_per_lf = coalesce(FR_floodplain_acres_suitable,0)*43560/length_ft,
+            floodplain_suitable_ac = coalesce(FR_floodplain_acres_suitable,0),
+            combined_wua_per_lf = instream_wua_per_lf + floodplain_wua_per_lf,
+            combined_suitable_ac =  instream_suitable_ac + floodplain_suitable_ac) |>
+  ungroup()
+```
+
+    ## Warning: There was 1 warning in `mutate()`.
+    ## ℹ In argument: `FR_floodplain_acres_suitable =
+    ##   zoo::na.approx(FR_floodplain_acres_suitable, flow_cfs, na.rm = F)`.
+    ## ℹ In group 20: `watershed = "Stanislaus River"`.
+    ## Caused by warning in `regularize.values()`:
+    ## ! collapsing to unique 'x' values
+
+``` r
+dsm_habitat_wua_per_lf <- dsm_habitat_combined |>
+  select(watershed, flow_cfs, instream_wua_per_lf, floodplain_wua_per_lf) |>
+#  mutate(combined_wua_per_lf = pmax(instream_wua_per_lf, floodplain_wua_per_lf)) |>
+  pivot_longer(cols=c(instream_wua_per_lf, floodplain_wua_per_lf)) |>
+  mutate(name = paste("DSMhabitat", str_replace(name, "_wua_per_lf", "")),
+         value = if_else(value>0, value, NA))
+
+dsm_habitat_suitable_ac <- dsm_habitat_combined |>
+  select(watershed, flow_cfs, instream_suitable_ac, floodplain_suitable_ac) |>
+#  mutate(combined_suitable_ac = pmax(instream_suitable_ac, floodplain_suitable_ac)) |>
+  pivot_longer(cols=c(instream_suitable_ac, floodplain_suitable_ac)) |>
+  mutate(value = if_else(value>0, value, NA)) |>
+  mutate(name = paste("DSMhabitat", str_replace(name, "_suitable_ac", "")),
+         value = if_else(value>0, value, NA))
+```
+
+``` r
+wua_predicted_cv_mainstems_grouped |>
+  filter(habitat == "rearing") |>
+  filter(river_group %in% dsm_habitat_wua_per_lf$watershed) |>
+  mutate(watershed = river_group) |>
+  ggplot(aes(x = flow_cfs)) + 
+  facet_wrap(~watershed, scales="free") + 
+  geom_line(aes(y = wua_acres_pred, color = paste("habistat", model_name))) +
+  geom_line(data=dsm_habitat_suitable_ac |> 
+              filter(flow_cfs <= 15000), 
+            aes(x = flow_cfs, y = value, color = paste("vs", name))) +
+  scale_x_log10() +
+  theme(legend.position = "top", panel.grid.minor = element_blank()) + 
+  scale_color_brewer(name = "", palette = "Paired") +
+  ylab("Predicted Total Habitat (acres)") + xlab("Flow at Outlet (cfs)") + 
+    guides(color = guide_legend(nrow = 2))
+```
+
+    ## Warning in scale_x_log10(): log-10 transformation introduced infinite values.
+
+    ## Warning: Removed 20 rows containing missing values or values outside the scale range
+    ## (`geom_line()`).
+
+![](watershed-flow-aggregation_files/figure-gfm/pred-watersheds-dsmhabitat-comparison-1.png)<!-- -->
 
 ## Applying this method to the duration analyis
 

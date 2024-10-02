@@ -51,6 +51,7 @@ function(input, output, session){
                                           lat = NULL)
 
   clicked_item_label <- reactive({
+    input$main_map_shape_click # so that this item updates on map click
     if (most_recent_map_click$type == "comid") {
       comid_name <- attr$gnis_name[[which(attr$comid==selected_point$comid)]]
       comid_watershed_name <- attr$watershed_level_3[[which(attr$comid==selected_point$comid)]]
@@ -250,7 +251,7 @@ function(input, output, session){
       xlab("Flow (cfs)") + ylab(wua_lab()) +
       scale_color_manual(name = "Model Type",
                          values = palette_colors) +
-      scale_linetype_manual(name = "Duration Analysis",
+      scale_linetype_manual(name = paste("Duration Analysis", active_reach_info$selected_gage),
                             values = palette_linetypes)
     } else if (most_recent_map_click$type == "watershed") {
       predictions_watershed |>
@@ -627,17 +628,17 @@ selected_watershed <- reactiveValues(object_id = NA,
 
       active_streamgage_attr <-
         streamgage_attr |>
-        filter(station_id == input$streamgage_id) |>
+        filter(station_id == active_reach_info$selected_gage) |>
         as.list()
 
-      message(paste0("pulling streamgage_drc for ", input$streamgage_id,
+      message(paste0("pulling streamgage_drc for ", active_reach_info$selected_gage,
               " ", input$selected_run,
               " ", input$habitat_type,
               " ", input$selected_wyt))
 
       active_streamgage_data <-
         get_data(streamgage_duration_rating_curves, package = "habistat") |>
-        filter((station_id == input$streamgage_id) &
+        filter((station_id == active_reach_info$selected_gage) &
                  (run == input$selected_run) &
                  (habitat == input$habitat_type) &
                  (wy_group == input$selected_wyt)) |>
@@ -675,19 +676,32 @@ selected_watershed <- reactiveValues(object_id = NA,
   active_reach_info <- reactiveValues(is_mainstem = FALSE,
                                       watershed_name = NA,
                                       river_name = NA,
-                                      multiplier = NA)
+                                      multiplier = NA,
+                                      default_gage = NULL,
+                                      selected_gage = NULL)
 
-  observe({
+  observeEvent(input$main_map_shape_click, {
+
+    # On map click, reset the selected streamgage
+    if(nrow(streamgage_options_geom()) > 0) {
+      active_reach_info$default_gage <- streamgage_options_geom()$station_id[[which(streamgage_options_geom()$nearest)]]
+      active_reach_info$selected_gage <- active_reach_info$default_gage
+    } else {
+      active_reach_info$default_gage <- NULL
+      active_reach_info$selected_gage <- NULL
+    }
+
+    # On map click, update the active reach attributes which inform the streamgage selection options
     if (most_recent_map_click$type == "comid") {
       active_reach_info$watershed_name <- (attr |>
-                                        filter(comid == selected_point$comid) |>
-                                        pull(watershed_level_3))[[1]]
-      active_reach_info$river_name <- (attr |>
                                              filter(comid == selected_point$comid) |>
-                                             pull(river_cvpia))[[1]]
+                                             pull(watershed_level_3))[[1]]
+      active_reach_info$river_name <- (attr |>
+                                         filter(comid == selected_point$comid) |>
+                                         pull(river_cvpia))[[1]]
       active_reach_info$is_mainstem <- !is.na((attr |>
-                                     filter(comid == selected_point$comid) |>
-                                     pull(river_cvpia))[[1]])
+                                                 filter(comid == selected_point$comid) |>
+                                                 pull(river_cvpia))[[1]])
     } else if (most_recent_map_click$type == "watershed"){
       active_reach_info$watershed_name <- selected_watershed$watershed_name
       active_reach_info$is_mainstem <- FALSE
@@ -695,9 +709,18 @@ selected_watershed <- reactiveValues(object_id = NA,
       active_reach_info$river_name <- selected_mainstem$river_name
       active_reach_info$is_mainstem <- TRUE
     }
+
+  })
+
+  # On new selection from dropdown, set the selected streamgage
+  observe({
+    active_reach_info$selected_gage <- input$streamgage_id
   })
 
   streamgage_options <- reactive({
+
+    input$main_map_shape_click # so that this item updates on map click
+    # TODO Make sure this updates anytime active_reach_info$river_name / $watershed_name changes
     if(active_reach_info$is_mainstem) {
       message(paste("pulling streamgage options for", active_reach_info$river_name))
       streamgages[[active_reach_info$river_name]]
@@ -732,7 +755,7 @@ selected_watershed <- reactiveValues(object_id = NA,
       selectInput(inputId = "streamgage_id",
                   label = "Select Gage for Duration Analysis",
                   choices = setNames(names(streamgage_options()), streamgage_options()),
-                  selected = streamgage_options_geom()$station_id[[which(streamgage_options_geom()$nearest)]])
+                  selected = active_reach_info$default_gage)
     } else {
       selectInput(inputId = "streamgage_id",
                   label = "Select Gage for Duration Analysis",
@@ -749,9 +772,9 @@ selected_watershed <- reactiveValues(object_id = NA,
     })
 
     streamgage_options_geom_labelled <- reactive({
-      if((nrow(streamgage_options_geom()) > 0) & (length(input$streamgage_id) > 0)){
+      if((nrow(streamgage_options_geom()) > 0) & (length(active_reach_info$selected_gage) > 0)){
         streamgage_options_geom() |>
-          mutate(selected = (station_id == input$streamgage_id))
+          mutate(selected = (station_id == coalesce(active_reach_info$selected_gage, NA)))
       } else {
         streamgage_options_geom() |>
           mutate(selected = FALSE) #st_sf(st_sfc())
@@ -760,6 +783,9 @@ selected_watershed <- reactiveValues(object_id = NA,
 
   observe({
     streamgage_options_geom_labelled()
+
+  # observeEvent(input$main_map_shape_click, {
+
     proxy <- leaflet::leafletProxy("main_map")
     proxy |>
       leaflet::removeMarker(paste0("streamgage_", streamgage_pts$station_id))
@@ -790,7 +816,7 @@ selected_watershed <- reactiveValues(object_id = NA,
 
   duration_curve <- reactive({
     #TODO: When the comid resets, reset the streamgage selection don't keep using the old one
-    if (length(input$streamgage_id) > 0) {
+    if (length(active_reach_info$selected_gage) > 0) {
 
     if (most_recent_map_click$type == "comid") {
 
@@ -845,7 +871,7 @@ selected_watershed <- reactiveValues(object_id = NA,
 
       drcs <-
         get_data(streamgage_duration_rating_curves, package = "habistat") |>
-        filter((station_id == input$streamgage_id) &
+        filter((station_id == active_reach_info$selected_gage) &
                  (run == input$selected_run) &
                  (habitat == input$habitat_type) &
                  (wy_group == input$selected_wyt)) |>

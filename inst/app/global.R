@@ -7,6 +7,8 @@ library(leafgl)
 library(habistat)
 library(patchwork)
 
+# reactlog::reactlog_enable()
+
 get_data <- function(...) {
   # use this for loading data from R package such that it can be easily garbage-collected
   # get_data(wua_predicted, package = "habistat")

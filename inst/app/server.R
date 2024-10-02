@@ -83,10 +83,7 @@ function(input, output, session){
     active_predictions <- predictions |>
       filter(flow_idx == as.integer(active_map_params$flow)) |>
       filter(habitat == input$habitat_type) |>
-      inner_join(attr |> select(comid, spawning_gravel_either_method), by=join_by(comid)) |>
-      #mutate(across(starts_with("wua_"), function(x) if_else(habitat == "spawning" & input_parms$spawning_filter & !spawning_gravel_either_method, 0, x))) |>
-      #filter(!((habitat == "spawning") & (input_parms$spawning_filter) & (!(spawning_gravel_either_method)))) |>
-      glimpse() #|>
+      inner_join(attr |> select(comid, spawning_gravel_either_method), by=join_by(comid))
 
     if(isTRUE(input$spawning_toggle)) {
       active_predictions <- active_predictions |>
@@ -111,9 +108,7 @@ function(input, output, session){
                                    round(wua_per_lf_pred_SN,2), " ft2/ft", "<br />",
                                    #"Scale-Normalized Model (post-model baseflow removal): ",
                                    #round(wua_per_lf_pred_SN_ph_bfc_rm,2), " ft2/ft", "<br />",
-                                   "Actual: ", round(wua_per_lf_actual,2), " ft2/ft")) |>
-      #filter(watershed_name == selected_watershed_name()) |>
-      glimpse()
+                                   "Actual: ", round(wua_per_lf_actual,2), " ft2/ft"))
   })
 
   active_geom_mainstem <- reactive({
@@ -125,14 +120,8 @@ function(input, output, session){
       mutate(object_label = paste0("<strong>", river_cvpia, "</strong>", "<br />",
                                    "Scale-Dependent Model: ",
                                    round(wua_per_lf_pred_SD,2), " ft2/ft", "<br />",
-                                   #"Scale-Dependent Model (post-model baseflow removal): ",
-                                   #round(wua_per_lf_pred_SD_ph_bfc_rm,2), " ft2/ft", "<br />",
                                    "Scale-Normalized Model: ",
-                                   round(wua_per_lf_pred_SN,2), " ft2/ft", "<br />")) |>
-                                   #"Scale-Normalized Model (post-model baseflow removal): ",
-                                   #round(wua_per_lf_pred_SN_ph_bfc_rm,2), " ft2/ft")
-      #filter(watershed_name == selected_watershed_name()) |>
-      glimpse()
+                                   round(wua_per_lf_pred_SN,2), " ft2/ft", "<br />"))
   })
 
   # SELECTED COMID OBSERVER ----------------------------------------------------
@@ -229,7 +218,6 @@ function(input, output, session){
     predictions |>
       filter(comid == selected_point$comid) |>
       filter(habitat == input$habitat_type) |>
-        glimpse() |>
       ggplot(aes(x = flow_cfs)) + #|> add_color_scale(type = input$habitat_type) +
       geom_line(aes(y = !!sym(paste0(input$wua_units,"_actual")), color="Actual", linetype = "Unscaled")) +
       geom_line(aes(y = !!sym(paste0(input$wua_units,"_pred_SD")), color="Scale-Dependent", linetype = "Unscaled")) +
@@ -251,7 +239,7 @@ function(input, output, session){
       xlab("Flow (cfs)") + ylab(wua_lab()) +
       scale_color_manual(name = "Model Type",
                          values = palette_colors) +
-      scale_linetype_manual(name = paste("Duration Analysis", active_reach_info$selected_gage),
+      scale_linetype_manual(name = paste("Duration Analysis", coalesce(paste0("(",str_to_upper(selected_gage()), ")"), "")),
                             values = palette_linetypes)
     } else if (most_recent_map_click$type == "watershed") {
       predictions_watershed |>
@@ -603,95 +591,27 @@ selected_watershed <- reactiveValues(object_id = NA,
   active_predictions_watershed <- reactive({
     predictions_watershed |>
       filter(flow_idx == as.integer(active_map_params$flow)) |>
-      filter(habitat == input$habitat_type) |>
-      glimpse()
+      filter(habitat == input$habitat_type)
   })
 
   active_predictions_mainstem <- reactive({
     predictions_mainstem |>
       filter(flow_idx == as.integer(active_map_params$flow)) |>
-      filter(habitat == input$habitat_type) |>
-      glimpse()
+      filter(habitat == input$habitat_type)
   })
 
-  # DURATION ANALYSIS ----------------------------------------------------------
-
-  # for comid only
-  streamgage_drc <- reactive({
-    # TODO: SCALE THIS BASED ON COMID DA
-
-    if (most_recent_map_click$type == "comid") {
-
-      active_reach_attr <- attr |>
-        filter(comid == selected_point$comid) |>
-        as.list()
-
-      active_streamgage_attr <-
-        streamgage_attr |>
-        filter(station_id == active_reach_info$selected_gage) |>
-        as.list()
-
-      message(paste0("pulling streamgage_drc for ", active_reach_info$selected_gage,
-              " ", input$selected_run,
-              " ", input$habitat_type,
-              " ", input$selected_wyt))
-
-      active_streamgage_data <-
-        get_data(streamgage_duration_rating_curves, package = "habistat") |>
-        filter((station_id == active_reach_info$selected_gage) &
-                 (run == input$selected_run) &
-                 (habitat == input$habitat_type) &
-                 (wy_group == input$selected_wyt)) |>
-        unnest(data) |>
-        glimpse()
-
-
-      if (length(active_streamgage_data) > 0) {
-
-        active_reach_info$multiplier <-
-          (active_reach_attr$da_area_sq_km / active_streamgage_attr$da_gage) *
-          (active_reach_attr$da_ppt_mean_mm / active_streamgage_attr$pc_gage)
-
-        multiplier <- if (input$scale_flow) active_reach_info$multiplier else 1
-
-          message(paste("scaling streamgage flow data by", multiplier))
-
-        active_streamgage_data |>
-            mutate(model_q = model_q * multiplier) |>
-            mutate(dhsi_selected = case_when(
-              input$habitat_type == "spawning" ~ durhsi_spawning,
-              active_reach_attr$hqt_gradient_class == "Valley Lowland" ~ durhsi_rearing_vl,
-              TRUE ~ durhsi_rearing_vf))
-
-        } else {
-
-          tibble(q = list(), dhsi_selected = list(), avg_max_days_inundated = list())
-
-        }
-      }
-
-  })
-
+  # STREAMGAGE SELECTION -------------------------------------------------------
+# TODO MAKE SURE THE MAIN PLOT STILL WORKS WHEN THERE ARE NO GAGES
   # ACTIVE STREAMGAGE SELECTOR
+
   active_reach_info <- reactiveValues(is_mainstem = FALSE,
                                       watershed_name = NA,
                                       river_name = NA,
-                                      multiplier = NA,
-                                      default_gage = NULL,
-                                      selected_gage = NULL)
+                                      multiplier = NA)
 
+  # Update these attributes any time the map is clicked...
   observeEvent(input$main_map_shape_click, {
-
-    # On map click, reset the selected streamgage
-    if(nrow(streamgage_options_geom()) > 0) {
-      active_reach_info$default_gage <- streamgage_options_geom()$station_id[[which(streamgage_options_geom()$nearest)]]
-      active_reach_info$selected_gage <- active_reach_info$default_gage
-    } else {
-      active_reach_info$default_gage <- NULL
-      active_reach_info$selected_gage <- NULL
-    }
-
-    # On map click, update the active reach attributes which inform the streamgage selection options
+    message("--- Observe input$main_map_shape_click: Update active_reach_info values")
     if (most_recent_map_click$type == "comid") {
       active_reach_info$watershed_name <- (attr |>
                                              filter(comid == selected_point$comid) |>
@@ -709,87 +629,95 @@ selected_watershed <- reactiveValues(object_id = NA,
       active_reach_info$river_name <- selected_mainstem$river_name
       active_reach_info$is_mainstem <- TRUE
     }
-
+    message("/// Observe input$main_map_shape_click: Update active_reach_info values")
   })
 
-  # On new selection from dropdown, set the selected streamgage
-  observe({
-    active_reach_info$selected_gage <- input$streamgage_id
-  })
-
+  # Whenever active river name or watershed name is updated...
+  # ...Update list of possible streamgages...
   streamgage_options <- reactive({
+    message("--- Reactive: Update streamgage_options")
 
-    input$main_map_shape_click # so that this item updates on map click
-    # TODO Make sure this updates anytime active_reach_info$river_name / $watershed_name changes
     if(active_reach_info$is_mainstem) {
       message(paste("pulling streamgage options for", active_reach_info$river_name))
-      streamgages[[active_reach_info$river_name]]
+      streamgage_options <- streamgages[[active_reach_info$river_name]]
     } else if (most_recent_map_click$type == "watershed") {
       message(paste("pulling streamgage options for", active_reach_info$watershed_name))
-      streamgages_by_watershed[[active_reach_info$watershed_name]]
+      streamgage_options <- streamgages_by_watershed[[active_reach_info$watershed_name]]
     } else {
-      list()
+      streamgage_options <- list()
     }
+    message(paste(length(streamgage_options), "streamgages found"))
+    return(streamgage_options)
+    message("/// Reactive: Update streamgage_options")
   })
-
+  # ...Pull geometries for possible streamgages...
   streamgage_options_geom <- reactive({
-    message(paste(length(streamgage_options()), " streamgages found"))
-    if(length(streamgage_options()) > 0){
+    message("--- Reactive: Update streamgage_options_geom")
+    if(isTRUE(length(streamgage_options()) > 0)){
       geom <- streamgage_pts |>
         filter(station_id %in% names(streamgage_options()))
-
-
-      nearest_station_id <- geom$station_id[[
-          st_nearest_feature(st_point(c(most_recent_map_click$lng,
-                                        most_recent_map_click$lat)),
-                             geom,
-                             check_crs = FALSE)]]
-      geom |> mutate(nearest = (station_id == nearest_station_id))
     } else {
-      st_sf(st_sfc())
+      geom <- st_sf(st_sfc())
     }
+    message(paste(nrow(geom), "streamgage geometries filtered"))
+    return(geom)
+    message("/// Reactive: Update streamgage_options_geom")
   })
-
-    output$streamgage_selector <- renderUI({
-    if(length(streamgage_options_geom()$station_id) > 0) {
-      selectInput(inputId = "streamgage_id",
-                  label = "Select Gage for Duration Analysis",
-                  choices = setNames(names(streamgage_options()), streamgage_options()),
-                  selected = active_reach_info$default_gage)
+  # Pull out the ID of the nearest streamgage
+  streamgage_nearest_id <- reactive({
+    message("--- Reactive: Update streamgage_nearest_id")
+    if(isTRUE(nrow(streamgage_options_geom()) > 0)) {
+      geom <- streamgage_options_geom()
+      streamgage_nearest_id <- geom$station_id[[
+        st_nearest_feature(st_point(c(most_recent_map_click$lng,
+                                      most_recent_map_click$lat)),
+                           geom,
+                           check_crs = FALSE)]]
     } else {
-      selectInput(inputId = "streamgage_id",
-                  label = "Select Gage for Duration Analysis",
-                  choices = c())
-      message("no stream gages")
+      streamgage_nearest_id <- NA
     }
+    message(paste("streamgage_nearest_id =", streamgage_nearest_id))
+    return(streamgage_nearest_id)
+    message("/// Reactive: Update streamgage_nearest_id")
   })
-
-    output$flowscale_toggle <- renderUI({
-      if (most_recent_map_click$type == "comid") {
-        title <- paste0("Scale Flow by Drainage Area and Precipitation Ratio = ", round(active_reach_info$multiplier, 2))
-        checkboxInput("scale_flow", title, value=T)
-      }
-    })
-
-    streamgage_options_geom_labelled <- reactive({
-      if((nrow(streamgage_options_geom()) > 0) & (length(active_reach_info$selected_gage) > 0)){
-        streamgage_options_geom() |>
-          mutate(selected = (station_id == coalesce(active_reach_info$selected_gage, NA)))
+  # Identify the selected streamgage based on the selector menu and the available options
+  selected_gage <- reactive({
+    message("--- Reactive: Update selected_gage")
+    if (isTRUE(coalesce(input$streamgage_id, NA) %in% names(streamgage_options()))) {
+      selected_gage <- input$streamgage_id
+    } else {
+      selected_gage <- streamgage_nearest_id()
+    }
+    message(paste("selected_gage =", selected_gage))
+    return(coalesce(selected_gage, NA))
+    message("/// Reactive: Update selected_gage")
+  })
+  # Label the geometry with the selected streamgage
+  streamgage_options_geom_labelled <- reactive({
+    message("--- Reactive: Update streamgage_options_geom_labelled")
+    geom <- streamgage_options_geom()
+    message(paste(nrow(geom), "streamgage geometries retrieved"))
+    if(isTRUE((nrow(geom) > 0))) {
+      if(isTRUE(!is.na(selected_gage()))) {
+        geom_lab <- geom |> mutate(selected = (station_id == coalesce(selected_gage(), NA)))
       } else {
-        streamgage_options_geom() |>
-          mutate(selected = FALSE) #st_sf(st_sfc())
+        geom_lab <- geom |> mutate(selected = FALSE)
       }
-    })
-
+    } else {
+      geom_lab <- st_sf(st_sfc())
+    }
+    message(paste(nrow(geom_lab), "streamgage geometries returned"))
+    return(geom_lab)
+    message("/// Reactive: Update streamgage_options_geom_labelled")
+  })
+  # Update the map to include the latest streamgages including the active gage selection
   observe({
-    streamgage_options_geom_labelled()
-
-  # observeEvent(input$main_map_shape_click, {
-
+    message("--- Observe streamgage_options_geom_labelled: Update streamgage leaflet map layer")
+    selected_gage() # This needs to be here for reactive to function
     proxy <- leaflet::leafletProxy("main_map")
     proxy |>
       leaflet::removeMarker(paste0("streamgage_", streamgage_pts$station_id))
-    if (length(streamgage_options()) > 0) {
+    if (isTRUE(nrow(streamgage_options_geom_labelled()) > 0)) {
       proxy |>
         leaflet::addCircleMarkers(data = streamgage_options_geom_labelled(),
                                   layerId = ~paste0("streamgage_", station_id),
@@ -799,9 +727,13 @@ selected_watershed <- reactiveValues(object_id = NA,
                                   radius = 6,
                                   options = leaflet::markerOptions(pane = "Overlays"))
     }
+    message("/// Observe streamgage_options_geom_labelled: Update streamgage leaflet map layer")
   })
 
+  # On click of streamgage, update the lat/lon of most recent map click
+  # which is used to update the active streamgage
   observeEvent(input$main_map_marker_click, {
+    message("--- Observe input$main_map_marker_click: Update most_recent_map_click values")
     cat(input$main_map_marker_click$id)
     if (!is.null(input$main_map_marker_click$id)) {
       if(substr(input$main_map_marker_click$id, 1, 11) == "streamgage_") {
@@ -810,13 +742,98 @@ selected_watershed <- reactiveValues(object_id = NA,
         most_recent_map_click$lat <- input$main_map_marker_click$lat
       }
     }
+    message("/// Observe input$main_map_marker_click: Update most_recent_map_click values")
+  })
+
+  output$streamgage_selector <- renderUI({
+    message("--- Render output$streamgage_selector")
+    if(length(streamgage_options_geom()$station_id) > 0) {
+      selectInput(inputId = "streamgage_id",
+                  label = "Select Gage for Duration Analysis",
+                  choices = setNames(names(streamgage_options()), streamgage_options()),
+                  selected = streamgage_nearest_id())
+    } else {
+      selectInput(inputId = "streamgage_id",
+                  label = "Select Gage for Duration Analysis",
+                  choices = c())
+      message("no stream gages")
+    }
+    message("/// Render output$streamgage_selector")
+  })
+
+  output$flowscale_toggle <- renderUI({
+    message("--- Render output$flowscale_toggle")
+    if (most_recent_map_click$type == "comid") {
+      title <- paste0("Scale Flow by Drainage Area and Precipitation Ratio = ", round(active_reach_info$multiplier, 2))
+      checkboxInput("scale_flow", title, value=T)
+    }
+    message("/// Render output$flowscale_toggle")
+  })
+
+  # DURATION ANALYSIS ----------------------------------------------------------
+
+  # STREAMGAGE RATING CURVE
+
+  # for comid only
+  streamgage_drc <- reactive({
+    # TODO: SCALE THIS BASED ON COMID DA
+
+    if (most_recent_map_click$type == "comid") {
+
+      active_reach_attr <- attr |>
+        filter(comid == selected_point$comid) |>
+        as.list()
+
+      active_streamgage_attr <-
+        streamgage_attr |>
+        filter(station_id == coalesce(selected_gage(), NA)) |>
+        as.list()
+
+      message(paste0("pulling streamgage_drc for ", selected_gage(),
+                     " ", input$selected_run,
+                     " ", input$habitat_type,
+                     " ", input$selected_wyt))
+
+      active_streamgage_data <-
+        get_data(streamgage_duration_rating_curves, package = "habistat") |>
+        filter((station_id == selected_gage()) &
+                 (run == input$selected_run) &
+                 (habitat == input$habitat_type) &
+                 (wy_group == input$selected_wyt)) |>
+        unnest(data)
+
+
+      if (nrow(active_streamgage_data) > 0) {
+
+        active_reach_info$multiplier <-
+          (active_reach_attr$da_area_sq_km / active_streamgage_attr$da_gage) *
+          (active_reach_attr$da_ppt_mean_mm / active_streamgage_attr$pc_gage)
+
+        multiplier <- if (isTRUE(input$scale_flow)) active_reach_info$multiplier else 1
+
+        message(paste("scaling streamgage flow data by", multiplier))
+
+        active_streamgage_data |>
+          mutate(model_q = model_q * multiplier) |>
+          mutate(dhsi_selected = case_when(
+            input$habitat_type == "spawning" ~ durhsi_spawning,
+            active_reach_attr$hqt_gradient_class == "Valley Lowland" ~ durhsi_rearing_vl,
+            TRUE ~ durhsi_rearing_vf))
+
+      } else {
+
+        tibble(q = list(), dhsi_selected = list(), avg_max_days_inundated = list())
+
+      }
+    }
+
   })
 
   # DURATION CURVE CALCULATION
 
   duration_curve <- reactive({
     #TODO: When the comid resets, reset the streamgage selection don't keep using the old one
-    if (length(active_reach_info$selected_gage) > 0) {
+    if (length(selected_gage()) > 0) {
 
     if (most_recent_map_click$type == "comid") {
 
@@ -824,8 +841,7 @@ selected_watershed <- reactiveValues(object_id = NA,
         predictions |>
         filter(comid == selected_point$comid) |>
         filter(habitat == input$habitat_type) |>
-        transmute(flow_cfs, selected_wua = !!sym(wua_var())) |>
-        glimpse()
+        transmute(flow_cfs, selected_wua = !!sym(wua_var()))
 
         if (nrow(streamgage_drc()) > 0) {
 
@@ -838,8 +854,7 @@ selected_watershed <- reactiveValues(object_id = NA,
             fsa_wua = selected_wua,
             drc = streamgage_drc(),
             drc_q = model_q,
-            drc_dhsi = dhsi_selected) |>
-            glimpse()
+            drc_dhsi = dhsi_selected)
 
         } else {
 
@@ -871,7 +886,7 @@ selected_watershed <- reactiveValues(object_id = NA,
 
       drcs <-
         get_data(streamgage_duration_rating_curves, package = "habistat") |>
-        filter((station_id == active_reach_info$selected_gage) &
+        filter((station_id == coalesce(selected_gage(), NA)) &
                  (run == input$selected_run) &
                  (habitat == input$habitat_type) &
                  (wy_group == input$selected_wyt)) |>
@@ -891,8 +906,7 @@ selected_watershed <- reactiveValues(object_id = NA,
                           mutate(dhsi_selected = case_when(input$habitat_type == "spawning" ~ durhsi_spawning,
                                                            hqt_gradient_class == "Valley Lowland" ~ durhsi_rearing_vl,
                                                            TRUE ~ durhsi_rearing_vf))
-                      })) |>
-        glimpse()
+                      }))
 
       joined <- inner_join(fsas, drcs, by=join_by(comid, !!sym(group_var), da_reach, pc_reach)) |>
         mutate(result = pmap(list(fsa_scaled, drc_scaled),

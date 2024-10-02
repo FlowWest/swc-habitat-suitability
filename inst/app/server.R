@@ -1,4 +1,3 @@
-# TODO Duration gages should only be an option on mainstems
 # Data not updating?
 # (1) Check that the latest source hydraulic Rds outputs are present
 # (2) Run model_cleaned.Rmd to re-export wua_hydraulic and wua_hydraulic_interp
@@ -152,6 +151,7 @@ function(input, output, session){
         select(any_of(names(var_names))) |>
         filter(comid == selected_point$comid) |>
         mutate(across(where(is.numeric), function(x) signif(x, 3) |> as.character(x))) |>
+        mutate(across(where(is.logical), function(x) if_else(x, "True", "False"))) |>
         mutate(across(-where(is.character), as.character)) |>
         pivot_longer(everything()) |>
         mutate(name = var_names[name])
@@ -160,6 +160,7 @@ function(input, output, session){
         select(any_of(names(var_names))) |>
         filter(watershed_level_3 == selected_watershed$watershed_name) |>
         mutate(across(where(is.numeric), function(x) signif(x, 3) |> as.character(x))) |>
+        mutate(across(where(is.logical), function(x) if_else(x, "True", "False"))) |>
         mutate(across(-where(is.character), as.character)) |>
         pivot_longer(everything()) |>
         mutate(name = var_names[name])
@@ -168,6 +169,7 @@ function(input, output, session){
         select(any_of(names(var_names))) |>
         filter(river_cvpia == selected_mainstem$river_name) |>
         mutate(across(where(is.numeric), function(x) signif(x, 3) |> as.character(x))) |>
+        mutate(across(where(is.logical), function(x) if_else(x, "True", "False"))) |>
         mutate(across(-where(is.character), as.character)) |>
         pivot_longer(everything()) |>
         mutate(name = var_names[name])
@@ -189,6 +191,8 @@ function(input, output, session){
      result <- attr |>
        filter(comid == selected_point$comid) |>
        mutate(across(where(is.numeric), function(x) signif(x, 3) |> as.character(x))) |>
+       mutate(across(where(is.logical), function(x) if_else(x, "True", "False"))) |>
+       mutate(across(-where(is.character), as.character)) |>
        pivot_longer(everything()) |>
        mutate(name = var_names[name])
      #gc()
@@ -290,44 +294,6 @@ function(input, output, session){
 
   # LEAFLET MAP FUNCTIONS ------------------------------------------------------
 
-  make_leaflet <- function(bbox=c(xmin=-122.3, ymin=38.5, xmax=-121.3, ymax=39.7)) {
-    m <- leaflet::leaflet() |>
-      leaflet::addMapPane("Basemap", zIndex = 400) |>
-      leaflet::addMapPane("ValleyLowland", zIndex = 440) |>
-      leaflet::addMapPane("Watersheds", zIndex = 445) |>
-      leaflet::addMapPane("Flowlines", zIndex = 470) |>
-      leaflet::addMapPane("Overlays", zIndex = 475) |>
-      leaflet::addMapPane("AOI", zIndex = 480) |>
-      leaflet::addMapPane("Reference", zIndex = 490) |>
-      leaflet::addTiles(urlTemplate = 'https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}',
-                        options = leaflet::tileOptions(noWrap = TRUE,
-                                                       opacity = 1,
-                                                       maxNativeZoom = 13,
-                                                       maxZoom = 13,
-                                                       pane = "Basemap"
-                        )) |>
-      leaflet::addTiles(urlTemplate = 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Reference_Overlay/MapServer/tile/{z}/{y}/{x}',
-                        options = leaflet::tileOptions(noWrap = TRUE,
-                                                       opacity = 1,
-                                                       #minZoom = 10,
-                                                       pane = "Reference"
-                        )) |>
-      leaflet::addTiles(urlTemplate = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-                        options = leaflet::tileOptions(noWrap = TRUE,
-                                                       opacity = 0.5,
-                                                       minZoom = 14,
-                                                       maxNativeZoom = 23,
-                                                       pane = "Basemap"
-                        )) |>
-      leaflet::addTiles(urlTemplate = "", attribution = 'Tiles &copy; Esri &mdash; Sources: GEBCO, NOAA, CHS, OSU, UNH, CSUMB, National Geographic, DeLorme, NAVTEQ, IGN, IGP, UPR-EGP, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, Esri, and the GIS User Community') |>
-      leaflet::fitBounds(lng1 = bbox[["xmin"]],
-                         lat1 = bbox[["ymin"]],
-                         lng2 = bbox[["xmax"]],
-                         lat2 = bbox[["ymax"]])
-
-    return(m)
-  }
-
   layer_flowlines <- function(m, show = TRUE, type = "comid") {
 
     # first remove any existing flowlines
@@ -394,12 +360,48 @@ function(input, output, session){
   # LEAFLET RENDER -------------------------------------------------------------
 
   output$main_map <- renderLeaflet({
+
     shinyjs::showElement(id = 'loading_action')
-    make_leaflet() |>
+
+    bbox <- c(xmin=-122.3, ymin=38.5, xmax=-121.3, ymax=39.7)
+
+    leaflet::leaflet() |>
+      leaflet::addMapPane("Basemap", zIndex = 400) |>
+      leaflet::addMapPane("ValleyLowland", zIndex = 440) |>
+      leaflet::addMapPane("Watersheds", zIndex = 445) |>
+      leaflet::addMapPane("Flowlines", zIndex = 470) |>
+      leaflet::addMapPane("Overlays", zIndex = 475) |>
+      leaflet::addMapPane("AOI", zIndex = 480) |>
+      leaflet::addMapPane("Reference", zIndex = 490) |>
+      leaflet::addTiles(urlTemplate = 'https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}',
+                        options = leaflet::tileOptions(noWrap = TRUE,
+                                                       opacity = 1,
+                                                       maxNativeZoom = 13,
+                                                       maxZoom = 13,
+                                                       pane = "Basemap"
+                        ), group = "Terrain (default)") |>
+      leaflet::addTiles(urlTemplate = 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Reference_Overlay/MapServer/tile/{z}/{y}/{x}',
+                        options = leaflet::tileOptions(noWrap = TRUE,
+                                                       opacity = 1,
+                                                       #minZoom = 10,
+                                                       pane = "Reference"
+                        ), group = "Terrain (default)") |>
+      leaflet::addTiles(urlTemplate = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                        options = leaflet::tileOptions(noWrap = TRUE,
+                                                       opacity = 1,
+                                                       maxZoom = 13,
+                                                       maxNativeZoom = 23,
+                                                       pane = "Basemap"
+                        ), group = "Aerial Imagery") |>
+      leaflet::addTiles(urlTemplate = "", attribution = 'Tiles &copy; Esri &mdash; Sources: GEBCO, NOAA, CHS, OSU, UNH, CSUMB, National Geographic, DeLorme, NAVTEQ, IGN, IGP, UPR-EGP, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, Esri, and the GIS User Community') |>
+      leaflet::fitBounds(lng1 = bbox[["xmin"]],
+                         lat1 = bbox[["ymin"]],
+                         lng2 = bbox[["xmax"]],
+                         lat2 = bbox[["ymax"]]) |>
       leaflet::addPolygons(data = watersheds,
                            stroke = T,
                            weight = 1,
-                           color = "red",
+                           color = "#31a1b3",
                            opacity = 0.5,
                            fill = T,
                            fillColor = "#FFFFFF",
@@ -412,7 +414,7 @@ function(input, output, session){
                                                                color = "white",
                                                                opacity = 1,
                                                                fill = T,
-                                                               fillColor = "red",
+                                                               fillColor = "#31a1b3",
                                                                fillOpacity = 0.5,
                                                                bringToFront = F)
       ) |>
@@ -424,11 +426,12 @@ function(input, output, session){
                            fillOpacity = 0.33,
                            options = leaflet::pathOptions(pane = "ValleyLowland")) |>
       addLayersControl(
-        baseGroups = c("Basemap"),
-        overlayGroups = c("flowlines", "watersheds", "HQT - Valley Lowland"), # TODO: unsure how to do watersheds right now..
+        baseGroups = c("Terrain (default)", "Aerial Imagery"),
+        overlayGroups = c("flowlines", "watersheds", "streamgages", "HQT - Valley Lowland"),
         options = layersControlOptions(collapsed = FALSE)
       ) |>
-      hideGroup("HQT - Valley Lowland")
+      hideGroup("HQT - Valley Lowland") |>
+      hideGroup("Aerial Imagery")
   })
 
   observe({
@@ -504,74 +507,66 @@ selected_watershed <- reactiveValues(object_id = NA,
   # ACTIVE MAP LOGIC ------------------------------------------------
 
   observe({
-    proxy <- leaflet::leafletProxy("main_map", session = session) |>
-      leaflet::removeShape("active_watershed")
+
+    proxy <- leaflet::leafletProxy("main_map", session = session)
+
+    # Active watershed
 
     if (most_recent_map_click$type == "watershed") {
       # (nrow(selected_watershed_geom()) > 0) &
       proxy |>
+        leaflet::removeShape("active_watershed") |>
         leaflet::addPolygons(data = selected_watershed_geom(),
                              stroke = T,
-                             weight = 2,
-                             color = "red",
+                             weight = 6,
+                             color = "#f6b911",
                              opacity = 1,
                              fill = T,
-                             fillColor = "red",
-                             fillOpacity = 0.25,
+                             fillColor = "#f6b911",
+                             fillOpacity = 0.33,
                              group = "watersheds", # this will make the active watershed also show/hide with the layer toggle
                              layerId = "active_watershed",
-                             label = ~lapply(watershed_label, htmltools::HTML))
+                             label = ~lapply(watershed_label, htmltools::HTML)) |>
+        leaflet::fitBounds(lng1 = selected_watershed_bbox()$xmin,
+                           lat1 = selected_watershed_bbox()$ymin,
+                           lng2 = selected_watershed_bbox()$xmax,
+                           lat2 = selected_watershed_bbox()$ymax)
 
-      proxy |>
-        leaflet::flyToBounds(lng1 = selected_watershed_bbox()$xmin,
-                             lat1 = selected_watershed_bbox()$ymin,
-                             lng2 = selected_watershed_bbox()$xmax,
-                             lat2 = selected_watershed_bbox()$ymax)
     } else {
 
-      leaflet::leafletProxy("main_map") |>
+      proxy |>
         leaflet::removeShape("active_watershed")
 
     }
 
-    if (most_recent_map_click$type == "comid") {
-      clicked_polyline <- active_geom() |>
-        filter(comid == selected_point$comid)
+    # Active flowline
 
-      bbox <- sf::st_bbox(clicked_polyline)
+    if (most_recent_map_click$type %in% c("comid", "mainstem")) {
+
+      if (most_recent_map_click$type == "comid") {
+        clicked_polyline <- active_geom() |>
+          filter(comid == selected_point$comid)
+      } else if (most_recent_map_click$type == "mainstem") {
+        clicked_polyline <- active_geom_mainstem() |>
+          filter(river_cvpia == selected_mainstem$river_name)
+      }
+
+      #bbox <- sf::st_bbox(clicked_polyline)
 
       proxy |>
-        fitBounds(bbox$ymin, bbox$xmin, bbox$ymax, bbox$xmax) |> #TODO: get this to work...
+        leaflet::removeShape("active_flowline") |>
         leaflet::addPolylines(data = clicked_polyline,
-                             weight = 20,
-                             color = "yellow",
-                             opacity = 1,
-                             layerId = "active_comid",
-                             label = ~lapply(object_label, htmltools::HTML))
-
-
-
-    } else {
-
-      leaflet::leafletProxy("main_map") |>
-        leaflet::removeShape("active_comid")
-
-    }
-
-    if (most_recent_map_click$type == "mainstem") {
-      proxy |>
-        leaflet::addPolylines(data = active_geom_mainstem(),
-                              stroke = T,
-                              weight = 2,
-                              color = "red",
+                              weight = 20,
+                              color = "#f6b911",
                               opacity = 1,
-                              layerId = "active_mainstem",
-                              label = ~lapply(mainstem_label, htmltools::HTML))
+                              layerId = "active_flowline",
+                              label = ~lapply(object_label, htmltools::HTML)) #|>
+      #fitBounds(bbox$ymin, bbox$xmin, bbox$ymax, bbox$xmax)
 
     } else {
 
-      leaflet::leafletProxy("main_map") |>
-        leaflet::removeShape("active_mainstem")
+      proxy |>
+        leaflet::removeShape("active_flowline")
 
     }
 
@@ -601,7 +596,7 @@ selected_watershed <- reactiveValues(object_id = NA,
   })
 
   # STREAMGAGE SELECTION -------------------------------------------------------
-# TODO MAKE SURE THE MAIN PLOT STILL WORKS WHEN THERE ARE NO GAGES
+
   # ACTIVE STREAMGAGE SELECTOR
 
   active_reach_info <- reactiveValues(is_mainstem = FALSE,
@@ -776,7 +771,6 @@ selected_watershed <- reactiveValues(object_id = NA,
 
   # for comid only
   streamgage_drc <- reactive({
-    # TODO: SCALE THIS BASED ON COMID DA
 
     if (most_recent_map_click$type == "comid") {
 
@@ -832,7 +826,7 @@ selected_watershed <- reactiveValues(object_id = NA,
   # DURATION CURVE CALCULATION
 
   duration_curve <- reactive({
-    #TODO: When the comid resets, reset the streamgage selection don't keep using the old one
+
     if (length(selected_gage()) > 0) {
 
     if (most_recent_map_click$type == "comid") {

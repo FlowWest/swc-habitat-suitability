@@ -16,7 +16,7 @@ shinyUI(
                      div(style="display: inline-block;",
                          shinyWidgets::radioGroupButtons("habitat_type", "Select Habitat Type", choices=c("rearing", "spawning"), selected="rearing")),
                      div(style="display: inline-block;",
-                         shinyWidgets::radioGroupButtons("flowline_scope", "Select Geographic Scope", choices=c("comid", "mainstem"), selected="comid")),
+                         shinyWidgets::radioGroupButtons("flowline_scope", "Select Flowline Type", choices=c("comid", "mainstem"), selected="comid")),
                      div(style="display: inline-block;",
                      shinyWidgets::radioGroupButtons("wua_var", "Select Calculation Method", list("Scale-Dependent" = "wua_per_lf_pred_SD",
                                                                                                   "Scale-Normalized" = "wua_per_lf_pred_SN",

@@ -5,6 +5,17 @@
 
 function(input, output, session){
 
+  # pre-load dynamic output items and make sure they do not suspend when hidden
+  output$units_selector <- renderUI({})
+  outputOptions(output, "units_selector", suspendWhenHidden = FALSE)
+  output$out_spawning_toggle <- renderUI({})
+  outputOptions(output, "out_spawning_toggle", suspendWhenHidden = FALSE)
+  output$out_streamgage_selector <- renderUI({})
+  outputOptions(output, "out_streamgage_selector", suspendWhenHidden = FALSE)
+  output$out_flowscale_toggle <- renderUI({})
+  outputOptions(output, "out_flowscale_toggle", suspendWhenHidden = FALSE)
+
+
   # WUA VARIABLE UNITS ---------------------------------------------------------
   wua_var <- reactive({
     switch(input$wua_var,
@@ -34,7 +45,7 @@ function(input, output, session){
   })
 
   #input_parms <- reactiveValues(spawning_filter = FALSE)
-  output$spawning_toggle <- renderUI({
+  output$out_spawning_toggle <- renderUI({
     if (input$flowline_scope=="comid" & input$habitat_type=="spawning") {
       checkboxInput("spawning_toggle", "Use geomorphic spawning gravel likelihood", value = TRUE)
     }
@@ -214,10 +225,6 @@ function(input, output, session){
     palette_colors <- c("Scale-Dependent" = "#6388b4",
                         "Scale-Normalized" = "#8cc2ca",
                         "Actual" = "#ffae34")
-    #var_not_selected <- switch(input$wua_var,
-    #                           "wua_per_lf_pred_SD"="wua_per_lf_pred_SN",
-    #                           "wua_per_lf_pred_SN"="wua_per_lf_pred_SD")
-    message("!!!", selected_point$comid)
     if (most_recent_map_click$type == "comid") { #& (length(selected_point$comid)>0)) {
     predictions |>
       filter(comid == selected_point$comid) |>
@@ -265,7 +272,7 @@ function(input, output, session){
         xlab("Flow (cfs)") + ylab(wua_lab()) +
         scale_color_manual(name = "Model Type",
                            values = palette_colors) +
-        scale_linetype_manual(name = "Duration Analysis",
+        scale_linetype_manual(name = paste("Duration Analysis", coalesce(paste0("(",str_to_upper(selected_gage()), ")"), "")),
                               values = palette_linetypes)
     } else if (most_recent_map_click$type == "mainstem") {
       predictions_mainstem |>
@@ -286,7 +293,7 @@ function(input, output, session){
         xlab("Flow (cfs)") + ylab(wua_lab()) +
         scale_color_manual(name = "Model Type",
                            values = palette_colors) +
-        scale_linetype_manual(name = "Duration Analysis",
+        scale_linetype_manual(name = paste("Duration Analysis", coalesce(paste0("(",str_to_upper(selected_gage()), ")"), "")),
                               values = palette_linetypes)
     } else {
       ggplot()
@@ -740,27 +747,30 @@ selected_watershed <- reactiveValues(object_id = NA,
     message("/// Observe input$main_map_marker_click: Update most_recent_map_click values")
   })
 
-  output$streamgage_selector <- renderUI({
+  output$out_streamgage_selector <- renderUI({
     message("--- Render output$streamgage_selector")
-    if(length(streamgage_options_geom()$station_id) > 0) {
-      selectInput(inputId = "streamgage_id",
+    if(length(streamgage_options()) > 0) {
+      message(paste(streamgage_options(), collapse=", "))
+      el <- selectInput(inputId = "streamgage_id",
                   label = "Select Gage for Duration Analysis",
                   choices = setNames(names(streamgage_options()), streamgage_options()),
-                  selected = streamgage_nearest_id())
+                  selected = selected_gage())
     } else {
-      selectInput(inputId = "streamgage_id",
+      el <- selectInput(inputId = "streamgage_id",
                   label = "Select Gage for Duration Analysis",
                   choices = c())
       message("no stream gages")
     }
+    return(el)
     message("/// Render output$streamgage_selector")
   })
 
-  output$flowscale_toggle <- renderUI({
+  output$out_flowscale_toggle <- renderUI({
     message("--- Render output$flowscale_toggle")
-    if (most_recent_map_click$type == "comid") {
+    if (most_recent_map_click$type == "comid" & isTRUE(is.numeric(active_reach_info$multiplier))) {
       title <- paste0("Scale Flow by Drainage Area and Precipitation Ratio = ", round(active_reach_info$multiplier, 2))
-      checkboxInput("scale_flow", title, value=T)
+      el <- checkboxInput("scale_flow", title, value=T)
+      return(el)
     }
     message("/// Render output$flowscale_toggle")
   })
@@ -870,14 +880,18 @@ selected_watershed <- reactiveValues(object_id = NA,
                         "mainstem" = cv_mainstems_flow_xw,
                         "watershed" = cv_watersheds_flow_xw)
 
+      message("FSA")
       fsas <-
         predictions_filtered |>
         filter(habitat == input$habitat_type) |>
         transmute(!!sym(group_var), comid, flow_idx, flow_cfs, reach_length_ft, selected_wua = !!sym(input$wua_var)) |>
         nest(fsa_raw = c(flow_idx, flow_cfs, reach_length_ft, selected_wua), .by = c(!!sym(group_var), comid)) |>
         inner_join(flow_xw, by=join_by(!!sym(group_var), comid)) |>
-        mutate(fsa_scaled = pmap(list(fsa_raw, multiplier), function(x, y) scale_fsa(x, y, .wua_var = selected_wua, .flow_var = flow_cfs)))
+        mutate(fsa_scaled = pmap(list(fsa_raw, multiplier), function(x, y) scale_fsa(x, y, .wua_var = selected_wua, .flow_var = flow_cfs))) |>
+        rename(multiplier_fsa = multiplier) |>
+        glimpse()
 
+      message(paste("DRC", selected_gage()))
       drcs <-
         get_data(streamgage_duration_rating_curves, package = "habistat") |>
         filter((station_id == coalesce(selected_gage(), NA)) &
@@ -900,8 +914,13 @@ selected_watershed <- reactiveValues(object_id = NA,
                           mutate(dhsi_selected = case_when(input$habitat_type == "spawning" ~ durhsi_spawning,
                                                            hqt_gradient_class == "Valley Lowland" ~ durhsi_rearing_vl,
                                                            TRUE ~ durhsi_rearing_vf))
-                      }))
+                      })) |>
+        rename(multiplier_drc = multiplier) |>
+        glimpse()
 
+      if (nrow(drcs)>0) {
+
+      message("FSA x DRC")
       joined <- inner_join(fsas, drcs, by=join_by(comid, !!sym(group_var), da_reach, pc_reach)) |>
         mutate(result = pmap(list(fsa_scaled, drc_scaled),
                              function(fsa, drc) {
@@ -921,27 +940,35 @@ selected_watershed <- reactiveValues(object_id = NA,
 
         })) |>
         select(-fsa_raw, -drc_raw, -fsa_scaled, -drc_scaled) |>
-        unnest(result)
+        unnest(result) |>
+        glimpse()
 
       message(paste("aggregated duration curve for", most_recent_map_click$type))
 
       duration_curve_result <-
         joined |>
+        glimpse() |>
         group_by(habitat, run, wy_group,
                  !!sym(group_var), q = flow_idx) |> # better to use the float version
         summarize(across(c(wua, durwua), switch(input$wua_units,
                                                 wua_per_lf = function(y) sum(y * reach_length_ft) / sum(reach_length_ft),
                                                 wua_acres = function(y) sum(y * reach_length_ft) / 43560)),
                   .groups="drop")
+      } else {
+
+      duration_curve_result <- tibble(q = list(), wua = list(), durwua = list())
+
+      }
 
     } else {
 
       fsa <- tibble(flow_cfs = c(),
+                    flow_idx = c(),
                     selected_wua = c())
     }
     } else {
 
-      duration_curve_result <- tibble(q = list(), durwua = list())
+      duration_curve_result <- tibble(q = list(), wua = list(), durwua = list())
 
     }
 

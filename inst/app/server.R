@@ -682,10 +682,13 @@ selected_watershed <- reactiveValues(object_id = NA,
     return(streamgage_nearest_id)
     message("/// Reactive: Update streamgage_nearest_id")
   })
+
+  most_recent_gage_event <- reactiveValues(type = NA)
+
   # Identify the selected streamgage based on the selector menu and the available options
   selected_gage <- reactive({
     message("--- Reactive: Update selected_gage")
-    if (isTRUE(coalesce(input$streamgage_id, NA) %in% names(streamgage_options()))) {
+    if ((isTRUE(coalesce(input$streamgage_id, NA) %in% names(streamgage_options()))) & (most_recent_gage_event$type=="menu_select")) {
       selected_gage <- input$streamgage_id
     } else {
       selected_gage <- streamgage_nearest_id()
@@ -742,9 +745,13 @@ selected_watershed <- reactiveValues(object_id = NA,
         message("clicked streamgage")
         most_recent_map_click$lng <- input$main_map_marker_click$lng
         most_recent_map_click$lat <- input$main_map_marker_click$lat
+        most_recent_gage_event$type <- "map_click"
       }
     }
     message("/// Observe input$main_map_marker_click: Update most_recent_map_click values")
+  })
+  observeEvent(input$streamgage_id, {
+    most_recent_gage_event$type <- "menu_select"
   })
 
   output$out_streamgage_selector <- renderUI({

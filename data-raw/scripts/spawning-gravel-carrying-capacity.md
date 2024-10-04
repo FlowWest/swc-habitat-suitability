@@ -38,6 +38,7 @@ glimpse_plot <- function(x, ...) {
   plot(x, ...)
   invisible(x)
 }
+knitr::opts_chunk$set(fig.width=6.5, fig.height=4, dpi=300)
 ```
 
 Map current and historical habitat reaches of the Yuba and its major
@@ -376,7 +377,12 @@ lyr_redd_survey <- read_csv(here::here("data-raw", "source", "spawning_data", "s
   separate(name, sep = "_", into = c("var", "year")) |>
   separate(rm, sep = " - ", into = c("rm_start", "rm_end")) |>
   mutate(across(starts_with("rm_"), as.numeric)) |>
-  mutate(time_range = factor(time_range, levels = c("On or Prior to Oct 15", "On or After Oct 16")))
+  mutate(time_range = factor(time_range, levels = c("On or Prior to Oct 15", "On or After Oct 16"))) |>
+  select(-var) %>%
+  bind_rows(. |>
+    group_by(rm_start, rm_end, time_range) |>
+    summarize(value = max(value)) |>
+    mutate(year = "max"))
 ```
 
     ## Rows: 50 Columns: 5
@@ -387,38 +393,104 @@ lyr_redd_survey <- read_csv(here::here("data-raw", "source", "spawning_data", "s
     ## 
     ## ℹ Use `spec()` to retrieve the full column specification for this data.
     ## ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+    ## `summarise()` has grouped output by 'rm_start', 'rm_end'. You can override using the `.groups` argument.
 
 ``` r
 lyr_redd_survey |>
   group_by(year, time_range) |>
   summarize(total_redds = sum(value)) |>
-  #pivot_wider(names_from = time_range, values_from = total_redds)
-  mutate(spawning_area_ac = total_redds * 94 / 43560)
+  mutate(spawning_area_ac = total_redds * 94 / 43560) |>
+  select(time_range, year, total_redds, spawning_area_ac) |>
+  arrange(time_range, year)
 ```
 
     ## `summarise()` has grouped output by 'year'. You can override using the
     ## `.groups` argument.
 
-    ## # A tibble: 4 × 4
-    ## # Groups:   year [2]
-    ##   year  time_range            total_redds spawning_area_ac
-    ##   <chr> <fct>                       <dbl>            <dbl>
-    ## 1 2009  On or Prior to Oct 15        1263             2.73
-    ## 2 2009  On or After Oct 16           2046             4.42
-    ## 3 2010  On or Prior to Oct 15        1600             3.45
-    ## 4 2010  On or After Oct 16           1499             3.23
+    ## # A tibble: 6 × 4
+    ## # Groups:   year [3]
+    ##   time_range            year  total_redds spawning_area_ac
+    ##   <fct>                 <chr>       <dbl>            <dbl>
+    ## 1 On or Prior to Oct 15 2009         1263             2.73
+    ## 2 On or Prior to Oct 15 2010         1600             3.45
+    ## 3 On or Prior to Oct 15 max          1702             3.67
+    ## 4 On or After Oct 16    2009         2046             4.42
+    ## 5 On or After Oct 16    2010         1499             3.23
+    ## 6 On or After Oct 16    max          2082             4.49
 
 ``` r
-lyr_redd_survey |>
+plt_redd_survey <-
+  lyr_redd_survey |>
   ggplot() + 
   geom_step(aes(x = rm_start, y = value, color = time_range)) +
   xlab("River Mile") + ylab("Numer of Redds") + 
   facet_wrap(~year, ncol=1)  +
   ggtitle("2009-2010 Lower Yuba River Redd Survey") + 
   guides(color = guide_legend(nrow=1, byrow=TRUE, title = "")) +
-  scale_y_continuous(sec.axis = sec_axis(name = "Spawning Area (ac)", transform = ~.*94/43560)) +
+  scale_y_continuous(sec.axis = sec_axis(name = "Redd Area (ac) per RM", transform = ~.*94/43560)) +
   theme(panel.grid.minor = element_blank(), legend.position="top") +
   scale_x_continuous(limits = c(0, 24.3))
+
+print(plt_redd_survey)
 ```
 
 ![](spawning-gravel-carrying-capacity_files/figure-gfm/unnamed-chunk-11-1.png)<!-- -->
+
+``` r
+lyr_rm <- selected_streams |>
+  filter(river_name == "Lower Yuba River") |>
+  inner_join(habistat::flowline_attr |> select(comid, hydro_seq, reach_length_ft), by=join_by(comid)) |>
+  arrange(hydro_seq) |>
+  mutate(reach_length_mi = reach_length_ft / 5280,
+         river_seq = row_number(),
+         cum_length_end = cumsum(reach_length_mi),
+         cum_length_start = cum_length_end - reach_length_mi,
+         rm_start = scales::rescale(cum_length_start, 
+                                    from = c(min(cum_length_start), max(cum_length_end)), 
+                                    to = c(0, 24.3)),
+         rm_end = scales::rescale(cum_length_end, 
+                                    from = c(min(cum_length_start), max(cum_length_end)), 
+                                    to = c(0, 24.3))) 
+
+plt_spawning_filters <-
+  lyr_rm |>
+  pivot_longer(cols = starts_with("spawning_")) |>
+  ggplot() + 
+  facet_wrap(~name, ncol=1) +
+  geom_rect(aes(xmin = rm_start, xmax = rm_end, ymin = -1, ymax = 1, fill = value)) +
+  theme(panel.grid.major.y = element_blank(), 
+        panel.grid.minor.y = element_blank(), 
+        axis.text.y = element_blank(),
+        legend.position = "top") +
+  xlab("River Mile") + ggtitle("Habistat Geographic Context")
+
+print(plt_spawning_filters)
+```
+
+![](spawning-gravel-carrying-capacity_files/figure-gfm/unnamed-chunk-12-1.png)<!-- -->
+
+``` r
+plt_habistat_by_rm <-
+  lyr_rm |> 
+  st_drop_geometry() |> 
+  select(comid, rm_start, rm_end, spawning_filter_all) |>
+  expand_grid(flow_idx = c(316, 1000, 3162, 10000)) |>
+  left_join(spawning_predictions_comid, by=join_by(comid, flow_idx), relationship="one-to-one") |>
+  #group_by(comid, rm_start, rm_end) |> 
+  #summarize(wua_per_lf_pred = max(wua_per_lf_pred)) |>
+  ggplot() +
+  geom_step(aes(x = rm_start, y = if_else(spawning_filter_all, wua_per_lf_pred * 5280 / 43560, 0))) + 
+  facet_wrap(~flow_idx, ncol = 1) + 
+  ylab("Potential Spawning Area (ac) per RM") + xlab("River Mile") + 
+  ggtitle("Habistat Area Predictions")
+
+print(plt_habistat_by_rm)
+```
+
+![](spawning-gravel-carrying-capacity_files/figure-gfm/unnamed-chunk-13-1.png)<!-- -->
+
+``` r
+(plt_spawning_filters / plt_habistat_by_rm / plt_redd_survey) + plot_layout(axes = "collect")
+```
+
+![](spawning-gravel-carrying-capacity_files/figure-gfm/unnamed-chunk-14-1.png)<!-- -->

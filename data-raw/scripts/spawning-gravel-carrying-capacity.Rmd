@@ -50,7 +50,7 @@ selected_streams <-
   left_join(spawning_context, by=join_by(comid)) |>
   mutate(across(starts_with("spawning"), function(x) coalesce(x, FALSE))) |>
   mutate(current_spawning_reach = coalesce(str_detect(habitat, "spawning"), FALSE)) |>
-  glimpse_plot()
+  glimpse_plot(max.plot = Inf)
 ```
 
 ## Actuals

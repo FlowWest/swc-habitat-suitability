@@ -1,7 +1,7 @@
 Spawning Gravel Carrying Capacity
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-09-24
+2024-10-04
 
 - [Actuals](#actuals)
 - [Predictions](#predictions)
@@ -69,7 +69,7 @@ selected_streams <-
   left_join(spawning_context, by=join_by(comid)) |>
   mutate(across(starts_with("spawning"), function(x) coalesce(x, FALSE))) |>
   mutate(current_spawning_reach = coalesce(str_detect(habitat, "spawning"), FALSE)) |>
-  glimpse_plot()
+  glimpse_plot(max.plot = Inf)
 ```
 
 ![](spawning-gravel-carrying-capacity_files/figure-gfm/unnamed-chunk-2-1.png)<!-- -->

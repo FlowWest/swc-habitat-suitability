@@ -74,18 +74,22 @@ spawning_matrix_data <- read_csv(here::here("data-raw", "source", "spawning_data
 Summarize
 
 ```{r}
-spawning_matrix_summary <- 
+spawning_matrix_summary <-
   spawning_matrix_data |>
   group_by(river_name, year) |>
   summarize(across(c(starts_with("length_"), starts_with("gravel_"), starts_with("redds_")), function(x) sum(x, na.rm=T)), .groups="drop") |>
-  select(river_name, year, ends_with("_UT")) |>
   group_by(river_name) |>
   summarize(across(c(starts_with("length_"), starts_with("gravel_"), starts_with("redds_")), mean)) |>
-  transmute(river_name = river_name |>
-            factor(levels = c("North Yuba River", "Middle Yuba River", "South Yuba River", "Yuba River", "Lower Yuba River")),
-            actual_length_mi = length_UT, # units are miles
-            actual_gravel_ac = gravel_UT * 1000 / 43560) # convert 1000 ft2 to ft2 to acres) |>
+  pivot_longer(cols = -river_name) |>
+  separate(name, sep = "_", into = c("name", "method"), extra = "merge") |>
+  pivot_wider() |>
+  transmute(river_name = river_name |> factor(levels = c("North Yuba River", "Middle Yuba River", "South Yuba River", "Yuba River", "Lower Yuba River")),
+            method,
+            actual_length_mi = length, # units are miles
+            actual_gravel_ac = gravel * 1000 / 43560)
+
 spawning_matrix_summary |> knitr::kable()
+
 ```
 
 ## Predictions
@@ -222,7 +226,7 @@ spawning_matrix_summary |>
              by=join_by(river_name)) |>
   mutate(ratio_length = (predicted_length_mi / actual_length_mi) |> num(digits = 2),
          ratio_gravel = (predicted_spawning_ac / actual_gravel_ac) |> num(digits = 2)) |>
-  select(river_name, 
+  select(river_name, method, 
          actual_length_mi, predicted_length_mi, ratio_length,
          actual_gravel_ac, predicted_spawning_ac, ratio_gravel) |>
   knitr::kable()
@@ -233,16 +237,14 @@ spawning_predictions |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = (total_wua_ft2 / 43560), color = river_name, linetype = "habistat Predictions")) + 
   #geom_line(aes(x = flow_cfs, y = (total_wua_ft2 / 43560) - actual_gravel_ac, color = river_name)) + 
-  geom_hline(data = spawning_matrix_summary, aes(yintercept = actual_gravel_ac, color = river_name, linetype = "YSF Habitat Matrices")) +
+  geom_hline(data = spawning_matrix_summary, aes(yintercept = actual_gravel_ac, color = river_name, linetype = paste("YSF Habitat Matrices", method))) +
   scale_x_log10(breaks = scales::breaks_log(10)) + annotation_logticks(sides="b") +
   ylab("Spawning Habitat\n(total acres)") + guides(color = "none", fill = "none") + 
   scale_y_continuous(sec.axis = sec_axis(name = "Redds\n(total)", transform = ~./94*43560)) + 
   scale_color_brewer(name = "Spawning/Reach", aesthetics = c("color", "fill"), palette="Paired") +
   facet_wrap(~river_name, ncol=2)  + theme(legend.position = "top", panel.grid.minor = element_blank()) +
-  ggtitle("Carrying Capacity Comparison")
+  ggtitle("Carrying Capacity Comparison") + 
+  guides(linetype = guide_legend(nrow=2, byrow=TRUE, title = ""))
 ```
-
-
-
 
 

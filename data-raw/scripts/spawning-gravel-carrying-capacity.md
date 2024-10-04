@@ -116,27 +116,40 @@ spawning_matrix_data <- read_csv(here::here("data-raw", "source", "spawning_data
 Summarize
 
 ``` r
-spawning_matrix_summary <- 
+spawning_matrix_summary <-
   spawning_matrix_data |>
   group_by(river_name, year) |>
   summarize(across(c(starts_with("length_"), starts_with("gravel_"), starts_with("redds_")), function(x) sum(x, na.rm=T)), .groups="drop") |>
-  select(river_name, year, ends_with("_UT")) |>
   group_by(river_name) |>
   summarize(across(c(starts_with("length_"), starts_with("gravel_"), starts_with("redds_")), mean)) |>
-  transmute(river_name = river_name |>
-            factor(levels = c("North Yuba River", "Middle Yuba River", "South Yuba River", "Yuba River", "Lower Yuba River")),
-            actual_length_mi = length_UT, # units are miles
-            actual_gravel_ac = gravel_UT * 1000 / 43560) # convert 1000 ft2 to ft2 to acres) |>
+  pivot_longer(cols = -river_name) |>
+  separate(name, sep = "_", into = c("name", "method"), extra = "merge") |>
+  pivot_wider() |>
+  transmute(river_name = river_name |> factor(levels = c("North Yuba River", "Middle Yuba River", "South Yuba River", "Yuba River", "Lower Yuba River")),
+            method,
+            actual_length_mi = length, # units are miles
+            actual_gravel_ac = gravel * 1000 / 43560)
+
 spawning_matrix_summary |> knitr::kable()
 ```
 
-| river_name        | actual_length_mi | actual_gravel_ac |
-|:------------------|-----------------:|-----------------:|
-| Lower Yuba River  |            24.00 |      175.7174013 |
-| Middle Yuba River |             9.20 |        0.5968779 |
-| North Yuba River  |            20.55 |        3.1393480 |
-| South Yuba River  |             0.75 |        0.0229568 |
-| Yuba River        |             1.70 |        0.1377410 |
+| river_name        | method   | actual_length_mi | actual_gravel_ac |
+|:------------------|:---------|-----------------:|-----------------:|
+| Lower Yuba River  | UO       |           18.125 |      154.4765840 |
+| Lower Yuba River  | UT       |           24.000 |      175.7174013 |
+| Lower Yuba River  | UT_butte |           24.000 |      175.7174013 |
+| Middle Yuba River | UO       |            4.325 |        0.1377410 |
+| Middle Yuba River | UT       |            9.200 |        0.5968779 |
+| Middle Yuba River | UT_butte |           10.700 |        0.7805326 |
+| North Yuba River  | UO       |            9.800 |        1.1880165 |
+| North Yuba River  | UT       |           20.550 |        3.1393480 |
+| North Yuba River  | UT_butte |           22.750 |        3.3057851 |
+| South Yuba River  | UO       |            0.000 |        0.0000000 |
+| South Yuba River  | UT       |            0.750 |        0.0229568 |
+| South Yuba River  | UT_butte |            0.875 |        0.0286961 |
+| Yuba River        | UO       |            1.700 |        0.1377410 |
+| Yuba River        | UT       |            1.700 |        0.1377410 |
+| Yuba River        | UT_butte |            1.700 |        0.1377410 |
 
 ## Predictions
 
@@ -308,32 +321,43 @@ spawning_matrix_summary |>
              by=join_by(river_name)) |>
   mutate(ratio_length = (predicted_length_mi / actual_length_mi) |> num(digits = 2),
          ratio_gravel = (predicted_spawning_ac / actual_gravel_ac) |> num(digits = 2)) |>
-  select(river_name, 
+  select(river_name, method, 
          actual_length_mi, predicted_length_mi, ratio_length,
          actual_gravel_ac, predicted_spawning_ac, ratio_gravel) |>
   knitr::kable()
 ```
 
-| river_name        | actual_length_mi | predicted_length_mi | ratio_length | actual_gravel_ac | predicted_spawning_ac | ratio_gravel |
-|:------------------|-----------------:|--------------------:|-------------:|-----------------:|----------------------:|-------------:|
-| Lower Yuba River  |            24.00 |           11.963589 |         0.50 |      175.7174013 |             119.07051 |         0.68 |
-| Middle Yuba River |             9.20 |           12.747955 |         1.39 |        0.5968779 |              56.72524 |        95.04 |
-| North Yuba River  |            20.55 |           33.615653 |         1.64 |        3.1393480 |             199.62539 |        63.59 |
-| South Yuba River  |             0.75 |           23.623749 |        31.50 |        0.0229568 |             126.50171 |      5510.41 |
-| Yuba River        |             1.70 |            6.917089 |         4.07 |        0.1377410 |              44.66620 |       324.28 |
+| river_name        | method   | actual_length_mi | predicted_length_mi | ratio_length | actual_gravel_ac | predicted_spawning_ac | ratio_gravel |
+|:------------------|:---------|-----------------:|--------------------:|-------------:|-----------------:|----------------------:|-------------:|
+| Lower Yuba River  | UO       |           18.125 |           11.963589 |         0.66 |      154.4765840 |             119.07051 |         0.77 |
+| Lower Yuba River  | UT       |           24.000 |           11.963589 |         0.50 |      175.7174013 |             119.07051 |         0.68 |
+| Lower Yuba River  | UT_butte |           24.000 |           11.963589 |         0.50 |      175.7174013 |             119.07051 |         0.68 |
+| Middle Yuba River | UO       |            4.325 |           12.747955 |         2.95 |        0.1377410 |              56.72524 |       411.83 |
+| Middle Yuba River | UT       |            9.200 |           12.747955 |         1.39 |        0.5968779 |              56.72524 |        95.04 |
+| Middle Yuba River | UT_butte |           10.700 |           12.747955 |         1.19 |        0.7805326 |              56.72524 |        72.68 |
+| North Yuba River  | UO       |            9.800 |           33.615653 |         3.43 |        1.1880165 |             199.62539 |       168.03 |
+| North Yuba River  | UT       |           20.550 |           33.615653 |         1.64 |        3.1393480 |             199.62539 |        63.59 |
+| North Yuba River  | UT_butte |           22.750 |           33.615653 |         1.48 |        3.3057851 |             199.62539 |        60.39 |
+| South Yuba River  | UO       |            0.000 |           23.623749 |          Inf |        0.0000000 |             126.50171 |          Inf |
+| South Yuba River  | UT       |            0.750 |           23.623749 |        31.50 |        0.0229568 |             126.50171 |      5510.41 |
+| South Yuba River  | UT_butte |            0.875 |           23.623749 |        27.00 |        0.0286961 |             126.50171 |      4408.33 |
+| Yuba River        | UO       |            1.700 |            6.917089 |         4.07 |        0.1377410 |              44.66620 |       324.28 |
+| Yuba River        | UT       |            1.700 |            6.917089 |         4.07 |        0.1377410 |              44.66620 |       324.28 |
+| Yuba River        | UT_butte |            1.700 |            6.917089 |         4.07 |        0.1377410 |              44.66620 |       324.28 |
 
 ``` r
 spawning_predictions |>
   ggplot() + 
   geom_line(aes(x = flow_cfs, y = (total_wua_ft2 / 43560), color = river_name, linetype = "habistat Predictions")) + 
   #geom_line(aes(x = flow_cfs, y = (total_wua_ft2 / 43560) - actual_gravel_ac, color = river_name)) + 
-  geom_hline(data = spawning_matrix_summary, aes(yintercept = actual_gravel_ac, color = river_name, linetype = "YSF Habitat Matrices")) +
+  geom_hline(data = spawning_matrix_summary, aes(yintercept = actual_gravel_ac, color = river_name, linetype = paste("YSF Habitat Matrices", method))) +
   scale_x_log10(breaks = scales::breaks_log(10)) + annotation_logticks(sides="b") +
   ylab("Spawning Habitat\n(total acres)") + guides(color = "none", fill = "none") + 
   scale_y_continuous(sec.axis = sec_axis(name = "Redds\n(total)", transform = ~./94*43560)) + 
   scale_color_brewer(name = "Spawning/Reach", aesthetics = c("color", "fill"), palette="Paired") +
   facet_wrap(~river_name, ncol=2)  + theme(legend.position = "top", panel.grid.minor = element_blank()) +
-  ggtitle("Carrying Capacity Comparison")
+  ggtitle("Carrying Capacity Comparison") + 
+  guides(linetype = guide_legend(nrow=2, byrow=TRUE, title = ""))
 ```
 
 ![](spawning-gravel-carrying-capacity_files/figure-gfm/unnamed-chunk-10-1.png)<!-- -->

@@ -247,4 +247,37 @@ spawning_predictions |>
   guides(linetype = guide_legend(nrow=2, byrow=TRUE, title = ""))
 ```
 
+## Redds Survey
+
+RM 0 is at the mouth of the river, and RM 24.3 is at the base of Englebright Dam.
+
+```{r}
+lyr_redd_survey <- read_csv(here::here("data-raw", "source", "spawning_data", "spring-run_and_fall-run_redds_for_Rene_data.csv")) |>
+  janitor::clean_names() |>
+  select(-redds_total) |>
+  pivot_longer(starts_with("redds")) |>
+  separate(name, sep = "_", into = c("var", "year")) |>
+  separate(rm, sep = " - ", into = c("rm_start", "rm_end")) |>
+  mutate(across(starts_with("rm_"), as.numeric)) |>
+  mutate(time_range = factor(time_range, levels = c("On or Prior to Oct 15", "On or After Oct 16")))
+
+lyr_redd_survey |>
+  group_by(year, time_range) |>
+  summarize(total_redds = sum(value)) |>
+  #pivot_wider(names_from = time_range, values_from = total_redds)
+  mutate(spawning_area_ac = total_redds * 94 / 43560)
+  
+lyr_redd_survey |>
+  ggplot() + 
+  geom_step(aes(x = rm_start, y = value, color = time_range)) +
+  xlab("River Mile") + ylab("Numer of Redds") + 
+  facet_wrap(~year, ncol=1)  +
+  ggtitle("2009-2010 Lower Yuba River Redd Survey") + 
+  guides(color = guide_legend(nrow=1, byrow=TRUE, title = "")) +
+  scale_y_continuous(sec.axis = sec_axis(name = "Spawning Area (ac)", transform = ~.*94/43560)) +
+  theme(panel.grid.minor = element_blank(), legend.position="top") +
+  scale_x_continuous(limits = c(0, 24.3))
+```
+
+
 

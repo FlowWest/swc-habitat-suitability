@@ -7,6 +7,7 @@ Spawning Gravel Carrying Capacity
 - [Predictions](#predictions)
 - [Compare against yuba relicensing
   estimates](#compare-against-yuba-relicensing-estimates)
+- [Redds Survey](#redds-survey)
 
 ``` r
 library(tidyverse)
@@ -361,3 +362,63 @@ spawning_predictions |>
 ```
 
 ![](spawning-gravel-carrying-capacity_files/figure-gfm/unnamed-chunk-10-1.png)<!-- -->
+
+## Redds Survey
+
+RM 0 is at the mouth of the river, and RM 24.3 is at the base of
+Englebright Dam.
+
+``` r
+lyr_redd_survey <- read_csv(here::here("data-raw", "source", "spawning_data", "spring-run_and_fall-run_redds_for_Rene_data.csv")) |>
+  janitor::clean_names() |>
+  select(-redds_total) |>
+  pivot_longer(starts_with("redds")) |>
+  separate(name, sep = "_", into = c("var", "year")) |>
+  separate(rm, sep = " - ", into = c("rm_start", "rm_end")) |>
+  mutate(across(starts_with("rm_"), as.numeric)) |>
+  mutate(time_range = factor(time_range, levels = c("On or Prior to Oct 15", "On or After Oct 16")))
+```
+
+    ## Rows: 50 Columns: 5
+    ## ── Column specification ────────────────────────────────────────────────────────
+    ## Delimiter: ","
+    ## chr (2): RM, Time Range
+    ## dbl (3): Redds 2009, Redds 2010, Redds Total
+    ## 
+    ## ℹ Use `spec()` to retrieve the full column specification for this data.
+    ## ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+
+``` r
+lyr_redd_survey |>
+  group_by(year, time_range) |>
+  summarize(total_redds = sum(value)) |>
+  #pivot_wider(names_from = time_range, values_from = total_redds)
+  mutate(spawning_area_ac = total_redds * 94 / 43560)
+```
+
+    ## `summarise()` has grouped output by 'year'. You can override using the
+    ## `.groups` argument.
+
+    ## # A tibble: 4 × 4
+    ## # Groups:   year [2]
+    ##   year  time_range            total_redds spawning_area_ac
+    ##   <chr> <fct>                       <dbl>            <dbl>
+    ## 1 2009  On or Prior to Oct 15        1263             2.73
+    ## 2 2009  On or After Oct 16           2046             4.42
+    ## 3 2010  On or Prior to Oct 15        1600             3.45
+    ## 4 2010  On or After Oct 16           1499             3.23
+
+``` r
+lyr_redd_survey |>
+  ggplot() + 
+  geom_step(aes(x = rm_start, y = value, color = time_range)) +
+  xlab("River Mile") + ylab("Numer of Redds") + 
+  facet_wrap(~year, ncol=1)  +
+  ggtitle("2009-2010 Lower Yuba River Redd Survey") + 
+  guides(color = guide_legend(nrow=1, byrow=TRUE, title = "")) +
+  scale_y_continuous(sec.axis = sec_axis(name = "Spawning Area (ac)", transform = ~.*94/43560)) +
+  theme(panel.grid.minor = element_blank(), legend.position="top") +
+  scale_x_continuous(limits = c(0, 24.3))
+```
+
+![](spawning-gravel-carrying-capacity_files/figure-gfm/unnamed-chunk-11-1.png)<!-- -->

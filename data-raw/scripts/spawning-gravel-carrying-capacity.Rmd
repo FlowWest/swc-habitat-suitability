@@ -25,6 +25,9 @@ glimpse_plot <- function(x, ...) {
 knitr::opts_chunk$set(fig.width=6.5, fig.height=4, dpi=300)
 ```
 
+
+## Yuba Case study
+
 Map current and historical habitat reaches of the Yuba and its major tributaries
 
 ```{r}
@@ -342,7 +345,65 @@ print(plt_habistat_by_rm)
 (plt_spawning_filters / plt_habistat_by_rm / plt_redd_survey) + plot_layout(axes = "collect")
 ```
 
+## Generalize beyond Yuba
 
+Define river miles upon which to map results
+
+```{r}
+  # length = vector of reach lengths
+  # start = numbering system start
+  # end = numbering system end
+  # vectors should be already ordered
+define_rm_start <- function(length, start, end) {
+  cum_length_end <- cumsum(length)
+  cum_length_start <- cum_length_end - length
+  scales::rescale(cum_length_start,
+                  from = c(min(cum_length_start), max(cum_length_end)), 
+                  to = c(first(start), first(end)))
+}
+
+rm_reaches <- 
+  tribble(~river_name,       ~river_cvpia,         ~ds_comid, ~ds_rm, ~us_comid, ~us_rm,
+          "Mokelumne River", c("Mokelumne River", 
+                               "South Mokelumne River"), 1889628,  -0.2, 3953353,  63.5, 
+          "American River",   "American River",          15024919, -0.1, 15025009, 16.1,
+          "Lower Yuba River", "Yuba River",              NA, NA, NA, NA,
+          "Feather River",    "Feather River",           NA, NA, NA, NA,
+          "Mill Creek",       "Mill Creek",              NA, NA, NA, NA,
+          "Battle Creek",     "Battle Creek",            NA, NA, NA, NA,
+          "Clear Creek",      "Clear Creek",             NA, NA, NA, NA)
+
+comid_with_rm <- 
+  rm_reaches |>
+  drop_na() |>
+  unnest(river_cvpia) |>
+  inner_join(habistat::cv_mainstems) |>
+  inner_join(habistat::flowline_attr |>
+               select(comid, hydro_seq, reach_length_ft)) |>
+  mutate(reach_length_mi = reach_length_ft / 5280) |>
+  group_by(river_name, ds_rm, us_rm) |>
+  arrange(river_name, hydro_seq) |>
+  mutate(rm_start = define_rm_start(reach_length_ft, ds_rm, us_rm)) |>
+  mutate(rm_end = rm_start + reach_length_mi) |>
+  ungroup() |>
+  select(river_name, comid, reach_length_mi, rm_start, rm_end)
+
+comid_with_rm |>
+  left_join(spawning_context, by=join_by(comid)) |>
+  mutate(across(starts_with("spawning"), function(x) coalesce(x, FALSE))) |>
+  #mutate(current_spawning_reach = coalesce(str_detect(habitat, "spawning"), FALSE)) |> 
+  pivot_longer(cols = starts_with("spawning_")) |>
+  filter(name == "spawning_filter_all") |>
+  ggplot() + 
+  facet_wrap(~river_name, ncol=1) +
+  #facet_grid(cols = vars(river_name), rows = vars(name), scales = "free_x", space = "free_x", switch = "y") +
+  geom_rect(aes(xmin = rm_start, xmax = rm_end, ymin = -1, ymax = 1, fill = value)) +
+  theme(panel.grid.major.y = element_blank(), 
+        panel.grid.minor.y = element_blank(), 
+        axis.text.y = element_blank(),
+        legend.position = "top") +
+  xlab("River Mile") + ggtitle("Habistat Geographic Context")
+```
 
 
 

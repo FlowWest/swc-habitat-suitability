@@ -367,8 +367,8 @@ rm_reaches <-
           "Mokelumne River", c("Mokelumne River", 
                                "South Mokelumne River"), 1889628,  -0.2, 3953353,  63.5, 
           "American River",   "American River",          15024919, -0.1, 15025009, 16.1,
-          "Lower Yuba River", "Yuba River",              NA, NA, NA, NA,
-          "Feather River",    "Feather River",           NA, NA, NA, NA,
+          "Lower Yuba River", "Yuba River",              7982918, 0, 8062555, 24.3,
+          "Feather River",    "Feather River",           7978071, -0.1, 7968113, 67.2,
           "Mill Creek",       "Mill Creek",              NA, NA, NA, NA,
           "Battle Creek",     "Battle Creek",            NA, NA, NA, NA,
           "Clear Creek",      "Clear Creek",             NA, NA, NA, NA)
@@ -403,6 +403,49 @@ comid_with_rm |>
         axis.text.y = element_blank(),
         legend.position = "top") +
   xlab("River Mile") + ggtitle("Habistat Geographic Context")
+```
+
+
+## Summary of spawning lengths
+
+```{r fig.width=6.5, fig.height=9, dpi=300}
+spawning_length_summary <- 
+  habistat::cv_mainstems |>
+  st_drop_geometry() |>
+  inner_join(habistat::flowline_attr |> select(comid, reach_length_ft)) |>
+  inner_join(spawning_context, by=join_by(comid)) |>
+  mutate(identity = T) |>
+  pivot_longer(cols = c(identity, starts_with("spawning_"))) |>
+  mutate(spawning_rm = value * reach_length_ft / 5280) |>
+  group_by(river_group, river_cvpia, name) |>
+  summarize(spawning_rm = sum(spawning_rm)) 
+
+var_labels <- tribble(
+  ~name,                           ~label,                                                         ~color,
+  "identity",                      "All Reaches",                                                  "gray",
+  "spawning_geographic_context",   "CVPIA/Elevation Range",                                        "orange",
+  "spawning_gravel_via_geomorph",  "Gravels via UCD Geomorph Class only",                          "darkcyan",
+  "spawning_gravel_via_sediment",  "Gravels via Sediment Transport only",                          "darkturquoise",
+  "spawning_gravel_either_method", "Gravels matching either method",                               "darkblue",
+  "spawning_filter_all",           "Gravels matching either method, within CVPIA/Elevation Range", "mediumvioletred")
+
+spawning_length_summary |>
+  mutate(name = factor(name, levels = var_labels$name, labels = var_labels$label)) |>
+  group_by(river_group, name) |>
+  summarize(spawning_rm = sum(spawning_rm)) |>
+  ggplot(aes(y = name, x = spawning_rm)) +
+  facet_wrap(~river_group, ncol=4, scales="free_x") +
+  geom_col(aes(fill = name), width=1, color="white") +
+  theme(legend.position = "top",
+        axis.text.y = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.y = element_blank(),
+        legend.key.size = unit(12, "pt"),
+        legend.key.spacing.y = unit(0, "pt"),
+        strip.text = element_text(size=8)) +
+  guides(color = "none", fill = guide_legend(nrow=6, byrow=F, title = "")) +
+  scale_y_discrete(limits=rev) + ylab("") + xlab("River Miles") +
+  scale_fill_manual(values = var_labels$color)
 ```
 
 

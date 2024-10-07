@@ -1,13 +1,16 @@
 Spawning Gravel Carrying Capacity
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-10-04
+2024-10-07
 
+- [Yuba Case study](#yuba-case-study)
 - [Actuals](#actuals)
 - [Predictions](#predictions)
 - [Compare against yuba relicensing
   estimates](#compare-against-yuba-relicensing-estimates)
 - [Redds Survey](#redds-survey)
+- [Generalize beyond Yuba](#generalize-beyond-yuba)
+- [Summary of spawning lengths](#summary-of-spawning-lengths)
 
 ``` r
 library(tidyverse)
@@ -40,6 +43,8 @@ glimpse_plot <- function(x, ...) {
 }
 knitr::opts_chunk$set(fig.width=6.5, fig.height=4, dpi=300)
 ```
+
+## Yuba Case study
 
 Map current and historical habitat reaches of the Yuba and its major
 tributaries
@@ -494,3 +499,123 @@ print(plt_habistat_by_rm)
 ```
 
 ![](spawning-gravel-carrying-capacity_files/figure-gfm/unnamed-chunk-14-1.png)<!-- -->
+
+## Generalize beyond Yuba
+
+Define river miles upon which to map results
+
+``` r
+  # length = vector of reach lengths
+  # start = numbering system start
+  # end = numbering system end
+  # vectors should be already ordered
+define_rm_start <- function(length, start, end) {
+  cum_length_end <- cumsum(length)
+  cum_length_start <- cum_length_end - length
+  scales::rescale(cum_length_start,
+                  from = c(min(cum_length_start), max(cum_length_end)), 
+                  to = c(first(start), first(end)))
+}
+
+rm_reaches <- 
+  tribble(~river_name,       ~river_cvpia,         ~ds_comid, ~ds_rm, ~us_comid, ~us_rm,
+          "Mokelumne River", c("Mokelumne River", 
+                               "South Mokelumne River"), 1889628,  -0.2, 3953353,  63.5, 
+          "American River",   "American River",          15024919, -0.1, 15025009, 16.1,
+          "Lower Yuba River", "Yuba River",              7982918, 0, 8062555, 24.3,
+          "Feather River",    "Feather River",           7978071, -0.1, 7968113, 67.2,
+          "Mill Creek",       "Mill Creek",              NA, NA, NA, NA,
+          "Battle Creek",     "Battle Creek",            NA, NA, NA, NA,
+          "Clear Creek",      "Clear Creek",             NA, NA, NA, NA)
+
+comid_with_rm <- 
+  rm_reaches |>
+  drop_na() |>
+  unnest(river_cvpia) |>
+  inner_join(habistat::cv_mainstems) |>
+  inner_join(habistat::flowline_attr |>
+               select(comid, hydro_seq, reach_length_ft)) |>
+  mutate(reach_length_mi = reach_length_ft / 5280) |>
+  group_by(river_name, ds_rm, us_rm) |>
+  arrange(river_name, hydro_seq) |>
+  mutate(rm_start = define_rm_start(reach_length_ft, ds_rm, us_rm)) |>
+  mutate(rm_end = rm_start + reach_length_mi) |>
+  ungroup() |>
+  select(river_name, comid, reach_length_mi, rm_start, rm_end)
+```
+
+    ## Joining with `by = join_by(river_cvpia)`
+    ## Joining with `by = join_by(comid)`
+
+``` r
+comid_with_rm |>
+  left_join(spawning_context, by=join_by(comid)) |>
+  mutate(across(starts_with("spawning"), function(x) coalesce(x, FALSE))) |>
+  #mutate(current_spawning_reach = coalesce(str_detect(habitat, "spawning"), FALSE)) |> 
+  pivot_longer(cols = starts_with("spawning_")) |>
+  filter(name == "spawning_filter_all") |>
+  ggplot() + 
+  facet_wrap(~river_name, ncol=1) +
+  #facet_grid(cols = vars(river_name), rows = vars(name), scales = "free_x", space = "free_x", switch = "y") +
+  geom_rect(aes(xmin = rm_start, xmax = rm_end, ymin = -1, ymax = 1, fill = value)) +
+  theme(panel.grid.major.y = element_blank(), 
+        panel.grid.minor.y = element_blank(), 
+        axis.text.y = element_blank(),
+        legend.position = "top") +
+  xlab("River Mile") + ggtitle("Habistat Geographic Context")
+```
+
+![](spawning-gravel-carrying-capacity_files/figure-gfm/unnamed-chunk-15-1.png)<!-- -->
+
+## Summary of spawning lengths
+
+``` r
+spawning_length_summary <- 
+  habistat::cv_mainstems |>
+  st_drop_geometry() |>
+  inner_join(habistat::flowline_attr |> select(comid, reach_length_ft)) |>
+  inner_join(spawning_context, by=join_by(comid)) |>
+  mutate(identity = T) |>
+  pivot_longer(cols = c(identity, starts_with("spawning_"))) |>
+  mutate(spawning_rm = value * reach_length_ft / 5280) |>
+  group_by(river_group, river_cvpia, name) |>
+  summarize(spawning_rm = sum(spawning_rm)) 
+```
+
+    ## Joining with `by = join_by(comid)`
+    ## `summarise()` has grouped output by 'river_group', 'river_cvpia'. You can
+    ## override using the `.groups` argument.
+
+``` r
+var_labels <- tribble(
+  ~name,                           ~label,                                                         ~color,
+  "identity",                      "All Reaches",                                                  "gray",
+  "spawning_geographic_context",   "CVPIA/Elevation Range",                                        "orange",
+  "spawning_gravel_via_geomorph",  "Gravels via UCD Geomorph Class only",                          "darkcyan",
+  "spawning_gravel_via_sediment",  "Gravels via Sediment Transport only",                          "darkturquoise",
+  "spawning_gravel_either_method", "Gravels matching either method",                               "darkblue",
+  "spawning_filter_all",           "Gravels matching either method, within CVPIA/Elevation Range", "mediumvioletred")
+
+spawning_length_summary |>
+  mutate(name = factor(name, levels = var_labels$name, labels = var_labels$label)) |>
+  group_by(river_group, name) |>
+  summarize(spawning_rm = sum(spawning_rm)) |>
+  ggplot(aes(y = name, x = spawning_rm)) +
+  facet_wrap(~river_group, ncol=4, scales="free_x") +
+  geom_col(aes(fill = name), width=1, color="white") +
+  theme(legend.position = "top",
+        axis.text.y = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.y = element_blank(),
+        legend.key.size = unit(12, "pt"),
+        legend.key.spacing.y = unit(0, "pt"),
+        strip.text = element_text(size=8)) +
+  guides(color = "none", fill = guide_legend(nrow=6, byrow=F, title = "")) +
+  scale_y_discrete(limits=rev) + ylab("") + xlab("River Miles") +
+  scale_fill_manual(values = var_labels$color)
+```
+
+    ## `summarise()` has grouped output by 'river_group'. You can override using the
+    ## `.groups` argument.
+
+![](spawning-gravel-carrying-capacity_files/figure-gfm/unnamed-chunk-16-1.png)<!-- -->

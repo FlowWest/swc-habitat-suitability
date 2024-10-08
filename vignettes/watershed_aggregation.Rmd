@@ -1,0 +1,68 @@
+---
+title: "Watershed Delineation and Flow Aggregation"
+author: "[Skyler Lewis](slewis@flowwest.com)"
+date: "`r Sys.Date()`"
+output: 
+  rmarkdown::html_vignette:
+    default
+vignette: >
+  %\VignetteIndexEntry{Model Overview}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  base.dir = "./",
+  base.url = "./articles",
+  fig.path = "figures/model-overview-"
+)
+```
+
+Reach-scale predictions are aggregated to the scale of the river (mainstem) reach or watershed for usability in decision support models and other applications. Aggregating reach-scale predictions across a river or watershed extent is more complicating than adding up habitat values at a given flow, because instantaneous flows at different points in the watershed differ. This article describes the delineation of watersheds and mainstems, as well as the method for aggregating reach-scale predictions.
+
+## Delineation
+
+The **Central Valley Mainstems** dataset [`cv_mainstems`](../reference/cv_mainstems.html) contains joined flowlines and attributes for major habitat streams in the Sacramento and San Joaquin Valleys. This dataset is derived from the following sources.
+
+Current habitat streams are derived primarily from the [CVPIA DSMHabitat Spawning and Rearing Habitat layer](https://cvpia-osc.github.io/DSMhabitat/articles/habitat-extents-map.html). This dataset delineates spawning and rearing reach extents by run (Fall Run Chinook, Spring Run Chinook, and Steelhead). For the habistat project, spawning and rearing extents were mapped onto NHD ComID reaches. To create a run-agnostic map of maximum potential spawning and rearing habitat extents, reaches identified as spawning reaches for any run are labelled as spawning reaches, and likewise for rearing. River names were modified to distinguish different forks and tributaries within the same watershed. (In the dataset, the `river_group` attribute describes the watershed, e.g. `Cottonwood Creek`, while the `river_cvpia` attribute describes the distinct river name, e.g. `North Fork Cottonwood Creek`.) 
+
+Historic and potential habitat streams are mapped from the historical extents described by Yoshiyama et al. (2001)^[R. M. Yoshiyama, E. R. Gerstung, F. W. Fisher, and P. B. Moyle. (2001). Historic and present distribution
+of Chinook salmon in the central valley drainage of California. In R. L. Brown, editor, Fish
+Bulletin 179: Contributions to the biology of Central Valley salmonids., volume 1, pages 71–
+176. California Department of Fish and Game, Sacramento, CA.] delineation. Naming conventions align with that described for the current habitat streams. Scope is presently limited to the Sacramento and San Joaquin basins and does not include the Tulare basin. 
+
+The **Central Valley Watersheds** dataset [`cv_watersheds`](../reference/cv_watersheds.html) describes the drainage area associated with the mainstem groups. Watersheds are grouped and dissolved based on USGS WBD subcatchment polygons. Watershed names are nested hierarchically to make summary statistics clearer.
+
+* `watershed_level_1` distinguishes the Sacramento versus San Joaquin basins.
+* `watershed_level_2` identifies catchments that flow directly into the Sacramento and San Joaquin rivers.
+* `watershed_level_3` is the canonical watershed name that aligns with the `river_group` attribute in the `cv_mainstems` dataset.
+
+For example, the Yuba River watershed is:
+
+* `watershed_level_1` = "Sacramento River"
+* `watershed_level_2` = "Feather River"
+* `watershed_level_3` = "Yuba River"
+
+while the Feather River watershed (not including the Yuba) is:
+
+* `watershed_level_1` = "Sacramento River"
+* `watershed_level_2` = "Feather River"
+* `watershed_level_3` = "Feather River"
+
+The Upper Sacramento River and Upper San Joaquin River are treated as distinct tributaries of the Sacramento River and San Joaquin River respectively. They have their own `river_group` and `watershed_level_3` names.
+
+<mark>TODO: Add map of Watersheds and Mainstems</mark>
+
+## Aggregation
+
+<mark>TODO: Describe aggregation procedures for the following:</mark>
+
+### Flow relationship crosswalk
+
+### Aggregation of flow-to-suitable habitat area curves
+
+### Aggregation of flow-to-duration suitability curves
+

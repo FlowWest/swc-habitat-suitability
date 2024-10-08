@@ -36,4 +36,20 @@ While the statistical model will produce predictions for any stream with valid p
 
 5. **Applying duration criteria**: Suitable habitat area predictions up to this point are based only on depth and velocity factors, but inundation duration is also a relevant factor. The perennially-inundated baseflow channel lacks sufficient food (invertebrates) for rearing juveniles and should be excluded regardless of depth and velocity. Meanwhile, channel areas that are inundated for only short periods of time have reduced habitat benefit as invertebrates have not had sufficient time to develop. R functions developed for this project will apply duration-based suitability criteria to an empirically or statistically derived flow-to-suitable-area curve by inputting (a) a water year hydrograph and/or (b) a flow threshold that defines the baseflow channel. These methods are defined in the [Duration Analysis](duration_analysis.html) article.
 
+6. **Filtering to geographic scope**: Rearing predictions are limited to perennial, natural stream channels of a certain size. The working draft filter includes reaches of stream order ≥4 (or reaches of stream order ≥3 with drainage area at least 50 km²). Minor distributaries with a divergence ratio of less than 50% are also excluded.
+
+7. **Aggregating from reach to mainstem/watershed scale:** Reach-scale predictions are aggregated to the scale of the river (mainstem) reach or watershed for usability in decision support models and other applications. Aggregating reach-scale predictions across a river or watershed extent is more complicating than adding up habitat values at a given flow, because instantaneous flows at different points in the watershed differ. The delineation of reaches and watersheds, as well as the aggregation process, are described in the [Watershed Aggregation](watershed_aggregation.html) article.
+
 ![](figures/flowchart.png){width=100%}
+
+## Spawning Model Overview
+
+The spawning model follows similar methods to the rearing model, with the following distinctions.
+
+* **Hydraulic model training data preparation**: A different depth- and velocity-based habitat suitability index is applied. Additionally, while the baseflow channel is eliminated from the hydraulic model result grid when assembling the rearing training data, it is retained in the spawning training data.
+
+* **Training statistical model**: The same methods are used to train the statistical model, but feature selection and validation yields a different set of predictor variables.
+
+* **Applying duration criteria**: A different duration suitability factor is applied to account for the extended minimum period of continuous inundation required for spawning and incubation. 
+
+* **Filtering to geographic scope**: The spawning model includes a more substantial filtering of reaches into those within spawning range and likely to include spawning gravels. This analysis is documented in the [Spawning Extents](spawning_extents.html) article. The core dataset is intended to capture overall suitability for any run, so that it can be subsequently applied to a specific run based on geographic scope filters and season-specific hydrology. 

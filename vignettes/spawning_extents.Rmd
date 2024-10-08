@@ -1,0 +1,80 @@
+---
+title: "Spawning Extents"
+author: "[Skyler Lewis](slewis@flowwest.com)"
+date: "`r Sys.Date()`"
+output: 
+  rmarkdown::html_vignette:
+    default
+vignette: >
+  %\VignetteIndexEntry{Model Overview}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  base.dir = "./",
+  base.url = "./articles",
+  fig.path = "figures/model-overview-"
+)
+```
+
+## Reach Definitions
+
+A core component of the spawning model is delineating the geographic extent of spawning reaches based on current/historical/potential salmonid presence and likelihood of spawning gravels. These values are used to limit the range of reaches for which the flow-to-suitable-area outputs of the habistat statistical model are applied. This is done in two steps.
+
+- **Geographic Scope**: An expansive delineation of the upstream and downstream limits of current/historical/potential spawning. This defines the scope of the spawning dataset.
+
+- **Spawning Gravels**: A reach-by-reach determination of the likelihood of spawning gravels, based on geomorphic and sediment transport factors. Reaches determined unlikely to contain gravels remain in the spawning dataset with a zeroed out suitability rating.
+
+### Geographic Scope
+
+The spawning geographic scope consists of reaches meeting *all* of the following criteria. Essentially, this analysis takes the current and historical spawning reaches delineated in the [`cv_mainstems`](../reference/cv_mainstems.html) dataset, as described in the [Watershed Aggregation](watershed_aggregation.html) article, and adds in some additional major tributaries. 
+
+- elevation > minimum known spawning elevation for the watershed
+- elevation < maximum historical habitat elevation for the watershed
+- upstream of a rearing stream (mainstem or tributary)
+- within a subcatchment identified as historical habitat in the PISCES^[*PISCES* spatial fish range dataset, published by UC Davis Center for Watershed Sciences. Available at [https://pisces.sf.ucdavis.edu/fish-data](https://pisces.sf.ucdavis.edu/fish-data)] dataset
+- outside of the valley lowland area (i.e. in valley foothill or bedrock)
+- stream size: stream order ≥4, or stream order ≥3 with drainage area at least 50 km²
+
+### Spawning Gravels
+
+Reach-by-reach identification of spawning gravels is experimental. We tested two methods. Reaches are included if they pass the spawning gravel likelihood criteria under either method.  
+
+#### Geomorphic Classification
+
+This approach applies the geomorphic classifications published by the UC Davis eFlows project for the Sacramento River basin. The [dataset is available on Dryad](https://doi.org/10.25338/B8031W)^[Guillon, Hervé et al. (2020). Channel types predictions for the Sacramento River basin [Dataset]. Dryad. https://doi.org/10.25338/B8031W] and documented in Guillon et al. (2020)^[Guillon, H., Byrne, C.F., Lane, B.A., Sandoval-Solis, S., and Pasternack G.B. (2020). Machine Learning Predicts Reach-Scale Channel Types from Coarse-Scale Geospatial Data in a Large River Basin. J. of Water Resources Research. https://doi.org/10.1029/2019WR026691] and within the [California Environmental Flows Framework documentation](https://ceff.ucdavis.edu/sites/g/files/dgvnsk5566/files/media/documents/Appendix_F%20Geomorphic%20Classification%20of%20CA.pdf). Ten channel types were mapped in this dataset, from which a subset were selected  as indicators of potential spawning suitability:
+
+- ~~**SAC01**: Unconfined, boulder-bedrock, bed-undulating~~
+- ~~**SAC02**: Confined, boulder, high-gradient, step-pool/cascade~~
+- ~~**SAC03**: Confined, boulder-bedrock, uniform~~
+-  **SAC04**: Confined, boulder-bedrock, low-gradient step-pool
+-  **SAC05**: Confined, gravel-cobble, uniform
+-  **SAC06**: Partly-confined, low width-to-depth, gravel-cobble, riffle-pool
+- ~~**SAC07**: Partly-confined, cobble-boulder, uniform~~
+-  **SAC08**: Partly-confined, high width-to-depth, gravel-cobble, riffle-pool
+-  **SAC09**: Unconfined, low width-to-depth, gravel
+-  **SAC10**: Unconfined, gravel-cobble, riffle-pool
+
+For the San Joaquin basin, we trained a simple random forest classifier on the Sacramento reaches, using a series of covariates (slope, catchment drainage area, catchment minimum elevation, catchment maximum elevation, catchment relief, catchment mean annual precipitation, reach mTPI [topographic position index], reach gradient class, and hydrologic class), and used this to estimate the classifications for the San Joaquin reaches.
+
+#### Sediment Transport at Bankfull
+
+This approach applies simple sediment transport relationships to estimate critical grain sizes at bankfull flow. Bankfull widths, depths, and velocities were sourced from the StreamCat NHDPlusLandscapeAttributes dataset for the NHDPlusV2 ComID reaches. 
+
+<mark>TODO: Add more detail about the calculation</mark>
+
+The following criteria were applied: 
+
+- **suspended transport**: bankfull flows are able to transport particles larger than silts and clays
+
+- **bed mobilization**: bankfull flows are sufficient to mobilize gravels/cobbles, but no so powerful as to be mobilizing boulders
+
+## Validation
+
+<mark>TODO: Add here the validation based on redd surveys.</mark>
+
+

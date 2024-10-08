@@ -73,7 +73,7 @@ ggplot2::ggplot() +
 
 ### Three Model Versions Tested
 
-Three forms of the model were tested, discussed in sequence in the following sections.
+Two forms of the model were tested, discussed in sequence in the following sections.
 
 #### Model Version 1: Habitat Area/LF vs Flow
 
@@ -125,32 +125,37 @@ The habitat and flow variables are multiplied by this scalar prior to prediction
 
 Compared to Version 1, the normalized Version 2 model creates flow-to-suitable-area curves that are more strongly proportional to the size of the river.
 
-#### Model Version 3: (Total Area/LF vs Flow) \* (% Habitat vs Normalized Flow)
+## Exploratory Linear Regression
 
-...details here...
-
-## Linear Regression Results
+<mark>TODO: Expand, just show some images of initial exploration, doesn't need to be the final version.</mark>
 
 -   Doesn't produce a great fit, but useful for exploring effects of predictor variables
 
 -   Collinearity between variables is not addressed as this is only exploratory
 
-## Random Forest Regression
+## Random Forest Regression Model
 
-Random Forest Regression is a decision tree based machine learning alternative to linear regression. The model specifications are essentially identical to the linear regression formulations previously dicsussed. Unlike linear regression, there is no constraint on the functional form of the flow-to-habitat relationship or the effects of predictor variables. 
+Random Forest Regression is a decision tree based machine learning alternative to linear regression. The model specifications are essentially identical to the linear regression formulations previously discussed. Unlike linear regression, there is no constraint on the functional form of the flow-to-habitat relationship or the effects of predictor variables. 
 
-### Model Results
+### Train / Test Split
 
-## Predictions
+<mark>TODO: details here</mark>
 
-### Overview
+### Feature Selection
 
-### By
+<mark>TODO: details here</mark>
 
-## Functional Regression
+### Parameter Tuning (Cross-Validation)
 
-Conceptually, we are thinking of suitable area to flow relationship is a function of a suite of predictor variables.
+<mark>TODO: details here</mark>
 
-3.  **Training statistical model**: The hydraulically modeled flow-to-suitable-area relationships developed for reaches in Step 2 are joined to the reach predictor variable table from Step 1. This dataset (one observation per flow per reach) is then used to train a statistical model that can be used to predict flow-to-suitable-area curves for reaches that are not hydraulically modeled. Random Forest Regression, a decision tree-based machine learning approach, allows for non-linear relationships between suitable habitat, flow, and the array of predictor variables. The model development process is detailed in the [Statistical Model](statistical_model.html) article.
+### Inverse Transformation
 
-4.  **Predicting habitat output**: The trained statistical model can now be used to predict flow-to-suitable-area relationships for other streams within the study area. While the statistical model will produce predictions for any stream with valid predictor data, the validity and trustworthiness of predictions will depend on those streams' similarity to the training dataset. As training datasets are currently limited to foothill alluvial systems on major tributary streams, only these should be considered valid. The prediction process is detailed in the [Statistical Model](statistical_model.html) article, and *preliminary* flow-to-suitable-habitat predictions are included in the data package [Map App](https://flowwest.shinyapps.io/habistat/).
+<mark>TODO: details here</mark>
+
+## Results
+
+The trained statistical model can now be used to predict flow-to-suitable-area relationships for other streams within the study area. While the statistical model will produce predictions for any stream with valid predictor data, the validity and trustworthiness of predictions will depend on those streams' similarity to the training dataset. As training datasets are currently limited to foothill alluvial systems on major tributary streams, only these should be considered valid. 
+
+<mark>TODO: show results map overview images from the model methods comparison script</mark>
+

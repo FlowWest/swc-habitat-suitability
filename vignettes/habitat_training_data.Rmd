@@ -40,7 +40,9 @@ The depth and velocity raster grids (for HEC-RAS 2D models) or vector meshes (fo
 
 A habitat suitability index was applied to each grid/mesh cell based on depth and velocity values. The simplest habitat suitability indices are binary, *i.e.*, 1 if a cell is within suitable depth and velocity range, else 0), and this approach is currently being used. However, it is possible to instead use a habitat suitability index that includes "somewhat suitable" fractional values between 0 and 1. 
 
-For model development, we applied the following habitat suitability index (all units are in feet):
+### Rearing
+
+We applied the following habitat suitability index (all units are in feet):
 
 > HSI = 1 if (d>1.0 & d<=3.28 & v>0 & v<=1.5) else 0
 
@@ -52,7 +54,29 @@ An alternative habitat suitability index was also tested:
 
 > HSI = 1 if (d>0.5 & d<=5.2 & v>0 & v<=4.0) else 0
 
-This index, derived from "juvenile salmonid observations from 11 different northern California rivers," was "developed for the California State Water Resources Control Board Voluntary Settlement Agreement and ... agreed upon by a committee of interested stakeholders as part of the Voluntary Settlement Agreement process during a meeting held November 9, 2017." It was previously applied by CBEC in the [Yuba River Flow Effects Modeling Project](https://drive.google.com/file/d/1UUjj0BxwIvbgL2k-frld6Fytx-bmi2Of/view).  
+This index, derived from "juvenile salmonid observations from 11 different northern California rivers," was "developed for the California State Water Resources Control Board Voluntary Settlement Agreement and ... agreed upon by a committee of interested stakeholders as part of the Voluntary Settlement Agreement process during a meeting held November 9, 2017." It was previously applied by CBEC in the [Yuba River Flow Effects Modeling Project](https://drive.google.com/file/d/1UUjj0BxwIvbgL2k-frld6Fytx-bmi2Of/view). 
+
+### Spawning
+
+For spawning, we derived general habitat suitability criteria from a dataset compiled by Mark Gard for use in [CVPIA DSMHabitat](https://cvpia-osc.github.io/DSMhabitat/). Within the dataset are spawning criteria for depth, velocity, and substrate for 11 watersheds and Fall, Late Fall, Winter, Spring for Chinook Salmon.
+
+<mark>TODO: Plot here of Mark Gard criteria</mark>
+
+The depth factor of the HSI, as the least-restrictive estimate, uses the maximum depth with a nonzero suitability across all of the runs analyzed.
+
+> HSI<sub>depth</sub> = 1 if d<=6.56 else 0
+
+For winter run, a minimum depth also applies:
+
+> HSI<sub>depth</sub> = 1 if (d > 1.00 & d<=6.56) else 0
+
+The velocity factor of the HSI, rather than a binary threshold, uses a curve relationship with fractional suitabilities. This curve is the upper envelope of all the individual suitability curves for different runs. 
+
+<mark>TODO: Plot here of the final suitability criteria.</mark>
+
+If both depth and velocity criteria were fractional, then a geometric mean would be an appropriate method of combining the two. However, with the binary criterion, simple multiplication is appropriate. The overall suitability equals the velocity suitability if and only if the depth is suitable, otherwise the overall suitability is zero.
+
+> HSI = HSI<sub>depth</sub> * HSI<sub>velocity</sub> = min(HSI<sub>depth</sub>, HSI<sub>velocity</sub>)
 
 ## Depth and Velocity Data Processing
 
@@ -87,6 +111,15 @@ The result is two values for each ComID (reach) at each flow. Units are ft2/ft, 
 * [`raster_summarize_hsi`](../reference/raster_summarize_hsi.html) applies the specified habitat suitability index, then calculates zonal statistics by ComID (reach) polygon to achieve total area and total suitable area for each polygon.
 * [`suitability_postprocess`](../reference/suitability_postprocess.html) spatially joins the ComID (reach) polygons to the NHD flowlines, then divides total area and total suitable area by the length of the corresponding flowline. The result is *total inundated area (ft2) per linear ft* and *suitable habitat area (ft2) per linear ft* for each reach, at each flow.
 
+### Baseflow Channel Removal
+
+For rearing reaches, it is also necessary to eliminate the area within within the perennial baseflow channel, even where depths and velocities are within the suitable range of the habitat suitability index (HSI). <mark>TODO Why?</mark>
+
+This is achieved by zeroing out the grid cells corresponding to the baseflow channel in the original hydraulic model output, prior to summarizing habitat suitability and creating the training dataset. The spatial extent of the baseflow channel can be estimated by choosing a specific baseflow (cfs) for each training reach and clipping out the inundation extent at this flow. In most cases, this is the minimum of the available flows in the provided hydraulic model results grids.
+
+The development team tested an alternative method which keeps the baseflow channel in the training dataset, and instead eliminates baseflow in the non-hydraulically modeled reaches after prediction. This is achieved by simply altering the duration suitability criteria to 'zero out' high durations (e.g. \>=100 days). However, it was determined that the assumptions inherent in the duratio suitability method would produce less accurate baseflow channel removal than simply spatially clipping.
+
 ## Output
 
 The summarized habitat training dataset by reach is available in the data package as [`wua_hydraulic`](../reference/wua_hydraulic.html).
+

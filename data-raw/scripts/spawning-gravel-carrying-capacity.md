@@ -1,7 +1,7 @@
 Spawning Gravel Carrying Capacity
 ================
 [Skyler Lewis](mailto:slewis@flowwest.com)
-2024-10-07
+2024-10-11
 
 - [Yuba Case study](#yuba-case-study)
 - [Actuals](#actuals)
@@ -11,6 +11,8 @@ Spawning Gravel Carrying Capacity
 - [Redds Survey](#redds-survey)
 - [Generalize beyond Yuba](#generalize-beyond-yuba)
 - [Summary of spawning lengths](#summary-of-spawning-lengths)
+- [Feather River](#feather-river)
+  - [Redds](#redds)
 
 ``` r
 library(tidyverse)
@@ -86,7 +88,7 @@ selected_streams <-
 Import estimates from the Yuba relicensing study
 
 ``` r
-spawning_matrix_data <- read_csv(here::here("data-raw", "source", "spawning_data", "01_YSF-Habitat-Matrices-Report_table8_data.csv"), col_types = "cnnnnnnnnnnn") |>
+spawning_matrix_data <- read_csv(here::here("data-raw", "source", "spawning_data", "yuba", "01_YSF-Habitat-Matrices-Report_table8_data.csv"), col_types = "cnnnnnnnnnnn") |>
   mutate(gnis_name = case_when(str_detect(reach, "North Yuba") ~ "North Yuba River",
                                str_detect(reach, "Middle Yuba") ~ "Middle Yuba River",
                                str_detect(reach, "South Yuba") ~ "South Yuba River",
@@ -375,7 +377,7 @@ RM 0 is at the mouth of the river, and RM 24.3 is at the base of
 Englebright Dam.
 
 ``` r
-lyr_redd_survey <- read_csv(here::here("data-raw", "source", "spawning_data", "spring-run_and_fall-run_redds_for_Rene_data.csv")) |>
+lyr_redd_survey <- read_csv(here::here("data-raw", "source", "spawning_data", "yuba", "spring-run_and_fall-run_redds_for_Rene_data.csv")) |>
   janitor::clean_names() |>
   select(-redds_total) |>
   pivot_longer(starts_with("redds")) |>
@@ -428,7 +430,7 @@ plt_redd_survey <-
   lyr_redd_survey |>
   ggplot() + 
   geom_step(aes(x = rm_start, y = value, color = time_range)) +
-  xlab("River Mile") + ylab("Numer of Redds") + 
+  xlab("River Mile") + ylab("Number of Redds") + 
   facet_wrap(~year, ncol=1)  +
   ggtitle("2009-2010 Lower Yuba River Redd Survey") + 
   guides(color = guide_legend(nrow=1, byrow=TRUE, title = "")) +
@@ -619,3 +621,136 @@ spawning_length_summary |>
     ## `.groups` argument.
 
 ![](spawning-gravel-carrying-capacity_files/figure-gfm/unnamed-chunk-16-1.png)<!-- -->
+
+## Feather River
+
+### Redds
+
+``` r
+# create river miles spatial index for feather
+rm_snap <- 10 # ft
+feather_rm_idx <- comid_with_rm |>
+  filter(river_name == "Feather River") |>
+  inner_join(y=_, x=habistat::flowline_geom_proj, by=join_by(comid)) |>
+  mutate(line_pts = map(geometry, \(x) st_line_sample(x, density=1/rm_snap))) |>
+  unnest(line_pts) |>
+  st_drop_geometry() |>
+  st_as_sf(sf_column_name = "line_pts", crs = st_crs(habistat::flowline_geom_proj)) |>
+  st_cast("POINT") |>
+  group_by(comid) |>
+  mutate(rm_pt = rm_start + ((row_number() - 1) * rm_snap) / 5280)
+```
+
+    ## Warning in st_cast.sf(st_as_sf(st_drop_geometry(unnest(mutate(inner_join(y =
+    ## filter(comid_with_rm, : repeating attributes for all sub-geometries for which
+    ## they may not be constant
+
+``` r
+# from https://github.com/FlowWest/feather-redd/blob/review-data/data/all_redd_data.csv
+feather_redd_data <- read_csv(here::here("data-raw", "source", "spawning_data", "feather", "all_redd_data.csv")) |>
+  filter(latitude>0 & longitude<0) |>
+  st_as_sf(coords = c("longitude", "latitude"), crs="EPSG:4269") |>
+  st_transform(habistat::const_proj_crs()) |>
+  mutate(rm_pt = feather_rm_idx$rm_pt[st_nearest_feature(geometry, feather_rm_idx)]) |>
+  mutate(year_starting_july = year(date) + if_else(month(date)>=7, 0, 1),
+         date_normalized = date %m-% months(12*(year_starting_july - 2047))) |>
+  mutate(time_range = if_else(date_normalized <= ymd("2047-10-15"), "On or Prior to Oct 15", "On or After Oct 16")
+           |> factor(levels = c("On or Prior to Oct 15", "On or After Oct 16"))) 
+```
+
+    ## Rows: 36870 Columns: 21
+    ## ── Column specification ────────────────────────────────────────────────────────
+    ## Delimiter: ","
+    ## chr   (2): survey_wk, location
+    ## dbl  (17): file_number, number_redds, number_salmon, depth_m, pot_depth_m, v...
+    ## lgl   (1): boat_point
+    ## date  (1): date
+    ## 
+    ## ℹ Use `spec()` to retrieve the full column specification for this data.
+    ## ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+
+``` r
+feather_redd_data |>
+  st_drop_geometry() |>
+  group_by(year_starting_july, time_range) |>
+  summarize(value = n(), .groups="drop") |>
+  pivot_wider(names_from = c(time_range)) |>
+  knitr::kable()
+```
+
+| year_starting_july | On or Prior to Oct 15 | On or After Oct 16 |
+|-------------------:|----------------------:|-------------------:|
+|               2014 |                  1207 |                690 |
+|               2015 |                   963 |               1371 |
+|               2016 |                   569 |               1001 |
+|               2017 |                    51 |               2666 |
+|               2018 |                   790 |               3373 |
+|               2019 |                  1297 |               3741 |
+|               2020 |                  1472 |               3955 |
+|               2021 |                  2164 |                430 |
+|               2022 |                   558 |               3202 |
+|               2023 |                   719 |               6604 |
+
+``` r
+# summarize by named location
+feather_redd_summary <- 
+  feather_redd_data |>
+  group_by(location) |>
+  summarize(number_redds = sum(number_redds, na.rm=T),
+            number_salmon = sum(number_salmon, na.rm=T)) |>
+  st_union(by_feature=T) |>
+  st_centroid() |>
+  mutate(rm_pt = feather_rm_idx$rm_pt[st_nearest_feature(geometry, feather_rm_idx)])
+
+feather_redds_by_rm <-
+  feather_redd_data |>
+  st_drop_geometry() |>
+  mutate(rm_start = as.integer(floor(rm_pt))) |>
+  group_by(year_starting_july, time_range, rm_start) |>
+  summarize(across(c(number_redds, number_salmon), \(x) sum(x, na.rm=T)), .groups="drop") |>
+  group_by(time_range, rm_start) |>
+  summarize(across(c(number_redds, number_salmon), \(x) mean(x, na.rm=T)), .groups="drop") |>
+  complete(time_range = unique(time_range),
+           rm_start = seq(min(rm_start), max(rm_start))) |>
+  mutate(across(c(number_redds, number_salmon), \(x) coalesce(x, 0)))
+
+plt_feather_redd_survey <-
+  feather_redds_by_rm |> 
+  ggplot() + geom_step(aes(x = rm_start, y = number_redds, color = time_range)) +
+  xlab("River Mile") + ylab("Number of Redds") + 
+  ggtitle("Feather River Redd Surveys (2014-2023 Mean)") + 
+  guides(color = guide_legend(nrow=1, byrow=TRUE, title = "")) +
+  scale_y_continuous(sec.axis = sec_axis(name = "Redd Area (ac) per RM", transform = ~.*94/43560)) +
+  theme(panel.grid.minor = element_blank(), legend.position="top") 
+
+plt_feather_redd_survey
+```
+
+![](spawning-gravel-carrying-capacity_files/figure-gfm/unnamed-chunk-18-1.png)<!-- -->
+
+``` r
+feather_redds_by_rm_yr <-
+  feather_redd_data |>
+  st_drop_geometry() |>
+  mutate(rm_start = as.integer(floor(rm_pt))) |>
+  group_by(year_starting_july, time_range, rm_start) |>
+  summarize(across(c(number_redds, number_salmon), \(x) sum(x, na.rm=T)), .groups="drop") |>
+  complete(year_starting_july = unique(year_starting_july),
+           time_range = unique(time_range),
+           rm_start = seq(min(rm_start), max(rm_start))) |>
+  mutate(across(c(number_redds, number_salmon), \(x) coalesce(x, 0)))
+
+plt_feather_redd_survey_yr <-
+  feather_redds_by_rm_yr |> 
+  ggplot() + geom_step(aes(x = rm_start, y = number_redds, color = time_range)) +
+  xlab("River Mile") + ylab("Number of Redds") + 
+  ggtitle("Feather River Redd Surveys") + 
+  facet_wrap(~year_starting_july) +
+  guides(color = guide_legend(nrow=1, byrow=TRUE, title = "")) +
+  scale_y_continuous(sec.axis = sec_axis(name = "Redd Area (ac) per RM", transform = ~.*94/43560)) +
+  theme(panel.grid.minor = element_blank(), legend.position="top") 
+
+plt_feather_redd_survey_yr
+```
+
+![](spawning-gravel-carrying-capacity_files/figure-gfm/unnamed-chunk-19-1.png)<!-- -->

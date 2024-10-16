@@ -28,7 +28,6 @@ reference:
   - starts_with("flowline_")
   - starts_with("wua_")
   - starts_with("cv_")
-  - starts_with("streamgage_")
 - title: "Suitability Functions"
   desc: "..."
   contents:

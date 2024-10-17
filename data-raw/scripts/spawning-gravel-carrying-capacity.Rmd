@@ -334,6 +334,95 @@ plt_yuba_redd_survey <-
 print(plt_yuba_redd_survey)
 ```
 
+#### Battle Creek 
+
+All Spring Run Chinook from 2011 to 2022
+```{r}
+# https://github.com/SRJPE/JPE-datasets/blob/main/data-raw/qc-markdowns/adult-holding-redd-and-carcass-surveys/battle-creek/battle_creek_redd_qc.md
+battle_redd <- read_csv(here::here("data-raw", "source", "spawning_data", "battle", "jpe_battle_creek_redd_counts.csv")) |> 
+  filter(species == "Chinook") |>  # removes O mykiss and lamprey, just a few rows
+  select(date, longitude, latitude, river_mile, reach, redd_measured, redd_length) |> 
+  filter(redd_measured == TRUE) |> 
+  glimpse()
+
+battle_redd |> 
+  group_by(river_mile) |> 
+  summarise(n_redd = length(redd_measured)) |> 
+ggplot(aes(x = river_mile, y = n_redd)) +
+  geom_col() +
+  ggtitle('Redd Counts for Battle Creek by River Mile')
+
+battle_redd_for_agg <- battle_redd |> 
+  group_by(river_mile) |> 
+  summarise(n_redd = length(redd_measured)) |> 
+  mutate(river = "Battle Creek")
+```
+
+
+#### Butte Creek
+
+No SRJPE redd data available 
+
+#### Clear Creek
+
+All Spring Run Chinook redds from 2000 to 2019
+
+```{r}
+#https://github.com/FlowWest/JPE-datasets/blob/main/data-raw/qc-markdowns/adult-holding-redd-and-carcass-surveys/clear-creek/clear_creek_redds_survey_qc.md
+clear_redd <- read_csv(here::here("data-raw", "source", "spawning_data", "clear", "jpe_clear_creek_redd_counts.csv")) |> 
+  filter(species == "Chinook", 
+         measured == TRUE) |> 
+  select(date, longitude, latitude, surveyed_reach, measured) |> 
+  glimpse()
+
+clear_redd |> 
+  mutate(lat_long = paste0(latitude, ", ", longitude)) |> 
+  group_by(lat_long) |> 
+  summarise(n_redd = length(measured)) |> 
+ggplot(aes(x = lat_long, y = n_redd)) +
+  geom_col() +
+  ggtitle('Redd Counts for Clear Creek by lat/long')
+
+clear_redd_for_agg <- clear_redd |> 
+  mutate(lat_long = paste0(latitude, ", ", longitude),
+         river = "Clear Creek") |> 
+  select(-date) |> 
+  glimpse()
+
+```
+
+#### Deer Creek
+
+No SRJPE redd data available 
+
+#### Mill Creek
+
+```{r}
+# https://github.com/FlowWest/JPE-datasets/blob/main/data-raw/qc-markdowns/adult-holding-redd-and-carcass-surveys/mill-creek/mill-creek-redd-survey-qc-checklist.md
+mill_redd <- read_csv(here::here("data-raw", "source", "spawning_data", "mill", "mill_redd_survey.csv")) |> glimpse()
+
+mill_locations <- readxl::read_excel(here::here("data-raw", "source", "spawning_data", "mill", 'adult-holding-redd-and-carcass-surveys_mill-creek_data-raw_Mill Creek spring-run Redd Counts 2007-2023.xlsx'), sheet = "nearest temp-logger") |> 
+  janitor::clean_names() |> 
+  rename(location = redd_survey_section) |> 
+  glimpse()
+
+mill_merge <- mill_redd |> 
+  left_join(mill_locations) |> 
+  select(-starting_elevation) |> 
+  filter(surveyed == TRUE) |> 
+  group_by(location, lat, long) |> 
+  summarise(n_redds = sum(redd_count)) |> 
+  mutate(river = "Mill Creek") |> 
+  glimpse()
+
+mill_merge |> 
+  ggplot(aes(x = location, y = n_redds)) + 
+  geom_col() +
+  coord_flip() + 
+  ggtitle('Redd Counts for Mill Creek by lat/long')
+  
+```
+
 ### Combined Plots
 
 ```{r combined_plot, fig.width=10.5, fig.height=8, dpi=300}

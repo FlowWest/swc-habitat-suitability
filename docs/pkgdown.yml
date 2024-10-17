@@ -1,0 +1,11 @@
+pandoc: 3.1.1
+pkgdown: 2.0.7
+pkgdown_sha: ~
+articles:
+  duration_analysis: duration_analysis.html
+  habitat_training_data: habitat_training_data.html
+  model_overview: model_overview.html
+  predictor_variables: predictor_variables.html
+  statistical_model: statistical_model.html
+last_built: 2024-10-17T17:21Z
+

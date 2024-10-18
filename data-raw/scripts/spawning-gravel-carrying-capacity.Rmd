@@ -5,7 +5,7 @@ date: "`r Sys.Date()`"
 output: 
   github_document:
     toc: true
-    toc_depth: 3
+    toc_depth: 4
     number_sections: false
     math_method:
       engine: webtex
@@ -17,7 +17,7 @@ library(tidyverse)
 library(sf)
 library(habistat)
 library(patchwork)
-theme_set(theme_minimal())
+theme_set(theme_minimal() + theme(panel.grid.minor = element_blank()))
 glimpse_plot <- function(x, ...) {
   plot(x, ...)
   invisible(x)
@@ -81,13 +81,23 @@ Define river miles upon which to map results
   # start = numbering system start
   # end = numbering system end
   # vectors should be already ordered
-define_rm_start <- function(length, start, end) {
-  cum_length_end <- cumsum(length)
-  cum_length_start <- cum_length_end - length
-  scales::rescale(cum_length_start,
-                  from = c(min(cum_length_start), max(cum_length_end)), 
-                  to = c(first(start), first(end)))
+define_rm_endpoint <- function(length, start, end, which="start") {
+  cum_length_end_unscaled <- cumsum(length)
+  cum_length_start_unscaled <- cum_length_end_unscaled - length
+  cum_length_start_scaled <-
+    scales::rescale(cum_length_start_unscaled,
+                    from = c(min(cum_length_start_unscaled), max(cum_length_end_unscaled)), 
+                    to = c(first(start), first(end)))
+  cum_length_end_scaled <-
+    scales::rescale(cum_length_end_unscaled,
+                    from = c(min(cum_length_start_unscaled), max(cum_length_end_unscaled)), 
+                    to = c(first(start), first(end)))
+  return(switch(which,
+                start = cum_length_start_scaled,
+                end = cum_length_end_scaled))
 }
+
+# for streams with known RM schemes, define them:
 
 rm_reaches <- 
   tribble(~river_name,       ~river_cvpia,         ~ds_comid, ~ds_rm, ~us_comid, ~us_rm,
@@ -96,11 +106,9 @@ rm_reaches <-
           "American River",   "American River",          15024919, -0.1, 15025009, 16.1,
           "Lower Yuba River", "Yuba River",              7982918, 0, 8062555, 24.3,
           "Feather River",    "Feather River",           7978071, -0.1, 7968113, 67.2,
-          "Mill Creek",       "Mill Creek",              NA, NA, NA, NA,
-          "Battle Creek",     "Battle Creek",            NA, NA, NA, NA,
-          "Clear Creek",      "Clear Creek",             NA, NA, NA, NA)
+          "Battle Creek",     "Battle Creek",            2495738, 0, 2766034, 17.0)
 
-comid_with_rm <- 
+comid_with_rm_custom <- 
   rm_reaches |>
   drop_na() |>
   unnest(river_cvpia) |>
@@ -110,10 +118,35 @@ comid_with_rm <-
   mutate(reach_length_mi = reach_length_ft / 5280) |>
   arrange(river_name, hydro_seq) |>
   group_by(river_name, ds_rm, us_rm) |>
-  mutate(rm_start = define_rm_start(reach_length_ft, ds_rm, us_rm)) |>
-  mutate(rm_end = rm_start + reach_length_mi) |>
+  mutate(rm_start = define_rm_endpoint(reach_length_ft, ds_rm, us_rm, "start")) |>
+  mutate(rm_end = define_rm_endpoint(reach_length_ft, ds_rm, us_rm, "end")) |>
   ungroup() |>
   select(river_name, comid, reach_length_mi, rm_start, rm_end)
+
+# for streams without custom RM definitions above, just use accumulated NHD lengths:
+
+comid_with_rm_nhd <-
+  habistat::cv_mainstems |>
+  st_drop_geometry() |>
+  inner_join(habistat::flowline_attr |>
+               select(comid, hydro_seq, reach_length_ft), by=join_by(comid)) |>
+  mutate(reach_length_mi = reach_length_ft / 5280) |>
+  arrange(river_cvpia, hydro_seq) |>
+  group_by(river_cvpia) |>
+  mutate(rm_end = cumsum(reach_length_mi),
+         rm_start = rm_end - reach_length_mi) |>
+  ungroup() |>
+  filter(river_cvpia %in% c("Mill Creek", 
+                            "Deer Creek",
+                            "Clear Creek")) |>
+  mutate(river_name = river_cvpia) |>
+  select(river_name, comid, reach_length_mi, rm_start, rm_end) 
+
+# combine the two datasets into one
+comid_with_rm <- bind_rows("custom" = comid_with_rm_custom, 
+                           "nhd" = comid_with_rm_nhd,
+                           .id = "rm_source") |>
+  glimpse()
 
 comid_with_rm |>
   inner_join(y = _, x = habistat::flowline_geom_proj, by=join_by(comid)) |>
@@ -185,33 +218,69 @@ print(plt_spawning_pred_rm)
 
 ### Redd Surveys by River Mile
 
+#### Function to create and apply river mile index to point dataset
+
+Apply to an `sf` point dataset via e.g. `data |> mutate(rm_pt = river_miles(geometry, "Feather River"))` where `geometry` is the name of the sf geometry column. Geometry needs to be in the project CRS.
+
+```{r}
+create_rm_idx <- function(river, rm_snap = 10) {
+  rm_idx <- 
+    comid_with_rm |>
+    filter(river_name == river) |>
+    inner_join(y=_, x=habistat::flowline_geom_proj, by=join_by(comid)) |>
+    mutate(line_pts = map(geometry, \(x) st_line_sample(x, density=1/rm_snap))) |>
+    unnest(line_pts) |>
+    st_drop_geometry() |>
+    st_as_sf(sf_column_name = "line_pts", crs = st_crs(habistat::flowline_geom_proj)) |>
+    st_cast("POINT") |>
+    group_by(comid) |>
+    mutate(rm_pt = rm_start + ((row_number() - 1) * rm_snap) / 5280)
+  return(rm_idx)
+}
+
+apply_rm_idx <- function(geometry, rm_idx) {
+  rm_pt <- rm_idx$rm_pt[st_nearest_feature(geometry, rm_idx)]
+  return(rm_pt)
+}
+
+river_miles <- function(geometry, river, rm_snap = 10) {
+  rm_idx <- create_rm_idx(river, rm_snap)
+  rm_pt <- apply_rm_idx(geometry, rm_idx)
+  return(rm_pt)
+}
+```
+
 #### Feather River
 
 ```{r feather_redd_data}
 # create river miles spatial index for feather
-rm_snap <- 10 # ft
+# rm_snap <- 10 # ft
 
-feather_rm_idx <- 
-  comid_with_rm |>
-  filter(river_name == "Feather River") |>
-  inner_join(y=_, x=habistat::flowline_geom_proj, by=join_by(comid)) |>
-  mutate(line_pts = map(geometry, \(x) st_line_sample(x, density=1/rm_snap))) |>
-  unnest(line_pts) |>
-  st_drop_geometry() |>
-  st_as_sf(sf_column_name = "line_pts", crs = st_crs(habistat::flowline_geom_proj)) |>
-  st_cast("POINT") |>
-  group_by(comid) |>
-  mutate(rm_pt = rm_start + ((row_number() - 1) * rm_snap) / 5280)
+# feather_rm_idx <- 
+#   comid_with_rm |>
+#   filter(river_name == "Feather River") |>
+#   inner_join(y=_, x=habistat::flowline_geom_proj, by=join_by(comid)) |>
+#   mutate(line_pts = map(geometry, \(x) st_line_sample(x, density=1/rm_snap))) |>
+#   unnest(line_pts) |>
+#   st_drop_geometry() |>
+#   st_as_sf(sf_column_name = "line_pts", crs = st_crs(habistat::flowline_geom_proj)) |>
+#   st_cast("POINT") |>
+#   group_by(comid) |>
+#   mutate(rm_pt = rm_start + ((row_number() - 1) * rm_snap) / 5280)
+
+feather_rm_idx <- create_rm_idx("Feather River")
 
 # from https://github.com/FlowWest/feather-redd/blob/review-data/data/all_redd_data.csv
 feather_redd_data <- read_csv(here::here("data-raw", "source", "spawning_data", "feather", "all_redd_data.csv")) |>
   filter(latitude>0 & longitude<0) |>
   st_as_sf(coords = c("longitude", "latitude"), crs="EPSG:4269") |>
   st_transform(habistat::const_proj_crs()) |>
-  mutate(rm_pt = feather_rm_idx$rm_pt[st_nearest_feature(geometry, feather_rm_idx)]) |>
+# mutate(rm_pt = feather_rm_idx$rm_pt[st_nearest_feature(geometry, feather_rm_idx)]) |>
+# mutate(rm_pt = river_miles(geometry, "Feather River")) |>
+  mutate(rm_pt = apply_rm_idx(geometry, feather_rm_idx)) |>
   mutate(survey_year = year(date) + if_else(month(date)>=7, 0, 1), # year starting in july
-         date_normalized = date %m-% months(12*(survey_year - 2047))) |>
-  mutate(time_range = if_else(date_normalized <= ymd("2047-10-15"), "On or Prior to Oct 15", "On or After Oct 16")
+         date_normalized = date %m-% months(12*(survey_year - 2047)),
+         time_range = if_else(date_normalized <= ymd("2047-10-15"), "On or Prior to Oct 15", "On or After Oct 16")
            |> factor(levels = c("On or Prior to Oct 15", "On or After Oct 16"))) |>
   rename(n_redds = number_redds, n_salmon = number_salmon) 
 
@@ -232,7 +301,7 @@ feather_redd_summary <-
             n_salmon = sum(n_salmon, na.rm=T)) |>
   st_union(by_feature=T) |>
   st_centroid() |>
-  mutate(rm_pt = feather_rm_idx$rm_pt[st_nearest_feature(geometry, feather_rm_idx)])
+  mutate(rm_pt = apply_rm_idx(geometry, feather_rm_idx))
 
 feather_redds_by_rm_avg <-
   feather_redd_data |>
@@ -246,16 +315,13 @@ feather_redds_by_rm_avg <-
            rm_start = seq(min(rm_start), max(rm_start))) |>
   mutate(across(c(n_redds, n_salmon), \(x) coalesce(x, 0)))
 
-plt_feather_redd_survey <-
-  feather_redds_by_rm_avg |> 
+feather_redds_by_rm_avg |> 
   ggplot() + geom_step(aes(x = rm_start, y = n_redds, color = time_range)) +
   xlab("River Mile") + ylab("Number of Redds") + 
   ggtitle("Feather River Redd Surveys (2014-2023 Mean)") + 
   guides(color = guide_legend(nrow=1, byrow=TRUE, title = "")) +
   scale_y_continuous(sec.axis = sec_axis(name = "Redd Area (ac) per RM", transform = ~.*94/43560)) +
   theme(panel.grid.minor = element_blank(), legend.position="top") 
-
-plt_feather_redd_survey
 ```
 
 ```{r feather_redds_rm_yr}
@@ -295,7 +361,7 @@ plt_feather_redd_survey_yr
 RM 0 is at the mouth of the river, and RM 24.3 is at the base of Englebright Dam.
 
 ```{r yuba_redds}
-lyr_redds_by_rm <- 
+yuba_redds_by_rm <- 
   read_csv(here::here("data-raw", "source", "spawning_data", "yuba", "spring-run_and_fall-run_redds_for_Rene_data.csv")) |>
   janitor::clean_names() |>
   select(-redds_total) |>
@@ -312,7 +378,7 @@ lyr_redds_by_rm <-
     mutate(survey_year = "max")) |>
   rename(n_redds = value)
 
-lyr_redds_by_rm |>
+yuba_redds_by_rm |>
   group_by(survey_year, time_range) |>
   summarize(total_redds = sum(n_redds)) |>
   mutate(spawning_area_ac = total_redds * 94 / 43560) |>
@@ -320,7 +386,7 @@ lyr_redds_by_rm |>
   arrange(time_range, survey_year)
   
 plt_yuba_redd_survey <-
-  lyr_redds_by_rm |>
+  yuba_redds_by_rm |>
   ggplot() + 
   geom_step(aes(x = rm_start, y = n_redds, color = time_range)) +
   xlab("River Mile") + ylab("Number of Redds") + 
@@ -337,27 +403,77 @@ print(plt_yuba_redd_survey)
 #### Battle Creek 
 
 All Spring Run Chinook from 2011 to 2022
-```{r}
+
+```{r battle_redds}
 # https://github.com/SRJPE/JPE-datasets/blob/main/data-raw/qc-markdowns/adult-holding-redd-and-carcass-surveys/battle-creek/battle_creek_redd_qc.md
 battle_redd <- read_csv(here::here("data-raw", "source", "spawning_data", "battle", "jpe_battle_creek_redd_counts.csv")) |> 
+  mutate(reach_orig = reach,
+         reach = reach |> str_replace_all("R", "") |> as.integer() |> factor(levels = seq(1,7))) |>
   filter(species == "Chinook") |>  # removes O mykiss and lamprey, just a few rows
-  select(date, longitude, latitude, river_mile, reach, redd_measured, redd_length) |> 
+  select(date, longitude, latitude, river_mile, reach, reach_orig, redd_measured, redd_length) |> 
   filter(redd_measured == TRUE) |> 
+  mutate(survey_year = year(date) + if_else(month(date)>=7, 0, 1), # year starting in july
+         date_normalized = date %m-% months(12*(survey_year - 2047)),
+         time_range = if_else(date_normalized <= ymd("2047-10-15"), "On or Prior to Oct 15", "On or After Oct 16")
+           |> factor(levels = c("On or Prior to Oct 15", "On or After Oct 16"))) |>
+  drop_na(survey_year) |>
+  mutate(rm_start = floor(river_mile)) |>
+  st_as_sf(coords = c("longitude", "latitude"), crs = "EPSG:4326", remove=F) |>
+  st_transform(habistat::const_proj_crs()) |> 
   glimpse()
 
 battle_redd |> 
-  group_by(river_mile) |> 
-  summarise(n_redd = length(redd_measured)) |> 
-ggplot(aes(x = river_mile, y = n_redd)) +
-  geom_col() +
-  ggtitle('Redd Counts for Battle Creek by River Mile')
+  group_by(rm_start, time_range) |> 
+  summarise(n_redds = length(redd_measured)) %>%
+  bind_rows(expand_grid(rm_start = max(.$rm_start) + 1, 
+                          n_redds = 0, 
+                          time_range = unique(.$time_range))) |>
+  ggplot(aes(x = rm_start, y = n_redds, color = time_range)) +
+  geom_step() +
+  ggtitle('Redd Counts for Battle Creek by River Mile') +
+  labs(subtitle = "total 2011-2022")
 
-battle_redd_for_agg <- battle_redd |> 
-  group_by(river_mile) |> 
-  summarise(n_redd = length(redd_measured)) |> 
-  mutate(river = "Battle Creek")
+battle_redds_by_rm <- battle_redd |> 
+  group_by(survey_year, time_range, rm_start) |> 
+  summarise(n_redds = length(redd_measured)) 
+
+battle_redds_by_rm %>%
+  bind_rows(expand_grid(rm_start = max(.$rm_start) + 1, 
+                          n_redds = 0, 
+                          survey_year = unique(.$survey_year),
+                          time_range = unique(.$time_range))) |>
+  ggplot(aes(x = rm_start, y = n_redds, color = time_range)) +
+  geom_step() +
+  facet_wrap(~survey_year) +
+  ggtitle('Redd Counts for Battle Creek by River Mile') +
+  labs(subtitle = "by Year 2011-2022")
 ```
 
+##### Battle Creek QC
+
+**Investigate RM and locations:** Min and max RM seem inconsistent by reach. Lat/lon on some reaches (from datasets with reach name coded with "R") are incorrectly integers. <mark>In lack of usable lat/lon, need to locate river mile definitions in order to correctly compare against habistat estimates.</mark>
+
+```{r}
+battle_redd |>
+  group_by(reach, reach_orig) |>
+  filter(river_mile != 0) |>
+  summarize(min(river_mile), max(river_mile), 
+            min(latitude), max(latitude), 
+            min(longitude), max(longitude)) |>
+  st_drop_geometry() |>
+  knitr::kable()
+```
+
+River miles defined in [USFWS (2018), *Summary of Actions to Jumpstart the Reintroduction of Sacramento River Winter-run Chinook Salmon, to Battle Creek, 2017 – 2018*](https://www.noaa.gov/sites/default/files/legacy/document/2020/Oct/07354626189.pdf), Figure 3:
+
+- Mainstem:
+  - North/South fork confluence is at mainstem RM 16.80
+- North fork:
+  - Wildcat Road Bridge RM 0.88
+  - Wilson Hill Road Bridge RM 8.82
+  - North Fork Feeder Dam Area RM 9.42
+  
+Using manual RM definition on the Battle Creek mainstem only for now, range 0 through 17 (~16.80). Need to confirm if some of these redds were surveyed on the forks.
 
 #### Butte Creek
 
@@ -367,28 +483,74 @@ No SRJPE redd data available
 
 All Spring Run Chinook redds from 2000 to 2019
 
-```{r}
+```{r clear_redds}
+clear_rm_idx <- create_rm_idx("Clear Creek")
+
 #https://github.com/FlowWest/JPE-datasets/blob/main/data-raw/qc-markdowns/adult-holding-redd-and-carcass-surveys/clear-creek/clear_creek_redds_survey_qc.md
 clear_redd <- read_csv(here::here("data-raw", "source", "spawning_data", "clear", "jpe_clear_creek_redd_counts.csv")) |> 
   filter(species == "Chinook", 
          measured == TRUE) |> 
-  select(date, longitude, latitude, surveyed_reach, measured) |> 
+  select(date, longitude, latitude, surveyed_reach, measured) |>
+  drop_na(longitude, latitude) |>
+  mutate(survey_year = year(date) + if_else(month(date)>=7, 0, 1), # year starting in july
+         date_normalized = date %m-% months(12*(survey_year - 2047)),
+         time_range = if_else(date_normalized <= ymd("2047-10-15"), "On or Prior to Oct 15", "On or After Oct 16")
+           |> factor(levels = c("On or Prior to Oct 15", "On or After Oct 16"))) |>
+  drop_na(survey_year) |>
+  st_as_sf(coords = c("longitude", "latitude"), crs = "EPSG:4326", remove=F) |>
+  st_transform(habistat::const_proj_crs()) |> 
+  mutate(rm_pt = apply_rm_idx(geometry, clear_rm_idx)) |>
   glimpse()
 
-clear_redd |> 
-  mutate(lat_long = paste0(latitude, ", ", longitude)) |> 
-  group_by(lat_long) |> 
-  summarise(n_redd = length(measured)) |> 
-ggplot(aes(x = lat_long, y = n_redd)) +
-  geom_col() +
+clear_redd_counts <- 
+  clear_redd |>
+  st_drop_geometry() |>
+  group_by(longitude, latitude, survey_year, time_range) |> 
+  summarise(n_redds = length(measured), .groups="drop") |>
+  st_as_sf(coords = c("longitude", "latitude"), crs = "EPSG:4326", remove=F) |>
+  st_transform(habistat::const_proj_crs()) |>
+  mutate(rm_pt = apply_rm_idx(geometry, clear_rm_idx))
+
+clear_redd_counts |> 
+  group_by(longitude, latitude, survey_year) |>
+  summarise(n_redds = sum(n_redds), .groups="drop") |>
+  ggplot() +
+  ggspatial::annotation_spatial(habistat::cv_mainstems |>
+                                  filter(river_group=="Clear Creek"), color="gray") +
+  geom_sf(aes(color = n_redds)) +
+  facet_wrap(~survey_year) +
   ggtitle('Redd Counts for Clear Creek by lat/long')
 
-clear_redd_for_agg <- clear_redd |> 
-  mutate(lat_long = paste0(latitude, ", ", longitude),
-         river = "Clear Creek") |> 
-  select(-date) |> 
-  glimpse()
+clear_redds_by_rm <-
+  clear_redd_counts |>
+  st_drop_geometry() |>
+  mutate(rm_start = as.integer(floor(rm_pt))) |>
+  group_by(rm_start, survey_year, time_range) |>
+  summarize(n_redds = sum(n_redds), .groups="drop") |>
+  group_by(survey_year) |>
+  complete(rm_start = seq(min(rm_start), max(rm_start))) |>
+  mutate(n_redds = coalesce(n_redds, 0)) |>
+  ungroup()
 
+clear_redds_by_rm %>%
+  bind_rows(expand_grid(rm_start = c(min(.$rm_start) - 1, max(.$rm_start) + 1), 
+                        n_redds = 0, 
+                        time_range = unique(.$time_range))) |>
+  ggplot() +
+  geom_step(aes(x = rm_start, y = n_redds, color = time_range)) +
+  facet_wrap(~survey_year) +
+  ggtitle('Redd Counts for Clear Creek by river mile')
+
+clear_redds_by_rm |> 
+  group_by(rm_start, time_range) |>
+  summarize(n_redds = max(n_redds))%>%
+  bind_rows(expand_grid(rm_start = c(min(.$rm_start) - 1, max(.$rm_start) + 1), 
+                        n_redds = 0, 
+                        survey_year = unique(.$survey_year),
+                        time_range = unique(.$time_range))) |>
+  ggplot() +
+  geom_step(aes(x = rm_start, y = n_redds, color = time_range)) +
+  ggtitle('Redd Counts for Clear Creek by river mile (upper envelope)')
 ```
 
 #### Deer Creek
@@ -397,37 +559,91 @@ No SRJPE redd data available
 
 #### Mill Creek
 
-```{r}
+```{r mill_redds}
+mill_rm_idx <- create_rm_idx("Mill Creek")
+
 # https://github.com/FlowWest/JPE-datasets/blob/main/data-raw/qc-markdowns/adult-holding-redd-and-carcass-surveys/mill-creek/mill-creek-redd-survey-qc-checklist.md
 mill_redd <- read_csv(here::here("data-raw", "source", "spawning_data", "mill", "mill_redd_survey.csv")) |> glimpse()
 
 mill_locations <- readxl::read_excel(here::here("data-raw", "source", "spawning_data", "mill", 'adult-holding-redd-and-carcass-surveys_mill-creek_data-raw_Mill Creek spring-run Redd Counts 2007-2023.xlsx'), sheet = "nearest temp-logger") |> 
   janitor::clean_names() |> 
-  rename(location = redd_survey_section) |> 
+  mutate(location = redd_survey_section |>
+           str_replace_all("HIG", "Hole-in-Ground") |>
+           str_replace_all("McCarty", "McCarthy") |>
+           str_replace_all("Ranch House to above Avery", "Below Ranch House to above Avery")) |>
+  st_as_sf(coords = c("long", "lat"), crs = "EPSG:4326", remove=F) |>
+  st_transform(habistat::const_proj_crs()) |>
+  mutate(rm_pt = apply_rm_idx(geometry, mill_rm_idx)) |>
   glimpse()
 
 mill_merge <- mill_redd |> 
-  left_join(mill_locations) |> 
+  right_join(x = mill_locations, y = _, by=join_by(location)) |> 
   select(-starting_elevation) |> 
-  filter(surveyed == TRUE) |> 
-  group_by(location, lat, long) |> 
-  summarise(n_redds = sum(redd_count)) |> 
-  mutate(river = "Mill Creek") |> 
-  glimpse()
+  filter(surveyed == TRUE) |>
+  rename(survey_year = year) |>
+  mutate(time_range = NA)
 
-mill_merge |> 
-  ggplot(aes(x = location, y = n_redds)) + 
-  geom_col() +
-  coord_flip() + 
+mill_redd_counts <-
+  mill_merge |>
+  st_drop_geometry() |>
+  group_by(location, lat, long, survey_year, time_range) |> 
+  summarise(n_redds = sum(redd_count), .groups="drop") |> 
+  drop_na(long, lat) |>
+  mutate(river = "Mill Creek") |> 
+  st_as_sf(coords = c("long", "lat"), crs = "EPSG:4326", remove=F) |>
+  st_transform(habistat::const_proj_crs()) |>
+  mutate(rm_pt = apply_rm_idx(geometry, mill_rm_idx)) 
+
+mill_redd_counts |> 
+  group_by(long, lat, survey_year) |>
+  summarise(n_redds = sum(n_redds), .groups="drop") |>
+  ggplot() +
+  ggspatial::annotation_spatial(habistat::cv_mainstems |>
+                                  filter(river_group=="Mill Creek"), color="gray") +
+  geom_sf(aes(color = n_redds)) +
+  facet_wrap(~survey_year) +
   ggtitle('Redd Counts for Mill Creek by lat/long')
-  
+
+mill_redds_by_rm <-
+  mill_redd_counts |>
+  st_drop_geometry() |>
+  mutate(rm_start = as.integer(floor(rm_pt))) |>
+  group_by(rm_start, survey_year, time_range) |>
+  summarize(n_redds = sum(n_redds), .groups="drop") |>
+  group_by(survey_year) |>
+  complete(rm_start = seq(min(rm_start), max(rm_start))) |>
+  mutate(n_redds = coalesce(n_redds, 0)) |>
+  ungroup()
+
+mill_redds_by_rm %>%
+  bind_rows(expand_grid(rm_start = c(min(.$rm_start) - 1, max(.$rm_start) + 1), 
+                        n_redds = 0, 
+                        survey_year = unique(.$survey_year),
+                        time_range = unique(.$time_range))) |>
+  ggplot() +
+  geom_step(aes(x = rm_start, y = n_redds, color = time_range)) +
+  facet_wrap(~survey_year) +
+  ggtitle('Redd Counts for Mill Creek by river mile')
+
+mill_redds_by_rm |> 
+  group_by(rm_start, time_range) |>
+  summarize(n_redds = max(n_redds)) %>%
+  bind_rows(expand_grid(rm_start = c(min(.$rm_start) - 1, max(.$rm_start) + 1), 
+                        n_redds = 0, 
+                        time_range = unique(.$time_range))) |>
+  ggplot() +
+  geom_step(aes(x = rm_start, y = n_redds, color = time_range)) +
+  ggtitle('Redd Counts for Mill Creek by river mile (upper envelope)')
 ```
 
 ### Combined Plots
 
 ```{r combined_plot, fig.width=10.5, fig.height=8, dpi=300}
-redd_data <- list("Lower Yuba River" = lyr_redds_by_rm,
-                  "Feather River" = feather_redds_by_rm) #|>
+redd_data <- list("Lower Yuba River" = yuba_redds_by_rm,
+                  "Feather River" = feather_redds_by_rm,
+                  "Clear Creek" = clear_redds_by_rm,
+                  "Mill Creek" = mill_redds_by_rm,
+                  "Battle Creek" = battle_redds_by_rm) #|>
  # bind_rows(.id = "river_name")
 
 for (x in names(redd_data)) {
@@ -459,16 +675,21 @@ for (x in names(redd_data)) {
     scale_color_viridis_c(direction = -1)
   
   plt_redds <- 
-    redd_data[[x]] |>
+    redd_data[[x]] %>%
+    bind_rows(expand_grid(rm_start = c(min(.$rm_start) - 1, max(.$rm_start) + 1), 
+                          n_redds = 0, 
+                          survey_year = unique(.$survey_year),
+                          time_range = unique(.$time_range))) |>
     ggplot() + 
     geom_step(aes(x = rm_start, y = n_redds, color = time_range)) +
     xlab("River Mile") + ylab("Number of Redds") + 
-    facet_grid(rows=vars(survey_year), scales="free_y", space="free_y")  +
+    facet_grid(rows=vars(survey_year), scales="free_y", space="free_y", switch="y")  +
     labs(subtitle="Redd Surveys") + 
     guides(color = guide_legend(nrow=1, byrow=TRUE, title = "")) +
     scale_y_continuous(sec.axis = sec_axis(name = "Redd Area (ac) per RM", transform = ~.*94/43560),
                        breaks = scales::breaks_width(1000)) +
-    theme(panel.grid.minor = element_blank(), legend.position="top")
+    theme(panel.grid.minor = element_blank(), legend.position="top",
+          strip.text.y = element_text(angle = 0), strip.placement = "outside")
   
   plt_combined <- (plt_context / plt_preds / plt_redds) + 
     plot_layout(axes = "collect", heights=c(3,1,5)) +
